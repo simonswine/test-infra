@@ -1,4 +1,4 @@
-# Copyright 2016 The Kubernetes Authors All rights reserved.
+# Copyright 2017 The Kubernetes Authors.
 #
 # Licensed under the Apache License, Version 2.0 (the "License");
 # you may not use this file except in compliance with the License.
@@ -12,13 +12,11 @@
 # See the License for the specific language governing permissions and
 # limitations under the License.
 
-apiVersion: v1
-kind: Service
-metadata:
-  name: hook
-spec:
-  selector:
-    app: hook
-  ports:
-  - port: 8888
-  type: ClusterIP
+VERSION = 0.3
+KUBERNETES_VERSIONS = v1.8.3 v1.7.10 v1.9.1
+
+$(KUBERNETES_VERSIONS):
+	docker build --build-arg KUBERNETES_VERSION=$@ -t "gcr.io/jetstack-build-infra/minikube-in-go-$@:$(VERSION)" .
+	gcloud docker -- push "gcr.io/jetstack-build-infra/minikube-in-go-$@:$(VERSION)"
+
+.PHONY: $(KUBERNETES_VERSIONS)

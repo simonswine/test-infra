@@ -1,4 +1,4 @@
-# Copyright 2016 The Kubernetes Authors All rights reserved.
+# Copyright 2017 The Kubernetes Authors.
 #
 # Licensed under the Apache License, Version 2.0 (the "License");
 # you may not use this file except in compliance with the License.
@@ -12,13 +12,12 @@
 # See the License for the specific language governing permissions and
 # limitations under the License.
 
-apiVersion: v1
-kind: Service
-metadata:
-  name: hook
-spec:
-  selector:
-    app: hook
-  ports:
-  - port: 8888
-  type: ClusterIP
+VERSION = 0.5
+
+image:
+	docker build -t "gcr.io/jetstack-build-infra/ruby-2.3:$(VERSION)" .
+
+push: image
+	gcloud docker -- push "gcr.io/jetstack-build-infra/ruby-2.3:$(VERSION)"
+
+.PHONY: image push

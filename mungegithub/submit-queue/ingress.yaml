@@ -3,51 +3,31 @@ kind: Ingress
 metadata:
   name: submit-queue
   annotations:
-    kubernetes.io/ingress.class: gce
+    kubernetes.io/ingress.class: nginx
     kubernetes.io/tls-acme: "true"
 spec:
   rules:
-  - host: submit-queue.k8s.io
+  - host: cert-manager.submit-queue.build-infra.jetstack.net
     http:
       paths:
         - backend:
-            serviceName: nginx-https-redirect
+            serviceName: cert-manager-sq-status
             servicePort: 80
-  - host: kubernetes.submit-queue.k8s.io
+  - host: navigator.submit-queue.build-infra.jetstack.net
     http:
       paths:
         - backend:
-            serviceName: nginx-https-redirect 
+            serviceName: navigator-sq-status
             servicePort: 80
-  - host: community.submit-queue.k8s.io
+  - host: tarmak.submit-queue.build-infra.jetstack.net
     http:
       paths:
         - backend:
-            serviceName: nginx-https-redirect 
-            servicePort: 80
-  - host: contrib.submit-queue.k8s.io
-    http:
-      paths:
-        - backend:
-            serviceName: nginx-https-redirect 
-            servicePort: 80
-  - host: kops.submit-queue.k8s.io
-    http:
-      paths:
-        - backend:
-            serviceName: nginx-https-redirect
-            servicePort: 80
-  - host: test-infra.submit-queue.k8s.io
-    http:
-      paths:
-        - backend:
-            serviceName: test-infra-sq-status
+            serviceName: tarmak-sq-status
             servicePort: 80
   tls:
   - hosts:
-    - kubernetes.submit-queue.k8s.io
-    - community.submit-queue.k8s.io
-    - contrib.submit-queue.k8s.io
-    - kops.submit-queue.k8s.io
-    - submit-queue.k8s.io
+    - cert-manager.submit-queue.build-infra.jetstack.net
+    - navigator.submit-queue.build-infra.jetstack.net
+    - tarmak.submit-queue.build-infra.jetstack.net
     secretName: submit-queue-tls

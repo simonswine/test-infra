@@ -4,230 +4,219 @@
 ---
 triggers:
 - repos:
-  - kubernetes
-  - kubernetes-incubator
-  - kubernetes-security
-  - google/cadvisor
-  - google/kubeflow
-  - tensorflow/k8s
-  - GoogleCloudPlatform/k8s-multicluster-ingress
-  trusted_org: kubernetes
-  join_org_url: "https://git.k8s.io/community/community-membership.md#member"
-- repos:
-  - containerd/cri-containerd
-  trusted_org: containerd
-  join_org_url: "https://github.com/containerd/containerd/blob/master/MAINTAINERS"
+  - jetstack/cert-manager
+  - jetstack/test-infra
+  - jetstack/navigator
+  - jetstack/tarmak
+  - jetstack/puppet-module-aws_ebs
+  - jetstack/puppet-module-calico
+  - jetstack/puppet-module-etcd
+  - jetstack/puppet-module-kubernetes
+  - jetstack/puppet-module-kubernetes_addons
+  - jetstack/puppet-module-prometheus
+  - jetstack/puppet-module-vault_client
+  - jetstack/puppet-module-tarmak
+  trusted_org: jetstack
 
-approve:
-- repos:
-  - kubernetes/charts
-  - kubernetes/cluster-registry
-  - kubernetes/community
-  - kubernetes/dashboard
-  - kubernetes/features
-  - kubernetes/ingress-nginx
-  - kubernetes/kubectl
-  - kubernetes/minikube
-  - kubernetes/sig-release
-  - kubernetes/steering
-  - kubernetes/test-infra
-  implicit_self_approve: true
-- repos:
-  - kubernetes/kubernetes
-  implicit_self_approve: true
-  issue_required: true
+# heart:
+#   adorees:
+#   - k8s-merge-robot
 
-blockades:
-- repos:
-  - kubernetes/kubernetes
-  blockregexps:
-  - ^docs/man
-  exceptionregexps:
-  - ^docs/man/man1/.*\.1$
-  explanation: "Files under `docs/man` must be in the `man1` directory and have suffix `.1`."
-- repos:
-  - kubernetes/kubernetes
-  blockregexps:
-  - ^docs/user-guide
-  exceptionregexps:
-  - ^docs/user-guide/kubectl/kubectl.*\.md$
-  explanation: "Files under `docs/user-guide` must be in the `kubectl` directory and match pattern `kubectl*.md`."
-- repos:
-  - kubernetes/kubernetes
-  blockregexps:
-  - ^docs/yaml
-  exceptionregexps:
-  - ^docs/yaml/kubectl/kubectl_.*\.yaml$
-  explanation: "Files under `docs/yaml` must be in the `kubectl` directory and match pattern `kubectl_*.yaml`."
-- repos:
-  - kubernetes/community
-  blockregexps:
-  - ^events/2016
-  - ^events/elections/2017
-  explanation: "These files are historical, and from events that have already occurred."
-
-heart:
-  adorees:
-  - k8s-merge-robot
-
-slack:
-  mergewarnings:
-  - repos:
-    - kubernetes/kubernetes
-    channels:
-    - kubernetes-dev
-    whitelist:
-    - k8s-merge-robot
-    - wojtek-t # 1.7 patch release manager
-    - jpbetz # 1.8 patch release manager
-    - mbohlool # 1.9 patch release manager
-  - repos:
-    - kubernetes/test-infra
-    channels:
-    - testing-ops
-    whitelist:
-    - k8s-ci-robot
+# slack:
+#   mergewarnings:
+#   - repos:
+#     - kubernetes/kubernetes
+#     channels:
+#     - kubernetes-dev
+#     whitelist:
+#     - k8s-merge-robot
 
 milestonestatus:
   # You can curl the following endpoint in order to determine the github ID of your team
   # responsible for maintaining the milestones:
   # curl -H "Authorization: token <token>" https://api.github.com/orgs/<org-name>/teams
-  maintainers_id: 2460384
+  maintainers_id: 2462700
 
 config_updater:
   config_file: prow/config.yaml
   plugin_file: prow/plugins.yaml
 
 plugins:
-  google/cadvisor:
-  - trigger
 
-  google/kubeflow:  
-  - lgtm
-  - size
-  - trigger
-
-  kubernetes/charts:
-  - approve
-  - blunderbuss
-  - trigger
-
-  kubernetes/cluster-registry:
-  - approve
-  - trigger
-
-  kubernetes/community:
-  - approve
-  - blunderbuss
-  - blockade
-  - require-sig
-  - trigger
-
-  kubernetes/contrib:
-  - approve
-  - blunderbuss
-
-  kubernetes/dashboard:
-  - approve
-
-  kubernetes/dns:
-  - trigger
-
-  kubernetes/features:
-  - approve
-
-  kubernetes/ingress-gce:
-  - trigger
-
-  kubernetes/ingress-nginx:
-  - approve
-
-  kubernetes/federation:
-  - trigger
-  - approve
-
-  kubernetes/heapster:
-  - trigger
-
-  kubernetes/kops:
-  - trigger
-  - approve
-
-  kubernetes/kubectl:
-  - approve
-
-  kubernetes/kubernetes:
-  - approve
-  - blockade
-  - docs-no-retest
-  - release-note
-  - require-sig
-  - trigger
-
-  kubernetes/kubernetes-template-project:
-  - approve
-
-  kubernetes/minikube:
-  - approve
-
-  kubernetes/sig-release:
-  - approve
-
-  kubernetes/steering:
-  - approve
-
-  kubernetes/test-infra:
+  jetstack/test-infra:
   - trigger
   - config-updater
-  - approve
 
-  kubernetes:
+  jetstack/cert-manager:
+  - docs-no-retest
+  - trigger
+  - release-note
   - assign
-  - cla
+  - close
+  - reopen
   - golint
   - heart
-  - help
   - hold
   - label
   - lgtm
-  - lifecycle
   - milestonestatus
-  - shrug
-  - sigmention
   - size
-  - skip
-  - slackevents
-  - wip
   - yuks
+  - wip
+  - shrug
 
-  kubernetes-incubator:
+  jetstack/navigator:
+  - docs-no-retest
+  - trigger
+  - release-note
   - assign
-  - cla
+  - close
+  - reopen
+  - golint
+  - heart
+  - hold
   - label
   - lgtm
-  - lifecycle
+  - milestonestatus
   - size
+  - yuks
+  - wip
+  - shrug
 
-  containerd/cri-containerd:
+  jetstack/tarmak:
+  - docs-no-retest
+  - trigger
+  - release-note
   - assign
-  - cla
+  - close
+  - reopen
+  - golint
+  - heart
+  - hold
   - label
   - lgtm
-  - lifecycle
+  - milestonestatus
   - size
-  - trigger
+  - yuks
+  - wip
+  - shrug
 
-  kubernetes-security/kubernetes:
+  jetstack/puppet-module-aws_ebs:
+  - docs-no-retest
   - trigger
-
-  tensorflow/k8s:
-  - trigger
-
-  spxtr/envoy:
   - assign
+  - close
+  - reopen
+  - heart
+  - hold
+  - label
   - lgtm
-  - lifecycle
-  - trigger
+  - size
+  - yuks
+  - wip
+  - shrug
 
-  GoogleCloudPlatform/k8s-multicluster-ingress:
+  jetstack/puppet-module-calico:
+  - docs-no-retest
   - trigger
+  - assign
+  - close
+  - reopen
+  - heart
+  - hold
+  - label
+  - lgtm
+  - size
+  - yuks
+  - wip
+  - shrug
+
+  jetstack/puppet-module-etcd:
+  - docs-no-retest
+  - trigger
+  - assign
+  - close
+  - reopen
+  - heart
+  - hold
+  - label
+  - lgtm
+  - size
+  - yuks
+  - wip
+  - shrug
+
+  jetstack/puppet-module-kubernetes:
+  - docs-no-retest
+  - trigger
+  - assign
+  - close
+  - reopen
+  - heart
+  - hold
+  - label
+  - lgtm
+  - size
+  - yuks
+  - wip
+  - shrug
+
+  jetstack/puppet-module-kubernetes_addons:
+  - docs-no-retest
+  - trigger
+  - assign
+  - close
+  - reopen
+  - heart
+  - hold
+  - label
+  - lgtm
+  - size
+  - yuks
+  - wip
+  - shrug
+
+  jetstack/puppet-module-prometheus:
+  - docs-no-retest
+  - trigger
+  - assign
+  - close
+  - reopen
+  - heart
+  - hold
+  - label
+  - lgtm
+  - size
+  - yuks
+  - wip
+  - shrug
+
+  jetstack/puppet-module-tarmak:
+  - docs-no-retest
+  - trigger
+  - assign
+  - close
+  - reopen
+  - heart
+  - hold
+  - label
+  - lgtm
+  - size
+  - yuks
+  - wip
+  - shrug
+
+  jetstack/puppet-module-vault_client:
+  - docs-no-retest
+  - trigger
+  - assign
+  - close
+  - reopen
+  - heart
+  - hold
+  - label
+  - lgtm
+  - size
+  - yuks
+  - wip
+  - shrug
