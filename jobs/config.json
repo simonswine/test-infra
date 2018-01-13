@@ -233,10 +233,7 @@
   },
   "cert-manager-e2e-v1-7": {
     "args": [
-      "make",
-      "build",
-      "e2e_test",
-      "APP_VERSION=build"
+      "./hack/ci.sh"
     ],
     "scenario": "minikube",
     "sigOwners": [
@@ -245,10 +242,7 @@
   },
   "cert-manager-e2e-v1-8": {
     "args": [
-      "make",
-      "build",
-      "e2e_test",
-      "APP_VERSION=build"
+      "./hack/ci.sh"
     ],
     "scenario": "minikube",
     "sigOwners": [
