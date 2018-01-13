@@ -249,6 +249,26 @@
       "UNKNOWN"
     ]
   },
+  "cert-manager-e2e-v1-9": {
+    "args": [
+      "./hack/ci.sh"
+    ],
+    "scenario": "minikube",
+    "sigOwners": [
+      "UNKNOWN"
+    ]
+  },
+  "cert-manager-quick-verify": {
+    "args": [
+      "make",
+      "verify",
+      "test"
+    ],
+    "scenario": "execute",
+    "sigOwners": [
+      "UNKNOWN"
+    ]
+  },
   "navigator-quick-verify": {
     "args": [
       "make",
