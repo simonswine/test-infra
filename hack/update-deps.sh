@@ -24,6 +24,7 @@ set -o errexit
 set -o pipefail
 set -o xtrace
 
+# Remove //foo:something references from bar/BUILD
 # Remove //vendor/golang.org/x/text/internal:go_default_library deps
 #
 # Unused text/gen.go file imports text/internal, which prevents dep prune from
@@ -36,27 +37,28 @@ set -o xtrace
 #
 # Usage:
 #   remove-text-internal
-patch-text-internal() {
+drop-dep() {
   local path
-  path="$(dirname "${BASH_SOURCE}")/../vendor/golang.org/x/text/internal/BUILD"
+  path="$(dirname "${BASH_SOURCE}")/../$2/BUILD"
   if [[ ! -f ${path} ]]; then
     return 0
   fi
-  sed -i -e "\|//vendor/golang.org/x/text/language:go_default_library|d" "$path"
+  sed -i -e "\|//$1:go_default_library|d" "$path"
 }
 
-main() {
-  pushd "$(dirname "${BASH_SOURCE}")/.."
-  dep ensure
-  dep prune
-  hack/update-bazel.sh
-  patch-text-internal  # TODO(fejta): fix dep prune instead
-  hack/prune-libraries.sh --fix
-  hack/update-bazel.sh  # Update child :all-srcs in case parent was deleted
-}
-
-if ! main; then
-  echo FAILED >&2
-  exit 1
-fi
+trap 'echo "FAILED" >&2' ERR
+pushd "$(dirname "${BASH_SOURCE}")/.."
+dep ensure -v
+dep prune -v
+hack/update-bazel.sh
+drop-dep vendor/golang.org/x/text/language vendor/golang.org/x/text/internal
+drop-dep vendor/google.golang.org/api/transport/grpc vendor/google.golang.org/api/transport
+drop-dep vendor/github.com/golang/protobuf/protoc-gen-go/grpc vendor/github.com/golang/protobuf/protoc-gen-go
+drop-dep vendor/github.com/golang/protobuf/protoc-gen-go/generator vendor/github.com/golang/protobuf/protoc-gen-go
+drop-dep vendor/github.com/docker/docker/pkg/ioutils vendor/github.com/docker/docker/api
+drop-dep vendor/github.com/docker/docker/pkg/system vendor/github.com/docker/docker/api
+drop-dep vendor/github.com/docker/libtrust vendor/github.com/docker/docker/api
+drop-dep vendor/github.com/docker/distribution/context vendor/github.com/docker/distribution
+hack/prune-libraries.sh --fix
+hack/update-bazel.sh  # Update child :all-srcs in case parent was deleted
 echo SUCCESS
