@@ -20,58 +20,31 @@ prowjob_namespace: default
 pod_namespace: test-pods
 log_level: info
 
-# tide:
-#   queries:
-#   - repos:
-#     - kubernetes/charts
-#     - kubernetes/cluster-registry
-#     - kubernetes/community
-#     - kubernetes/contrib
-#     - kubernetes/dashboard
-#     - kubernetes/features
-#     - kubernetes/federation
-#     - kubernetes/ingress-nginx
-#     - kubernetes/kops
-#     - kubernetes/kubernetes-template-project
-#     - kubernetes/minikube
-#     - kubernetes/sig-release
-#     - kubernetes/steering
-#     - kubernetes/test-infra
-#     labels:
-#     - lgtm
-#     - approved
-#     - "cncf-cla: yes"
-#     missingLabels:
-#     - do-not-merge
-#     - do-not-merge/blocked-paths
-#     - do-not-merge/cherry-pick-not-approved
-#     - do-not-merge/hold
-#     - do-not-merge/release-note-label-needed
-#     - do-not-merge/work-in-progress
-#     - needs-ok-to-test
-#     - needs-rebase
-#   - repos:
-#     - kubernetes/kubectl
-#     labels:
-#     - "cncf-cla: yes"
-#     missingLabels:
-#     - do-not-merge/hold
-#     - do-not-merge/work-in-progress
-#     reviewApprovedRequired: true
-#   merge_method:
-#     kubernetes/charts: squash
-#   target_url: https://prow.k8s.io/tide.html
-
 tide:
+  target_url: https://prow.build-infra.jetstack.net/tide.html
   queries:
-    - "type:pr state:open repo:jetstack/puppet-module-aws_ebs label:lgtm label:approved -label:needs-ok-to-test -label:do-not-merge/work-in-progress -label:do-not-merge/release-note-label-needed"
-    - "type:pr state:open repo:jetstack/puppet-module-calico label:lgtm label:approved -label:needs-ok-to-test -label:do-not-merge/work-in-progress -label:do-not-merge/release-note-label-needed"
-    - "type:pr state:open repo:jetstack/puppet-module-etcd label:lgtm label:approved -label:needs-ok-to-test -label:do-not-merge/work-in-progress -label:do-not-merge/release-note-label-needed"
-    - "type:pr state:open repo:jetstack/puppet-module-kubernetes label:lgtm label:approved -label:needs-ok-to-test -label:do-not-merge/work-in-progress -label:do-not-merge/release-note-label-needed"
-    - "type:pr state:open repo:jetstack/puppet-module-kubernetes_addons label:lgtm label:approved -label:needs-ok-to-test -label:do-not-merge/work-in-progress -label:do-not-merge/release-note-label-needed"
-    - "type:pr state:open repo:jetstack/puppet-module-prometheus label:lgtm label:approved -label:needs-ok-to-test -label:do-not-merge/work-in-progress -label:do-not-merge/release-note-label-needed"
-    - "type:pr state:open repo:jetstack/puppet-module-tarmak label:lgtm label:approved -label:needs-ok-to-test -label:do-not-merge/work-in-progress -label:do-not-merge/release-note-label-needed"
-    - "type:pr state:open repo:jetstack/puppet-module-vault_client label:lgtm label:approved -label:needs-ok-to-test -label:do-not-merge/work-in-progress -label:do-not-merge/release-note-label-needed"
+  - repos:
+    - jetstack/puppet-module-aws_ebs
+    - jetstack/puppet-module-calico
+    - jetstack/puppet-module-etcd
+    - jetstack/puppet-module-kubernetes
+    - jetstack/puppet-module-kubernetes_addons
+    - jetstack/puppet-module-prometheus
+    - jetstack/puppet-module-tarmak
+    - jetstack/puppet-module-vault_client
+    - jetstack/test-infra
+    labels:
+    - lgtm
+    - approved
+    missingLabels:
+    - needs-ok-to-test
+    - do-not-merge
+    - do-not-merge/blocked-paths
+    - do-not-merge/cherry-pick-not-approved
+    - do-not-merge/hold
+    - do-not-merge/release-note-label-needed
+    - do-not-merge/work-in-progress
+    - needs-rebase
 
 # push_gateway:
 #   endpoint: pushgateway
