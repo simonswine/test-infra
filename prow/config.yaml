@@ -154,7 +154,7 @@ tide:
       key: dedicated
       operator: Equal
     containers:
-    - image: gcr.io/jetstack-build-infra/minikube-in-go-v1.7.10:0.2
+    - image: gcr.io/jetstack-build-infra/minikube-in-go-v1.7.10:0.5
       args:
       - "--repo=github.com/$(REPO_OWNER)/$(REPO_NAME)=$(PULL_REFS)"
       - "--root=/go/src"
@@ -203,7 +203,7 @@ tide:
       key: dedicated
       operator: Equal
     containers:
-    - image: gcr.io/jetstack-build-infra/minikube-in-go-v1.8.3:0.2
+    - image: gcr.io/jetstack-build-infra/minikube-in-go-v1.8.3:0.5
       args:
       - "--repo=github.com/$(REPO_OWNER)/$(REPO_NAME)=$(PULL_REFS)"
       - "--root=/go/src"
@@ -252,7 +252,7 @@ tide:
       key: dedicated
       operator: Equal
     containers:
-    - image: gcr.io/jetstack-build-infra/minikube-in-go-v1.9.1:0.3
+    - image: gcr.io/jetstack-build-infra/minikube-in-go-v1.9.1:0.5
       args:
       - "--repo=github.com/$(REPO_OWNER)/$(REPO_NAME)=$(PULL_REFS)"
       - "--root=/go/src"
@@ -575,7 +575,7 @@ periodics:
       key: dedicated
       operator: Equal
     containers:
-    - image: gcr.io/jetstack-build-infra/minikube-in-go-v1.7.10:0.2
+    - image: gcr.io/jetstack-build-infra/minikube-in-go-v1.7.10:0.5
       args:
       - "--repo=github.com/$(REPO_OWNER)/$(REPO_NAME)=master"
       - "--root=/go/src"
@@ -624,7 +624,7 @@ periodics:
       key: dedicated
       operator: Equal
     containers:
-    - image: gcr.io/jetstack-build-infra/minikube-in-go-v1.8.3:0.2
+    - image: gcr.io/jetstack-build-infra/minikube-in-go-v1.8.3:0.5
       args:
       - "--repo=github.com/$(REPO_OWNER)/$(REPO_NAME)=master"
       - "--root=/go/src"
