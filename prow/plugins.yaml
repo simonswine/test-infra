@@ -47,6 +47,16 @@ plugins:
   - trigger
   - config-updater
   - blunderbuss
+  - shrug
+  - lgtm
+  - size
+  - wip
+  - close
+  - reopen
+  - assign
+  - hold
+  - label
+  
 
   jetstack/cert-manager:
   - docs-no-retest
