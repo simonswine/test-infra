@@ -17,6 +17,7 @@ limitations under the License.
 package github
 
 import (
+	"context"
 	"crypto/tls"
 	"encoding/base64"
 	"encoding/json"
@@ -26,12 +27,26 @@ import (
 	"net/http/httptest"
 	"strconv"
 	"strings"
+	"sync/atomic"
 	"testing"
 	"time"
 )
 
+type testTime struct {
+	now   time.Time
+	slept time.Duration
+}
+
+func (tt *testTime) Sleep(d time.Duration) {
+	tt.slept = d
+}
+func (tt *testTime) Until(t time.Time) time.Duration {
+	return t.Sub(tt.now)
+}
+
 func getClient(url string) *Client {
 	return &Client{
+		time: &standardTime{},
 		client: &http.Client{
 			Transport: &http.Transport{
 				TLSClientConfig: &tls.Config{InsecureSkipVerify: true},
@@ -42,39 +57,37 @@ func getClient(url string) *Client {
 }
 
 func TestRequestRateLimit(t *testing.T) {
-	var slept time.Duration
-	timeSleep = func(d time.Duration) { slept = d }
-	defer func() { timeSleep = time.Sleep }()
+	tc := &testTime{now: time.Now()}
 	ts := httptest.NewTLSServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		if slept == 0 {
+		if tc.slept == 0 {
 			w.Header().Set("X-RateLimit-Remaining", "0")
-			w.Header().Set("X-RateLimit-Reset", strconv.Itoa(int(time.Now().Add(time.Second).Unix())))
+			w.Header().Set("X-RateLimit-Reset", strconv.Itoa(int(tc.now.Add(time.Second).Unix())))
 			http.Error(w, "403 Forbidden", http.StatusForbidden)
 		}
 	}))
 	defer ts.Close()
 	c := getClient(ts.URL)
+	c.time = tc
 	resp, err := c.requestRetry(http.MethodGet, c.base, "", nil)
 	if err != nil {
 		t.Errorf("Error from request: %v", err)
 	} else if resp.StatusCode != 200 {
 		t.Errorf("Expected status code 200, got %d", resp.StatusCode)
-	} else if slept < time.Second {
-		t.Errorf("Expected to sleep for at least a second, got %v", slept)
+	} else if tc.slept < time.Second {
+		t.Errorf("Expected to sleep for at least a second, got %v", tc.slept)
 	}
 }
 
 func TestRetry404(t *testing.T) {
-	var slept int
-	timeSleep = func(d time.Duration) { slept++ }
-	defer func() { timeSleep = time.Sleep }()
+	tc := &testTime{now: time.Now()}
 	ts := httptest.NewTLSServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		if slept == 0 {
+		if tc.slept == 0 {
 			http.Error(w, "404 Not Found", http.StatusNotFound)
 		}
 	}))
 	defer ts.Close()
 	c := getClient(ts.URL)
+	c.time = tc
 	resp, err := c.requestRetry(http.MethodGet, c.base, "", nil)
 	if err != nil {
 		t.Errorf("Error from request: %v", err)
@@ -1081,5 +1094,142 @@ func TestListIssueEvents(t *testing.T) {
 	}
 	if events[1].Event != IssueActionClosed {
 		t.Errorf("Wrong event for index 1: %v", events[1])
+	}
+}
+
+func TestThrottle(t *testing.T) {
+	ts := simpleTestServer(
+		t,
+		"/repos/org/repo/issues/1/events",
+		[]ListedIssueEvent{
+			{Event: IssueActionOpened},
+			{Event: IssueActionClosed},
+		},
+	)
+	c := getClient(ts.URL)
+	c.Throttle(1, 2)
+	if c.client != &c.throttle {
+		t.Errorf("Bad client %v, expecting %v", c.client, &c.throttle)
+	}
+	if len(c.throttle.throttle) != 2 {
+		t.Fatalf("Expected two items in throttle channel, found %d", len(c.throttle.throttle))
+	}
+	if cap(c.throttle.throttle) != 2 {
+		t.Fatalf("Expected throttle channel capacity of two, found %d", cap(c.throttle.throttle))
+	}
+	events, err := c.ListIssueEvents("org", "repo", 1)
+	if err != nil {
+		t.Errorf("Unexpected error: %v", err)
+	}
+	if len(events) != 2 {
+		t.Errorf("Expected two events, found %d: %v", len(events), events)
+	}
+	if len(c.throttle.throttle) != 1 {
+		t.Errorf("Expected one item in throttle channel, found %d", len(c.throttle.throttle))
+	}
+	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+	go func() {
+		if _, err := c.ListIssueEvents("org", "repo", 1); err != nil {
+			t.Errorf("Unexpected error: %v", err)
+		}
+		if _, err := c.ListIssueEvents("org", "repo", 1); err != nil {
+			t.Errorf("Unexpected error: %v", err)
+		}
+		cancel()
+	}()
+	slowed := false
+	for ctx.Err() == nil {
+		// Wait for the client to get throttled
+		if atomic.LoadInt32(&c.throttle.slow) == 0 {
+			continue
+		}
+		// Throttled, now add to the channel
+		slowed = true
+		select {
+		case c.throttle.throttle <- time.Now(): // Add items to the channel
+		case <-ctx.Done():
+		}
+	}
+	if !slowed {
+		t.Errorf("Never throttled")
+	}
+	if err := ctx.Err(); err != context.Canceled {
+		t.Errorf("Expected context cancelation did not happen: %v", err)
+	}
+}
+
+func TestGetBranches(t *testing.T) {
+	ts := simpleTestServer(t, "/repos/org/repo/branches", []Branch{
+		{Name: "master", Protected: false},
+		{Name: "release-3.7", Protected: true},
+	})
+	defer ts.Close()
+	c := getClient(ts.URL)
+	branches, err := c.GetBranches("org", "repo")
+	if err != nil {
+		t.Errorf("Unexpected error: %v", err)
+	} else if len(branches) != 2 {
+		t.Errorf("Expected two branches, found %d, %v", len(branches), branches)
+		return
+	}
+	switch {
+	case branches[0].Name != "master":
+		t.Errorf("Wrong branch name for index 0: %v", branches[0])
+	case branches[1].Name != "release-3.7":
+		t.Errorf("Wrong branch name for index 1: %v", branches[1])
+	case branches[1].Protected == false:
+		t.Errorf("Wrong branch protection for index 1: %v", branches[1])
+	}
+}
+
+func TestRemoveBranchProtection(t *testing.T) {
+	ts := httptest.NewTLSServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if r.Method != http.MethodDelete {
+			t.Errorf("Bad method: %s", r.Method)
+		}
+		if r.URL.Path != "/repos/org/repo/branches/master/protection" {
+			t.Errorf("Bad request path: %s", r.URL.Path)
+		}
+		http.Error(w, "204 No Content", http.StatusNoContent)
+	}))
+	defer ts.Close()
+	c := getClient(ts.URL)
+	if err := c.RemoveBranchProtection("org", "repo", "master"); err != nil {
+		t.Errorf("Unexpected error: %v", err)
+	}
+}
+
+func TestUpdateBranchProtection(t *testing.T) {
+	ts := httptest.NewTLSServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if r.Method != http.MethodPut {
+			t.Errorf("Bad method: %s", r.Method)
+		}
+		if r.URL.Path != "/repos/org/repo/branches/master/protection" {
+			t.Errorf("Bad request path: %s", r.URL.Path)
+		}
+		b, err := ioutil.ReadAll(r.Body)
+		if err != nil {
+			t.Fatalf("Could not read request body: %v", err)
+		}
+		var bpr BranchProtectionRequest
+		if err := json.Unmarshal(b, &bpr); err != nil {
+			t.Errorf("Could not unmarshal request: %v", err)
+		}
+		switch {
+		case len(bpr.RequiredStatusChecks.Contexts) != 2:
+			t.Errorf("Bad contexts: %v", bpr.RequiredStatusChecks.Contexts)
+		case bpr.RequiredStatusChecks.Contexts[0] != "foo-pr-test":
+			t.Errorf("Bad context name: %v", bpr.RequiredStatusChecks.Contexts)
+		case len(bpr.Restrictions.Teams) != 3:
+			t.Errorf("Bad teams: %v", bpr.Restrictions.Teams)
+		case bpr.Restrictions.Teams[1] != "awesome-team":
+			t.Errorf("Bad team: %v", bpr.Restrictions.Teams)
+		}
+		http.Error(w, "200 OK", http.StatusOK)
+	}))
+	defer ts.Close()
+	c := getClient(ts.URL)
+	if err := c.UpdateBranchProtection("org", "repo", "master", []string{"foo-pr-test", "other"}, []string{"movers", "awesome-team", "shakers"}); err != nil {
+		t.Errorf("Unexpected error: %v", err)
 	}
 }

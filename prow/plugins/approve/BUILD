@@ -7,6 +7,7 @@ go_library(
     visibility = ["//visibility:public"],
     deps = [
         "//prow/github:go_default_library",
+        "//prow/pluginhelp:go_default_library",
         "//prow/plugins:go_default_library",
         "//prow/plugins/approve/approvers:go_default_library",
         "//vendor/github.com/sirupsen/logrus:go_default_library",
@@ -19,15 +20,15 @@ go_test(
     data = [
         "//prow:configs",
     ],
+    embed = [":go_default_library"],
     importpath = "k8s.io/test-infra/prow/plugins/approve",
-    library = ":go_default_library",
     deps = [
         "//prow/github:go_default_library",
         "//prow/github/fakegithub:go_default_library",
         "//prow/plugins:go_default_library",
         "//vendor/github.com/ghodss/yaml:go_default_library",
         "//vendor/github.com/sirupsen/logrus:go_default_library",
-        "//vendor/k8s.io/kubernetes/pkg/util/sets:go_default_library",
+        "//vendor/k8s.io/apimachinery/pkg/util/sets:go_default_library",
     ],
 )
 

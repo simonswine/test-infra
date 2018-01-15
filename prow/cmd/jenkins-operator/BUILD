@@ -2,10 +2,19 @@ package(default_visibility = ["//visibility:public"])
 
 licenses(["notice"])
 
+load("@io_bazel_rules_docker//go:image.bzl", "go_image")
 load(
     "@io_bazel_rules_go//go:def.bzl",
     "go_binary",
     "go_library",
+)
+
+go_image(
+    name = "image",
+    base = "@alpine-base//image",
+    embed = [":go_default_library"],
+    importpath = "k8s.io/test-infra/prow/cmd/jenkins-operator",
+    pure = "on",
 )
 
 go_library(
@@ -15,14 +24,15 @@ go_library(
         "main.go",
     ],
     importpath = "k8s.io/test-infra/prow/cmd/jenkins-operator",
-    tags = ["automanaged"],
     deps = [
         "//prow/config:go_default_library",
         "//prow/github:go_default_library",
         "//prow/jenkins:go_default_library",
         "//prow/kube:go_default_library",
         "//prow/kube/labels:go_default_library",
+        "//prow/metrics:go_default_library",
         "//vendor/github.com/NYTimes/gziphandler:go_default_library",
+        "//vendor/github.com/prometheus/client_golang/prometheus/promhttp:go_default_library",
         "//vendor/github.com/sirupsen/logrus:go_default_library",
     ],
 )
@@ -42,7 +52,8 @@ filegroup(
 
 go_binary(
     name = "jenkins-operator",
+    embed = [":go_default_library"],
     importpath = "k8s.io/test-infra/prow/cmd/jenkins-operator",
-    library = ":go_default_library",
-    tags = ["automanaged"],
+    pure = "on",
+    race = "off",
 )

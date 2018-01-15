@@ -117,13 +117,16 @@ test_groups:
 
 ### Email alerts
 In TestGroup, set `num_failures_to_alert` (alerts for consistent failures)
-and/or `alert_stale_results_hours` (alerts when tests haven't run recently.)
+and/or `alert_stale_results_hours` (alerts when tests haven't run recently).
+You can also set `num_passes_to_disable_alert`.
 
 In DashboardTab, set `alert_mail_to_addresses` (comma-separated list of email
 addresses to send mail to).
 
 These alerts will send whenever new failures are detected (or whenever the
-dashboard tab goes stale).
+dashboard tab goes stale), and will stop when `num_passes_to_disable_alert`
+consecutive passes are found (or no failure is found in `num_columns_recent`
+runs).
 
 ```
 # Send alerts to foo@bar.com whenever a test fails 3 times in a row, or tests
@@ -359,6 +362,6 @@ Devs - `config.proto` changes require rebuilding to golang module:
 4. Commit both `config.proto` and `config.pb.go`
 
 
-[`config.proto`]: https://github.com/kubernetes/test-infra/blob/master/testgrid/config/config.proto
-[`config.yaml`]: https://github.com/kubernetes/test-infra/blob/master/testgrid/config/config.yaml
+[`config.proto`]: ./config.proto
+[`config.yaml`]: ./config.yaml
 [`protoc`]: https://github.com/golang/protobuf

@@ -12,6 +12,7 @@ go_test(
         "assign-fixes_test.go",
         "check-labels_test.go",
         "cherrypick-auto-approve_test.go",
+        "cherrypick-clear-after-merge_test.go",
         "comment-deleter-jenkins_test.go",
         "inactive-review-handler_test.go",
         "milestone-maintainer_test.go",
@@ -25,9 +26,9 @@ go_test(
     data = [
         "//mungegithub:configs",
     ],
-    features = ["-race"],
+    embed = [":go_default_library"],
     importpath = "k8s.io/test-infra/mungegithub/mungers",
-    library = ":go_default_library",
+    race = "off",  # kubernetes/test-infra/issues/3639
     deps = [
         "//mungegithub/features:go_default_library",
         "//mungegithub/github:go_default_library",
@@ -41,16 +42,15 @@ go_test(
         "//mungegithub/sharedmux:go_default_library",
         "//vendor/github.com/golang/glog:go_default_library",
         "//vendor/github.com/google/go-github/github:go_default_library",
+        "//vendor/k8s.io/apimachinery/pkg/util/clock:go_default_library",
+        "//vendor/k8s.io/apimachinery/pkg/util/sets:go_default_library",
         "//vendor/k8s.io/contrib/test-utils/utils:go_default_library",
-        "//vendor/k8s.io/kubernetes/pkg/util/clock:go_default_library",
-        "//vendor/k8s.io/kubernetes/pkg/util/sets:go_default_library",
     ],
 )
 
 go_library(
     name = "go_default_library",
     srcs = [
-        "approval-handler.go",
         "assign-fixes.go",
         "block_paths.go",
         "blunderbuss.go",
@@ -60,7 +60,6 @@ go_library(
         "cherrypick-label-unapproved.go",
         "cherrypick-must-have-milestone.go",
         "cherrypick-queue.go",
-        "close-stale.go",
         "comment-deleter.go",
         "comment-deleter-jenkins.go",
         "doc.go",
@@ -75,8 +74,6 @@ go_library(
         "owner-label.go",
         "path_label.go",
         "prow.go",
-        "publisher.go",
-        "publisher_logger.go",
         "sig-mention-handler.go",
         "stale-green-ci.go",
         "stale-pending-ci.go",
@@ -102,10 +99,10 @@ go_library(
         "//vendor/github.com/golang/glog:go_default_library",
         "//vendor/github.com/google/go-github/github:go_default_library",
         "//vendor/github.com/prometheus/client_golang/prometheus:go_default_library",
+        "//vendor/k8s.io/apimachinery/pkg/util/clock:go_default_library",
+        "//vendor/k8s.io/apimachinery/pkg/util/sets:go_default_library",
+        "//vendor/k8s.io/apimachinery/pkg/util/yaml:go_default_library",
         "//vendor/k8s.io/contrib/test-utils/utils:go_default_library",
-        "//vendor/k8s.io/kubernetes/pkg/util/clock:go_default_library",
-        "//vendor/k8s.io/kubernetes/pkg/util/sets:go_default_library",
-        "//vendor/k8s.io/kubernetes/pkg/util/yaml:go_default_library",
     ],
 )
 

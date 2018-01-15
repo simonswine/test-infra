@@ -16,13 +16,13 @@ IMG = gcr.io/k8s-testimages/bazelbuild
 TAG = $(shell date +v%Y%m%d)-$(shell git describe --tags --always --dirty)
 
 # TODO(bentheelder): retire some of these as they become unnecessary
-LATEST_BAZEL_VERSION=0.7.0
-BAZEL_VERSIONS=0.5.2 0.5.4 0.6.1 $(LATEST_BAZEL_VERSION)
+LATEST_BAZEL_VERSION=0.8.1
+BAZEL_VERSIONS=0.5.2 0.5.4 0.6.1 0.7.0 $(LATEST_BAZEL_VERSION)
 
 all: build
 
 do_build = \
-	docker build --pull --build-arg BAZEL_VERSION=$(VERSION) -t $(IMG):$(TAG)-$(VERSION) .;\
+	docker build --pull --build-arg BAZEL_VERSION=$(VERSION) --build-arg IMAGE_ARG=$(IMG):$(TAG)-$(VERSION) -t $(IMG):$(TAG)-$(VERSION) .;\
 	docker tag $(IMG):$(TAG)-$(VERSION) $(IMG):latest-$(VERSION);\
 	echo Built $(IMG):$(TAG)-$(VERSION) and tagged with latest-$(VERSION);\
 	[ "$(VERSION)" == "$(LATEST_BAZEL_VERSION)" ] &&\

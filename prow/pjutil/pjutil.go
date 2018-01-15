@@ -22,8 +22,10 @@ import (
 	"time"
 
 	uuid "github.com/satori/go.uuid"
+	"github.com/sirupsen/logrus"
 
 	"k8s.io/test-infra/prow/config"
+	"k8s.io/test-infra/prow/github"
 	"k8s.io/test-infra/prow/kube"
 )
 
@@ -169,41 +171,45 @@ func kubeEnv(environment map[string]string) []kube.EnvVar {
 	return kubeEnvironment
 }
 
-// PartitionPending separates the provided prowjobs into pending and non-pending
+// PartitionActive separates the provided prowjobs into pending and triggered
 // and returns them inside channels so that they can be consumed in parallel
-// by different goroutines. Controller loops need to handle pending jobs first
-// so they can conform to maximum concurrency requirements that different jobs
-// may have.
-func PartitionPending(pjs []kube.ProwJob) (pending, nonPending chan kube.ProwJob) {
-	// Determine pending job size in order to size the channels correctly.
-	pendingCount := 0
+// by different goroutines. Complete prowjobs are filtered out. Controller
+// loops need to handle pending jobs first so they can conform to maximum
+// concurrency requirements that different jobs may have.
+func PartitionActive(pjs []kube.ProwJob) (pending, triggered chan kube.ProwJob) {
+	// Size channels correctly.
+	pendingCount, triggeredCount := 0, 0
 	for _, pj := range pjs {
-		if pj.Status.State == kube.PendingState {
+		switch pj.Status.State {
+		case kube.PendingState:
 			pendingCount++
+		case kube.TriggeredState:
+			triggeredCount++
 		}
 	}
 	pending = make(chan kube.ProwJob, pendingCount)
-	nonPending = make(chan kube.ProwJob, len(pjs)-pendingCount)
+	triggered = make(chan kube.ProwJob, triggeredCount)
 
 	// Partition the jobs into the two separate channels.
 	for _, pj := range pjs {
-		if pj.Status.State == kube.PendingState {
+		switch pj.Status.State {
+		case kube.PendingState:
 			pending <- pj
-		} else {
-			nonPending <- pj
+		case kube.TriggeredState:
+			triggered <- pj
 		}
 	}
 	close(pending)
-	close(nonPending)
-	return pending, nonPending
+	close(triggered)
+	return pending, triggered
 }
 
-// GetLatestPeriodics filters through the provided prowjobs and returns
-// a map of periodic jobs to their latest prowjobs.
-func GetLatestPeriodics(pjs []kube.ProwJob) map[string]kube.ProwJob {
+// GetLatestProwJobs filters through the provided prowjobs and returns
+// a map of jobType jobs to their latest prowjobs.
+func GetLatestProwJobs(pjs []kube.ProwJob, jobType kube.ProwJobType) map[string]kube.ProwJob {
 	latestJobs := make(map[string]kube.ProwJob)
 	for _, j := range pjs {
-		if j.Spec.Type != kube.PeriodicJob {
+		if j.Spec.Type != jobType {
 			continue
 		}
 		name := j.Spec.Job
@@ -212,4 +218,21 @@ func GetLatestPeriodics(pjs []kube.ProwJob) map[string]kube.ProwJob {
 		}
 	}
 	return latestJobs
+}
+
+// ProwJobFields extracts logrus fields from a prowjob useful for logging.
+func ProwJobFields(pj *kube.ProwJob) logrus.Fields {
+	fields := make(logrus.Fields)
+	fields["name"] = pj.Metadata.Name
+	fields["job"] = pj.Spec.Job
+	fields["type"] = pj.Spec.Type
+	if len(pj.Metadata.Labels[github.EventGUID]) > 0 {
+		fields[github.EventGUID] = pj.Metadata.Labels[github.EventGUID]
+	}
+	if len(pj.Spec.Refs.Pulls) == 1 {
+		fields[github.PrLogField] = pj.Spec.Refs.Pulls[0].Number
+		fields[github.RepoLogField] = pj.Spec.Refs.Repo
+		fields[github.OrgLogField] = pj.Spec.Refs.Org
+	}
+	return fields
 }

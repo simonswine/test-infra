@@ -54,14 +54,34 @@ func handleIC(c client, trustedOrg string, ic github.IssueCommentEvent) error {
 		return nil
 	}
 
+	var changedFiles []string
+	files := func() ([]string, error) {
+		if changedFiles != nil {
+			return changedFiles, nil
+		}
+		changes, err := c.GitHubClient.GetPullRequestChanges(org, repo, number)
+		if err != nil {
+			return nil, err
+		}
+		changedFiles = []string{}
+		for _, change := range changes {
+			changedFiles = append(changedFiles, change.Filename)
+		}
+		return changedFiles, nil
+	}
+
 	// Which jobs does the comment want us to run?
+	testAll := okToTest.MatchString(ic.Comment.Body)
 	shouldRetestFailed := retest.MatchString(ic.Comment.Body)
-	requestedJobs := c.Config.MatchingPresubmits(ic.Repo.FullName, ic.Comment.Body, okToTest)
+	requestedJobs, err := c.Config.MatchingPresubmits(ic.Repo.FullName, ic.Comment.Body, testAll, files)
+	if err != nil {
+		return err
+	}
 	if !shouldRetestFailed && len(requestedJobs) == 0 {
 		// Check for the presence of the needs-ok-to-test label and remove it
 		// if a trusted member has commented "/ok-to-test".
-		if okToTest.MatchString(ic.Comment.Body) && ic.Issue.HasLabel(needsOkToTest) {
-			orgMember, err := c.GitHubClient.IsMember(trustedOrg, commentAuthor)
+		if testAll && ic.Issue.HasLabel(needsOkToTest) {
+			orgMember, err := isUserTrusted(c.GitHubClient, commentAuthor, trustedOrg, org)
 			if err != nil {
 				return err
 			}
@@ -92,17 +112,21 @@ func handleIC(c client, trustedOrg string, ic github.IssueCommentEvent) error {
 				runContexts[status.Context] = true
 			}
 		}
-		requestedJobs = append(requestedJobs, c.Config.RetestPresubmits(ic.Repo.FullName, skipContexts, runContexts)...)
+		retests, err := c.Config.RetestPresubmits(ic.Repo.FullName, skipContexts, runContexts, files)
+		if err != nil {
+			return err
+		}
+		requestedJobs = append(requestedJobs, retests...)
 	}
 
 	var comments []github.IssueComment
-
 	// Skip untrusted users.
-	orgMember, err := c.GitHubClient.IsMember(trustedOrg, commentAuthor)
+	orgMember, err := isUserTrusted(c.GitHubClient, commentAuthor, trustedOrg, org)
 	if err != nil {
 		return err
-	} else if !orgMember {
-		comments, err = c.GitHubClient.ListIssueComments(pr.Base.Repo.Owner.Login, pr.Base.Repo.Name, pr.Number)
+	}
+	if !orgMember {
+		comments, err = c.GitHubClient.ListIssueComments(org, repo, number)
 		if err != nil {
 			return err
 		}
@@ -111,13 +135,17 @@ func handleIC(c client, trustedOrg string, ic github.IssueCommentEvent) error {
 			return err
 		}
 		if !trusted {
-			resp := fmt.Sprintf("you can't request testing unless you are a [%s](https://github.com/orgs/%s/people) member.", trustedOrg, trustedOrg)
+			var more string
+			if org != trustedOrg {
+				more = fmt.Sprintf("or [%s](https://github.com/orgs/%s/people) ", org, org)
+			}
+			resp := fmt.Sprintf("you can't request testing unless you are a [%s](https://github.com/orgs/%s/people) %smember.", trustedOrg, trustedOrg, more)
 			c.Logger.Infof("Commenting \"%s\".", resp)
 			return c.GitHubClient.CreateComment(org, repo, number, plugins.FormatICResponse(ic.Comment, resp))
 		}
 	}
 
-	if okToTest.MatchString(ic.Comment.Body) && ic.Issue.HasLabel(needsOkToTest) {
+	if testAll && ic.Issue.HasLabel(needsOkToTest) {
 		if err := c.GitHubClient.RemoveLabel(ic.Repo.Owner.Login, ic.Repo.Name, ic.Issue.Number, needsOkToTest); err != nil {
 			c.Logger.WithError(err).Errorf("Failed at removing %s label", needsOkToTest)
 		}
@@ -132,18 +160,29 @@ func handleIC(c client, trustedOrg string, ic github.IssueCommentEvent) error {
 		return err
 	}
 
+	// Determine if any branch-shard of a given job runs against the base branch.
+	anyShardRunsAgainstBranch := map[string]bool{}
+	for _, job := range requestedJobs {
+		if job.RunsAgainstBranch(pr.Base.Ref) {
+			anyShardRunsAgainstBranch[job.Context] = true
+		}
+	}
+
 	var errors []error
 	for _, job := range requestedJobs {
 		if !job.RunsAgainstBranch(pr.Base.Ref) {
-			if err := c.GitHubClient.CreateStatus(org, repo, pr.Head.SHA, github.Status{
-				State:       github.StatusSuccess,
-				Context:     job.Context,
-				Description: "Skipped",
-			}); err != nil {
-				return err
+			if !job.SkipReport && !anyShardRunsAgainstBranch[job.Context] {
+				if err := c.GitHubClient.CreateStatus(org, repo, pr.Head.SHA, github.Status{
+					State:       github.StatusSuccess,
+					Context:     job.Context,
+					Description: "Skipped",
+				}); err != nil {
+					return err
+				}
 			}
 			continue
 		}
+
 		c.Logger.Infof("Starting %s build.", job.Name)
 		kr := kube.Refs{
 			Org:     org,
@@ -158,7 +197,14 @@ func handleIC(c client, trustedOrg string, ic github.IssueCommentEvent) error {
 				},
 			},
 		}
-		if _, err := c.KubeClient.CreateProwJob(pjutil.NewProwJob(pjutil.PresubmitSpec(job, kr), job.Labels)); err != nil {
+		labels := make(map[string]string)
+		for k, v := range job.Labels {
+			labels[k] = v
+		}
+		labels[github.EventGUID] = ic.GUID
+		pj := pjutil.NewProwJob(pjutil.PresubmitSpec(job, kr), labels)
+		c.Logger.WithFields(pjutil.ProwJobFields(&pj)).Info("Creating a new prowjob.")
+		if _, err := c.KubeClient.CreateProwJob(pj); err != nil {
 			errors = append(errors, err)
 		}
 	}

@@ -166,7 +166,7 @@ tests.
 
 Tests can use `--skew` and `--upgrade_args` if they provided multiple
 `--extract` flags (or manually created a `kubernetes/kubernetes_skew` directory
-as a sibling to `kubernetes/kubernetes`. This will cause tests to run from the
+as a sibling to `kubernetes/kubernetes`). This will cause tests to run from the
 skew directory, potentially to upgrade/downgrade kubernetes to another version.
 
 A simple example is:<br>
@@ -209,7 +209,7 @@ right path, the command below does the same as above:
 
 [bootstrap.py]: /jenkins/bootstrap.py
 [boskos]: /boskos
-[e2e testing]: https://github.com/kubernetes/community/blob/master/contributors/devel/e2e-tests.md
+[e2e testing]: https://git.k8s.io/community/contributors/devel/e2e-tests.md
 [extract.go]: /kubetest/extract.go
 [ginkgo]: https://github.com/onsi/ginkgo
 [kubekins-e2e]: /jenkins/e2e-image

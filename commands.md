@@ -2,6 +2,9 @@
 
 `k8s-ci-robot` and `k8s-merge-robot` understand several commands. They should all be uttered on their own line, and they are case-sensitive.
 
+For more detailed documentation on each of these commands, consult Prow's [plugin
+help](https://prow.k8s.io/plugin-help.html).
+
 Command | Implemented By | Who can run it | Description
 --- | --- | --- | ---
 `/approve` | mungegithub [approvers](./mungegithub/mungers/approvers) | owners | approve all the files for which you are an approver
@@ -13,8 +16,12 @@ Command | Implemented By | Who can run it | Description
 `/unassign [@userA @userB @etc]` | prow [assign](./prow/plugins/assign) | anyone | Unassigns specified people (or yourself if no one is specified). Target must already be assigned.
 `/cc [@userA @userB @etc]` | prow [assign](./prow/plugins/assign) | anyone | Request review from specified people (or yourself if no one is specified). Target must be a kubernetes org member.
 `/uncc [@userA @userB @etc]` | prow [assign](./prow/plugins/assign) | anyone | Dismiss review request for specified people (or yourself if no one is specified). Target must already have had a review requested.
-`/close` | prow [close](./prow/plugins/close) | authors and assignees | closes the issue/PR
-`/reopen` | prow [reopen](./prow/plugins/reopen) | authors and assignees | reopens a closed issue/PR
+`/close` | prow [lifecycle](./prow/plugins/lifecycle) | authors and assignees | closes the issue/PR
+`/reopen` | prow [lifecycle](./prow/plugins/lifecycle) | authors and assignees | reopens a closed issue/PR
+`/lifecycle [state]` | prow [lifecycle](./prow/plugins/lifecycle) | anyone | adds a stale, rotten or frozen state label
+`/remove-lifecycle [state]` | prow [lifecycle](./prow/plugins/lifecycle) | anyone | removes a stale, rotten or frozen state label
+`/help` | prow [help](./prow/plugins/help) | anyone | adds the `help wanted` label
+`/remove-help` | prow [help](./prow/plugins/help) | anyone | removes the `help wanted` label
 `/hold` | prow [hold](./prow/plugins/hold) | anyone | adds the `do-not-merge/hold` label
 `/hold cancel` | prow [hold](./prow/plugins/hold) | anyone | removes the `do-not-merge/hold` label
 `/joke` | prow [yuks](./prow/plugins/yuks) | anyone | tells a bad joke, sometimes

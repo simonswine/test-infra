@@ -27,13 +27,16 @@ import (
 	"net/http"
 	"net/http/httptest"
 	"net/url"
+	"reflect"
 	"strconv"
 	"testing"
 	"time"
 
 	"github.com/ghodss/yaml"
 
+	"k8s.io/test-infra/prow/config"
 	"k8s.io/test-infra/prow/kube"
+	"k8s.io/test-infra/prow/pluginhelp"
 	"k8s.io/test-infra/prow/tide"
 )
 
@@ -199,8 +202,17 @@ func TestTide(t *testing.T) {
 		}
 		fmt.Fprintf(w, string(b))
 	}))
+	ca := &config.Agent{}
+	ca.Set(&config.Config{
+		Tide: config.Tide{
+			Queries: []config.TideQuery{
+				{Repos: []string{"kubernetes/test-infra"}},
+			},
+		},
+	})
 	ta := tideAgent{
-		path: s.URL,
+		path:         s.URL,
+		updatePeriod: func() time.Duration { return time.Minute },
 	}
 	if err := ta.update(); err != nil {
 		t.Fatalf("Updating: %v", err)
@@ -211,7 +223,7 @@ func TestTide(t *testing.T) {
 	if ta.pools[0].Org != "o" {
 		t.Errorf("Wrong org in pool. Got %s, expected o in %v", ta.pools[0].Org, ta.pools)
 	}
-	handler := handleTide(&ta)
+	handler := handleTide(ca, &ta)
 	req, err := http.NewRequest(http.MethodGet, "/tide.js", nil)
 	if err != nil {
 		t.Fatalf("Error making request: %v", err)
@@ -227,14 +239,72 @@ func TestTide(t *testing.T) {
 	if err != nil {
 		t.Fatalf("Error reading response body: %v", err)
 	}
-	var res []tide.Pool
+	res := tideData{}
 	if err := yaml.Unmarshal(body, &res); err != nil {
 		t.Fatalf("Error unmarshaling: %v", err)
 	}
-	if len(res) != 1 {
-		t.Fatalf("Wrong number of pools. Got %d, expected 1 in %v", len(res), res)
+	if len(res.Pools) != 1 {
+		t.Fatalf("Wrong number of pools. Got %d, expected 1 in %v", len(res.Pools), res.Pools)
 	}
-	if res[0].Org != "o" {
-		t.Errorf("Wrong org in pool. Got %s, expected o in %v", res[0].Org, res)
+	if res.Pools[0].Org != "o" {
+		t.Errorf("Wrong org in pool. Got %s, expected o in %v", res.Pools[0].Org, res.Pools)
 	}
+	if len(res.Queries) != 1 {
+		t.Fatalf("Wrong number of pools. Got %d, expected 1 in %v", len(res.Queries), res.Queries)
+	}
+	if expected := "is:pr state:open repo:\"kubernetes/test-infra\""; res.Queries[0] != expected {
+		t.Errorf("Wrong query. Got %s, expected %s", res.Queries[0], expected)
+	}
+}
+
+func TestHelp(t *testing.T) {
+	hitCount := 0
+	help := pluginhelp.Help{
+		AllRepos:            []string{"org/repo"},
+		RepoPlugins:         map[string][]string{"org": {"plugin"}},
+		RepoExternalPlugins: map[string][]string{"org/repo": {"external-plugin"}},
+		PluginHelp:          map[string]pluginhelp.PluginHelp{"plugin": {Description: "plugin"}},
+		ExternalPluginHelp:  map[string]pluginhelp.PluginHelp{"external-plugin": {Description: "external-plugin"}},
+	}
+	s := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		hitCount++
+		b, err := json.Marshal(help)
+		if err != nil {
+			t.Fatalf("Marshaling: %v", err)
+		}
+		fmt.Fprintf(w, string(b))
+	}))
+	ha := &helpAgent{
+		path: s.URL,
+	}
+	handler := handlePluginHelp(ha)
+	handleAndCheck := func() {
+		req, err := http.NewRequest(http.MethodGet, "/plugin-help.js", nil)
+		if err != nil {
+			t.Fatalf("Error making request: %v", err)
+		}
+		rr := httptest.NewRecorder()
+		handler.ServeHTTP(rr, req)
+		if rr.Code != http.StatusOK {
+			t.Fatalf("Bad error code: %d", rr.Code)
+		}
+		resp := rr.Result()
+		defer resp.Body.Close()
+		body, err := ioutil.ReadAll(resp.Body)
+		if err != nil {
+			t.Fatalf("Error reading response body: %v", err)
+		}
+		var res pluginhelp.Help
+		if err := yaml.Unmarshal(body, &res); err != nil {
+			t.Fatalf("Error unmarshaling: %v", err)
+		}
+		if !reflect.DeepEqual(help, res) {
+			t.Errorf("Invalid plugin help. Got %q, expected %q", res, help)
+		}
+		if hitCount != 1 {
+			t.Errorf("Expected fake hook endpoint to be hit once, but endpoint was hit %d times.", hitCount)
+		}
+	}
+	handleAndCheck()
+	handleAndCheck()
 }

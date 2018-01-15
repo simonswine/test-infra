@@ -14,7 +14,9 @@ See the License for the specific language governing permissions and
 limitations under the License.
 */
 
-// Package tide contains a controller for managing a tide pool of PRs.
+// Package tide contains a controller for managing a tide pool of PRs. The
+// controller will automatically retest PRs in the pool and merge them if they
+// pass tests.
 package tide
 
 import (
@@ -35,6 +37,12 @@ import (
 	"k8s.io/test-infra/prow/pjutil"
 )
 
+const (
+	statusContext   string = "tide"
+	statusInPool           = "In tide pool."
+	statusNotInPool        = "Not in tide pool."
+)
+
 type kubeClient interface {
 	ListProwJobs(string) ([]kube.ProwJob, error)
 	CreateProwJob(kube.ProwJob) (kube.ProwJob, error)
@@ -42,6 +50,7 @@ type kubeClient interface {
 
 type githubClient interface {
 	GetRef(string, string, string) (string, error)
+	CreateStatus(string, string, string, github.Status) error
 	Query(context.Context, interface{}, map[string]interface{}) error
 	Merge(string, string, int, github.MergeDetails) error
 }
@@ -49,7 +58,6 @@ type githubClient interface {
 // Controller knows how to sync PRs and PJs.
 type Controller struct {
 	logger *logrus.Entry
-	dryRun bool
 	ca     *config.Agent
 	ghc    githubClient
 	kc     kubeClient
@@ -85,20 +93,79 @@ type Pool struct {
 	PendingPRs []PullRequest
 	MissingPRs []PullRequest
 
+	// Empty if there is no pending batch.
+	BatchPending []PullRequest
+
 	// Which action did we last take, and to what target(s), if any.
 	Action Action
 	Target []PullRequest
 }
 
 // NewController makes a Controller out of the given clients.
-func NewController(ghc *github.Client, kc *kube.Client, ca *config.Agent, gc *git.Client, dryRun bool, logger *logrus.Entry) *Controller {
+func NewController(ghc *github.Client, kc *kube.Client, ca *config.Agent, gc *git.Client, logger *logrus.Entry) *Controller {
 	return &Controller{
 		logger: logger,
-		dryRun: dryRun,
 		ghc:    ghc,
 		kc:     kc,
 		ca:     ca,
 		gc:     gc,
+	}
+}
+
+// org/repo -> number -> pr
+func byRepoAndNumber(prs []PullRequest) map[string]map[int]PullRequest {
+	m := make(map[string]map[int]PullRequest)
+	for _, pr := range prs {
+		r := string(pr.Repository.NameWithOwner)
+		if _, ok := m[r]; !ok {
+			m[r] = make(map[int]PullRequest)
+		}
+		m[r][int(pr.Number)] = pr
+	}
+	return m
+}
+
+// Returns expected status state and description.
+// TODO(spxtr): Useful information such as "missing label: foo."
+func expectedStatus(pr PullRequest, pool map[string]map[int]PullRequest) (string, string) {
+	if _, ok := pool[string(pr.Repository.NameWithOwner)][int(pr.Number)]; !ok {
+		return github.StatusPending, statusNotInPool
+	}
+	return github.StatusSuccess, statusInPool
+}
+
+func (c *Controller) setStatuses(all, pool []PullRequest) {
+	poolM := byRepoAndNumber(pool)
+	for _, pr := range all {
+		wantState, wantDesc := expectedStatus(pr, poolM)
+		var actualState githubql.StatusState
+		var actualDesc string
+		for _, ctx := range pr.Commits.Nodes[0].Commit.Status.Contexts {
+			if string(ctx.Context) == statusContext {
+				actualState = ctx.State
+				actualDesc = string(ctx.Description)
+			}
+		}
+		if wantState != strings.ToLower(string(actualState)) || wantDesc != actualDesc {
+			if err := c.ghc.CreateStatus(
+				string(pr.Repository.Owner.Login),
+				string(pr.Repository.Name),
+				string(pr.HeadRef.Target.OID),
+				github.Status{
+					Context:     statusContext,
+					State:       wantState,
+					Description: wantDesc,
+					TargetURL:   c.ca.Config().Tide.TargetURL,
+				}); err != nil {
+				c.logger.WithError(err).Errorf(
+					"Failed to set status context for %s/%s#%d sha: %s.",
+					string(pr.Repository.Owner.Login),
+					string(pr.Repository.Name),
+					int(pr.Number),
+					string(pr.HeadRef.Target.OID),
+				)
+			}
+		}
 	}
 }
 
@@ -107,13 +174,21 @@ func (c *Controller) Sync() error {
 	ctx := context.Background()
 	c.logger.Info("Building tide pool.")
 	var pool []PullRequest
+	var all []PullRequest
 	for _, q := range c.ca.Config().Tide.Queries {
-		prs, err := c.search(ctx, q)
+		poolPRs, err := c.search(ctx, q.Query())
 		if err != nil {
 			return err
 		}
-		pool = append(pool, prs...)
+		pool = append(pool, poolPRs...)
+		allPRs, err := c.search(ctx, q.AllPRs())
+		if err != nil {
+			return err
+		}
+		all = append(all, allPRs...)
 	}
+	c.setStatuses(all, pool)
+
 	var pjs []kube.ProwJob
 	var err error
 	if len(pool) > 0 {
@@ -126,16 +201,18 @@ func (c *Controller) Sync() error {
 	if err != nil {
 		return err
 	}
-	// This may take a while, which may cause ServeHTTP requests to block for
-	// some time. This is not a frontend service, so that's okay.
-	c.m.Lock()
-	defer c.m.Unlock()
-	c.pools = make([]Pool, 0, len(sps))
+
+	pools := make([]Pool, 0, len(sps))
 	for _, sp := range sps {
-		if err := c.syncSubpool(sp); err != nil {
-			return err
+		if pool, err := c.syncSubpool(sp); err != nil {
+			c.logger.WithError(err).Errorf("Syncing subpool %s/%s:%s.", sp.org, sp.repo, sp.branch)
+		} else {
+			pools = append(pools, pool)
 		}
 	}
+	c.m.Lock()
+	defer c.m.Unlock()
+	c.pools = pools
 	return nil
 }
 
@@ -167,6 +244,20 @@ func toSimpleState(s kube.ProwJobState) simpleState {
 	return noneState
 }
 
+// isPassingTests returns whether or not all contexts set on the PR except for
+// the tide pool context are passing.
+func isPassingTests(pr PullRequest) bool {
+	for _, ctx := range pr.Commits.Nodes[0].Commit.Status.Contexts {
+		if string(ctx.Context) == statusContext {
+			continue
+		}
+		if ctx.State != githubql.StatusStateSuccess {
+			return false
+		}
+	}
+	return true
+}
+
 func pickSmallestPassingNumber(prs []PullRequest) (bool, PullRequest) {
 	smallestNumber := -1
 	var smallestPR PullRequest
@@ -177,8 +268,7 @@ func pickSmallestPassingNumber(prs []PullRequest) (bool, PullRequest) {
 		if len(pr.Commits.Nodes) < 1 {
 			continue
 		}
-		// TODO(spxtr): Check the actual statuses for individual jobs.
-		if string(pr.Commits.Nodes[0].Commit.Status.State) != "SUCCESS" {
+		if !isPassingTests(pr) {
 			continue
 		}
 		smallestNumber = int(pr.Number)
@@ -188,9 +278,9 @@ func pickSmallestPassingNumber(prs []PullRequest) (bool, PullRequest) {
 }
 
 // accumulateBatch returns a list of PRs that can be merged after passing batch
-// testing, if any exist. It also returns whether or not a batch is currently
-// running.
-func accumulateBatch(presubmits []string, prs []PullRequest, pjs []kube.ProwJob) ([]PullRequest, bool) {
+// testing, if any exist. It also returns a list of PRs currently being batch
+// tested.
+func accumulateBatch(presubmits []string, prs []PullRequest, pjs []kube.ProwJob) ([]PullRequest, []PullRequest) {
 	prNums := make(map[int]PullRequest)
 	for _, pr := range prs {
 		prNums[int(pr.Number)] = pr
@@ -209,7 +299,11 @@ func accumulateBatch(presubmits []string, prs []PullRequest, pjs []kube.ProwJob)
 		}
 		// If any batch job is pending, return now.
 		if toSimpleState(pj.Status.State) == pendingState {
-			return nil, true
+			var pending []PullRequest
+			for _, pull := range pj.Spec.Refs.Pulls {
+				pending = append(pending, prNums[pull.Number])
+			}
+			return nil, pending
 		}
 		// Otherwise, accumulate results.
 		ref := pj.Spec.Refs.String()
@@ -250,9 +344,9 @@ func accumulateBatch(presubmits []string, prs []PullRequest, pjs []kube.ProwJob)
 		if !passesAll {
 			continue
 		}
-		return state.prs, false
+		return state.prs, nil
 	}
-	return nil, false
+	return nil, nil
 }
 
 // accumulate returns the supplied PRs sorted into three buckets based on their
@@ -321,11 +415,13 @@ func (c *Controller) pickBatch(sp subpool) ([]PullRequest, error) {
 	if err := r.Checkout(sp.sha); err != nil {
 		return nil, err
 	}
-	// TODO(spxtr): Limit batch size.
 	var res []PullRequest
-	for _, pr := range sp.prs {
-		// TODO(spxtr): Check the actual statuses for individual jobs.
-		if string(pr.Commits.Nodes[0].Commit.Status.State) != "SUCCESS" {
+	for i, pr := range sp.prs {
+		// TODO: Make this configurable per subpool.
+		if i == 5 {
+			break
+		}
+		if !isPassingTests(pr) {
 			continue
 		}
 		if ok, err := r.Merge(string(pr.HeadRef.Target.OID)); err != nil {
@@ -340,7 +436,8 @@ func (c *Controller) pickBatch(sp subpool) ([]PullRequest, error) {
 func (c *Controller) mergePRs(sp subpool, prs []PullRequest) error {
 	for _, pr := range prs {
 		if err := c.ghc.Merge(sp.org, sp.repo, int(pr.Number), github.MergeDetails{
-			SHA: string(pr.HeadRef.Target.OID),
+			SHA:         string(pr.HeadRef.Target.OID),
+			MergeMethod: string(c.ca.Config().Tide.MergeMethod(sp.org, sp.repo)),
 		}); err != nil {
 			if _, ok := err.(github.ModifiedHeadError); ok {
 				// This is a possible source of incorrect behavior. If someone
@@ -394,50 +491,38 @@ func (c *Controller) trigger(sp subpool, prs []PullRequest) error {
 	return nil
 }
 
-func (c *Controller) takeAction(sp subpool, batchPending bool, successes, pendings, nones, batchMerges []PullRequest) (Action, []PullRequest, error) {
+func (c *Controller) takeAction(sp subpool, batchPending, successes, pendings, nones, batchMerges []PullRequest) (Action, []PullRequest, error) {
 	// Merge the batch!
 	if len(batchMerges) > 0 {
-		if c.dryRun {
-			return MergeBatch, batchMerges, nil
-		}
 		return MergeBatch, batchMerges, c.mergePRs(sp, batchMerges)
 	}
 	// Do not merge PRs while waiting for a batch to complete. We don't want to
 	// invalidate the old batch result.
-	if len(successes) > 0 && !batchPending {
+	if len(successes) > 0 && len(batchPending) == 0 {
 		if ok, pr := pickSmallestPassingNumber(successes); ok {
-			if c.dryRun {
-				return Merge, []PullRequest{pr}, nil
-			}
 			return Merge, []PullRequest{pr}, c.mergePRs(sp, []PullRequest{pr})
 		}
 	}
 	// If we have no serial jobs pending or successful, trigger one.
 	if len(nones) > 0 && len(pendings) == 0 && len(successes) == 0 {
 		if ok, pr := pickSmallestPassingNumber(nones); ok {
-			if c.dryRun {
-				return Trigger, []PullRequest{pr}, nil
-			}
 			return Trigger, []PullRequest{pr}, c.trigger(sp, []PullRequest{pr})
 		}
 	}
 	// If we have no batch, trigger one.
-	if len(sp.prs) > 1 && !batchPending {
+	if len(sp.prs) > 1 && len(batchPending) == 0 {
 		batch, err := c.pickBatch(sp)
 		if err != nil {
 			return Wait, nil, err
 		}
 		if len(batch) > 1 {
-			if c.dryRun {
-				return TriggerBatch, batch, nil
-			}
 			return TriggerBatch, batch, c.trigger(sp, batch)
 		}
 	}
 	return Wait, nil, nil
 }
 
-func (c *Controller) syncSubpool(sp subpool) error {
+func (c *Controller) syncSubpool(sp subpool) (Pool, error) {
 	c.logger.Infof("%s/%s %s: %d PRs, %d PJs.", sp.org, sp.repo, sp.branch, len(sp.prs), len(sp.pjs))
 	var presubmits []string
 	for _, ps := range c.ca.Config().Presubmits[sp.org+"/"+sp.repo] {
@@ -452,22 +537,24 @@ func (c *Controller) syncSubpool(sp subpool) error {
 	c.logger.Infof("Pending PRs: %v", prNumbers(pendings))
 	c.logger.Infof("Missing PRs: %v", prNumbers(nones))
 	c.logger.Infof("Passing batch: %v", prNumbers(batchMerge))
-	c.logger.Infof("Pending batch: %v", batchPending)
+	c.logger.Infof("Pending batch: %v", prNumbers(batchPending))
 	act, targets, err := c.takeAction(sp, batchPending, successes, pendings, nones, batchMerge)
 	c.logger.Infof("Action: %v, Targets: %v", act, targets)
-	c.pools = append(c.pools, Pool{
-		Org:    sp.org,
-		Repo:   sp.repo,
-		Branch: sp.branch,
+	return Pool{
+			Org:    sp.org,
+			Repo:   sp.repo,
+			Branch: sp.branch,
 
-		SuccessPRs: successes,
-		PendingPRs: pendings,
-		MissingPRs: nones,
+			SuccessPRs: successes,
+			PendingPRs: pendings,
+			MissingPRs: nones,
 
-		Action: act,
-		Target: targets,
-	})
-	return err
+			BatchPending: batchPending,
+
+			Action: act,
+			Target: targets,
+		},
+		err
 }
 
 type subpool struct {
@@ -570,13 +657,21 @@ type PullRequest struct {
 	}
 	Commits struct {
 		Nodes []struct {
-			Commit struct {
-				Status struct {
-					State githubql.String
-				}
-			}
+			Commit Commit
 		}
 	} `graphql:"commits(last: 1)"`
+}
+
+type Commit struct {
+	Status struct {
+		Contexts []Context
+	}
+}
+
+type Context struct {
+	Context     githubql.String
+	Description githubql.String
+	State       githubql.StatusState
 }
 
 type searchQuery struct {

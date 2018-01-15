@@ -23,19 +23,20 @@ ARG BAZEL_VERSION
 WORKDIR "/workspace"
 RUN mkdir -p "/workspace"
 
+# TODO(bentheelder): we should probably have these pip deps in bazel,
+# remove these from the container if kettle is fixed.
 RUN apt-get update && apt-get install -y --no-install-recommends \
     build-essential \
     ca-certificates \
     git \
     python \
     python-pip \
+    rpm \
     unzip \
     wget \
     zip \
     zlib1g-dev \
     && apt-get clean && \
-    # TODO(bentheelder): we should probably have these as bazel dependencies,
-    # remove these from the container if kettle is fixed.
     pip install pylint pyyaml
 
 SHELL ["/bin/bash", "-c"]

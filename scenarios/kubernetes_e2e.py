@@ -36,7 +36,7 @@ import time
 ORIG_CWD = os.getcwd()  # Checkout changes cwd
 
 # Note: This variable is managed by experiment/bump_e2e_image.sh.
-DEFAULT_KUBEKINS_TAG = 'v20171108-8b5aad9f-master'
+DEFAULT_KUBEKINS_TAG = 'v20180102-0e2b24a0b-master'
 
 def test_infra(*paths):
     """Return path relative to root of test-infra repo."""
@@ -58,7 +58,7 @@ def check_output(*cmd):
 def check_env(env, *cmd):
     """Log and run the command with a specific env, raising on errors."""
     print >>sys.stderr, 'Environment:'
-    for key, value in env.items():
+    for key, value in sorted(env.items()):
         print >>sys.stderr, '%s=%s' % (key, value)
     print >>sys.stderr, 'Run:', cmd
     subprocess.check_call(cmd, env=env)
@@ -445,7 +445,7 @@ def set_up_kops_aws(workspace, args, mode, cluster, runner_args):
 
     zones = args.kops_zones or random.choice([
         'us-west-1a',
-        'us-west-1c',
+        #'us-west-1c', Some accounts have b but not c, some c but not b
         'us-west-2a',
         'us-west-2b',
         'us-east-1a',
@@ -488,7 +488,7 @@ def set_up_aws(workspace, args, mode, cluster, runner_args):
 
     zones = args.kops_zones or random.choice([
         'us-west-1a',
-        'us-west-1c',
+        #'us-west-1c', Some accounts have b but not c, some c but not b
         'us-west-2a',
         'us-west-2b',
         'us-east-1a',

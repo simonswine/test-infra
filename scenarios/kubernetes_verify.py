@@ -54,6 +54,35 @@ def check(*cmd):
     subprocess.check_call(cmd)
 
 
+def retry(func, times=5):
+    """call func until it returns true at most times times"""
+    success = False
+    for _ in range(0, times):
+        success = func()
+        if success:
+            return success
+    return success
+
+
+def try_call(cmds):
+    """returns true if check(cmd) does not throw an exception
+    over all cmds where cmds = [[cmd, arg, arg2], [cmd2, arg]]"""
+    try:
+        for cmd in cmds:
+            check(*cmd)
+        return True
+    # pylint: disable=bare-except
+    except:
+        return False
+
+def get_git_cache(k8s):
+    git = os.path.join(k8s, ".git")
+    if not os.path.isfile(git):
+        return None
+    with open(git) as git_file:
+        return git_file.read().replace("gitdir: ", "").rstrip("\n")
+
+
 def main(branch, script, force, on_prow):
     """Test branch using script, optionally forcing verify checks."""
     # If branch has 3-part version, only take first 2 parts.
@@ -84,7 +113,30 @@ def main(branch, script, force, on_prow):
     if not os.path.isdir(artifacts):
         os.makedirs(artifacts)
 
-    if not on_prow:
+    if on_prow:
+        # TODO(bentheelder): on prow REPO_DIR should be /go/src/k8s.io/kubernetes
+        # however these paths are brittle enough as is...
+        git_cache = get_git_cache(k8s)
+        cmd = [
+            'docker', 'run', '--rm=true', '--privileged=true',
+            '-v', '/var/run/docker.sock:/var/run/docker.sock',
+            '-v', '/etc/localtime:/etc/localtime:ro',
+            '-v', '%s:/go/src/k8s.io/kubernetes' % k8s,
+        ]
+        if git_cache is not None:
+            cmd.extend(['-v', '%s:%s' % (git_cache, git_cache)])
+        cmd.extend([
+            '-v', '/workspace/k8s.io/:/workspace/k8s.io/',
+            '-v', '%s:/workspace/artifacts' % artifacts,
+            '-e', 'KUBE_FORCE_VERIFY_CHECKS=%s' % force,
+            '-e', 'KUBE_VERIFY_GIT_BRANCH=%s' % branch,
+            '-e', 'REPO_DIR=%s' % k8s,  # hack/lib/swagger.sh depends on this
+            '--tmpfs', '/tmp:exec,mode=1777',
+            'gcr.io/k8s-testimages/kubekins-test:%s' % tag,
+            'bash', '-c', 'cd kubernetes && %s' % script,
+        ])
+        check(*cmd)
+    else:
         check(
             'docker', 'run', '--rm=true', '--privileged=true',
             '-v', '/var/run/docker.sock:/var/run/docker.sock',
@@ -97,13 +149,7 @@ def main(branch, script, force, on_prow):
             'gcr.io/k8s-testimages/kubekins-test:%s' % tag,
             'bash', '-c', 'cd kubernetes && %s' % script,
         )
-    else:
-        os.environ["REPO_DIR"] = k8s # hack/lib/swagger.sh depends on this
-        os.environ["KUBE_FORCE_VERIFY_CHECKS"] = str(force)
-        os.environ["KUBE_VERIFY_GIT_BRANCH"] = str(branch)
-        check(
-            'bash', '-c', 'cd kubernetes && %s' % script,
-        )
+
 
 
 if __name__ == '__main__':

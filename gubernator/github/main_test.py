@@ -28,9 +28,13 @@ import unittest
 
 import webtest
 
+from google.appengine.ext import deferred
+from google.appengine.ext import testbed
+
 import handlers
 import main
 import models
+import secrets
 
 app = webtest.TestApp(main.app)
 
@@ -42,19 +46,25 @@ class TestBase(unittest.TestCase):
         self.testbed.init_urlfetch_stub()
         self.testbed.init_blobstore_stub()
         self.testbed.init_datastore_v3_stub()
+        self.testbed.init_taskqueue_stub()
 
 
 class AppTest(TestBase):
     def setUp(self):
         self.init_stubs()
+        self.taskqueue = self.testbed.get_stub(testbed.TASKQUEUE_SERVICE_NAME)
+        secrets.put('github_webhook_secret', 'some_secret', per_host=False)
 
     def get_response(self, event, body):
         if isinstance(body, dict):
             body = json.dumps(body)
         signature = handlers.make_signature(body)
-        return app.post('/webhook', body,
+        resp = app.post('/webhook', body,
             {'X-Github-Event': event,
              'X-Hub-Signature': signature})
+        for task in self.taskqueue.get_filtered_tasks():
+            deferred.run(task.payload)
+        return resp
 
     def test_webhook(self):
         self.get_response('test', {'action': 'blah'})

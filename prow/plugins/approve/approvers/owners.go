@@ -28,7 +28,7 @@ import (
 
 	"github.com/sirupsen/logrus"
 
-	"k8s.io/kubernetes/pkg/util/sets"
+	"k8s.io/apimachinery/pkg/util/sets"
 )
 
 const (
@@ -550,7 +550,7 @@ func GenerateTemplate(templ, name string, data interface{}) (string, error) {
 	return buf.String(), nil
 }
 
-// getMessage returns the comment body that we want the approval-handler to display on PRs
+// getMessage returns the comment body that we want the approve plugin to display on PRs
 // The comment shows:
 // 	- a list of approvers files (and links) needed to get the PR approved
 // 	- a list of approvers files with strikethroughs that already have an approver's approval
@@ -572,7 +572,7 @@ Assign the PR to them by writing `+"`/assign {{range $index, $cc := .ap.GetCCs}}
 
 {{if not .ap.RequireIssue -}}
 {{else if .ap.AssociatedIssue -}}
-Associated issue: *{{.ap.AssociatedIssue}}*
+Associated issue: *#{{.ap.AssociatedIssue}}*
 
 {{ else if len .ap.NoIssueApprovers -}}
 Associated issue requirement bypassed by: {{range $index, $approval := .ap.ListNoIssueApprovals}}{{if $index}}, {{end}}{{$approval}}{{end}}
@@ -585,7 +585,7 @@ Associated issue requirement bypassed by: {{range $index, $approval := .ap.ListN
 
 {{ end -}}
 
-The full list of commands accepted by this bot can be found [here](https://github.com/kubernetes/test-infra/blob/master/commands.md).
+The full list of commands accepted by this bot can be found [here](https://go.k8s.io/bot-commands).
 
 <details {{if (and (not .ap.AreFilesApproved) (not (call .ap.ManuallyApproved))) }}open{{end}}>
 Needs approval from an approver in each of these OWNERS Files:

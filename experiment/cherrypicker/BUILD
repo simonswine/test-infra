@@ -14,15 +14,14 @@ go_library(
         "//prow/github:go_default_library",
         "//prow/hook:go_default_library",
         "//prow/plugins:go_default_library",
-        "//vendor/github.com/satori/go.uuid:go_default_library",
         "//vendor/github.com/sirupsen/logrus:go_default_library",
     ],
 )
 
 go_binary(
     name = "cherrypicker",
+    embed = [":go_default_library"],
     importpath = "k8s.io/test-infra/experiment/cherrypicker",
-    library = ":go_default_library",
     visibility = ["//visibility:public"],
 )
 
@@ -43,8 +42,8 @@ filegroup(
 go_test(
     name = "go_default_test",
     srcs = ["server_test.go"],
+    embed = [":go_default_library"],
     importpath = "k8s.io/test-infra/experiment/cherrypicker",
-    library = ":go_default_library",
     deps = [
         "//prow/git/localgit:go_default_library",
         "//prow/github:go_default_library",

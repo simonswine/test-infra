@@ -19,6 +19,7 @@ package plugins
 import (
 	"fmt"
 	"io/ioutil"
+	"regexp"
 	"strings"
 	"sync"
 	"time"
@@ -31,12 +32,15 @@ import (
 	"k8s.io/test-infra/prow/git"
 	"k8s.io/test-infra/prow/github"
 	"k8s.io/test-infra/prow/kube"
+	"k8s.io/test-infra/prow/pluginhelp"
 	"k8s.io/test-infra/prow/repoowners"
 	"k8s.io/test-infra/prow/slack"
 )
 
+const defaultBlunderbussReviewerCount = 2
+
 var (
-	allPlugins                 = map[string]struct{}{}
+	pluginHelp                 = map[string]HelpProvider{}
 	genericCommentHandlers     = map[string]GenericCommentHandler{}
 	issueHandlers              = map[string]IssueHandler{}
 	issueCommentHandlers       = map[string]IssueCommentHandler{}
@@ -47,59 +51,65 @@ var (
 	statusEventHandlers        = map[string]StatusEventHandler{}
 )
 
+type HelpProvider func(config *Configuration, enabledRepos []string) (*pluginhelp.PluginHelp, error)
+
+func HelpProviders() map[string]HelpProvider {
+	return pluginHelp
+}
+
 type IssueHandler func(PluginClient, github.IssueEvent) error
 
-func RegisterIssueHandler(name string, fn IssueHandler) {
-	allPlugins[name] = struct{}{}
+func RegisterIssueHandler(name string, fn IssueHandler, help HelpProvider) {
+	pluginHelp[name] = help
 	issueHandlers[name] = fn
 }
 
 type IssueCommentHandler func(PluginClient, github.IssueCommentEvent) error
 
-func RegisterIssueCommentHandler(name string, fn IssueCommentHandler) {
-	allPlugins[name] = struct{}{}
+func RegisterIssueCommentHandler(name string, fn IssueCommentHandler, help HelpProvider) {
+	pluginHelp[name] = help
 	issueCommentHandlers[name] = fn
 }
 
 type PullRequestHandler func(PluginClient, github.PullRequestEvent) error
 
-func RegisterPullRequestHandler(name string, fn PullRequestHandler) {
-	allPlugins[name] = struct{}{}
+func RegisterPullRequestHandler(name string, fn PullRequestHandler, help HelpProvider) {
+	pluginHelp[name] = help
 	pullRequestHandlers[name] = fn
 }
 
 type StatusEventHandler func(PluginClient, github.StatusEvent) error
 
-func RegisterStatusEventHandler(name string, fn StatusEventHandler) {
-	allPlugins[name] = struct{}{}
+func RegisterStatusEventHandler(name string, fn StatusEventHandler, help HelpProvider) {
+	pluginHelp[name] = help
 	statusEventHandlers[name] = fn
 }
 
 type PushEventHandler func(PluginClient, github.PushEvent) error
 
-func RegisterPushEventHandler(name string, fn PushEventHandler) {
-	allPlugins[name] = struct{}{}
+func RegisterPushEventHandler(name string, fn PushEventHandler, help HelpProvider) {
+	pluginHelp[name] = help
 	pushEventHandlers[name] = fn
 }
 
 type ReviewEventHandler func(PluginClient, github.ReviewEvent) error
 
-func RegisterReviewEventHandler(name string, fn ReviewEventHandler) {
-	allPlugins[name] = struct{}{}
+func RegisterReviewEventHandler(name string, fn ReviewEventHandler, help HelpProvider) {
+	pluginHelp[name] = help
 	reviewEventHandlers[name] = fn
 }
 
 type ReviewCommentEventHandler func(PluginClient, github.ReviewCommentEvent) error
 
-func RegisterReviewCommentEventHandler(name string, fn ReviewCommentEventHandler) {
-	allPlugins[name] = struct{}{}
+func RegisterReviewCommentEventHandler(name string, fn ReviewCommentEventHandler, help HelpProvider) {
+	pluginHelp[name] = help
 	reviewCommentEventHandlers[name] = fn
 }
 
 type GenericCommentHandler func(PluginClient, github.GenericCommentEvent) error
 
-func RegisterGenericCommentHandler(name string, fn GenericCommentHandler) {
-	allPlugins[name] = struct{}{}
+func RegisterGenericCommentHandler(name string, fn GenericCommentHandler, help HelpProvider) {
+	pluginHelp[name] = help
 	genericCommentHandlers[name] = fn
 }
 
@@ -153,6 +163,9 @@ type Configuration struct {
 	ConfigUpdater   ConfigUpdater   `json:"config_updater,omitempty"`
 	Blockades       []Blockade      `json:"blockades,omitempty"`
 	Approve         []Approve       `json:"approve,omitempty"`
+	Blunderbuss     Blunderbuss     `json:"blunderbuss,omitempty"`
+	RequireSIG      RequireSIG      `json:"requiresig,omitempty"`
+	SigMention      SigMention      `json:"sigmention,omitempty"`
 }
 
 // ExternalPlugin holds configuration for registering an external
@@ -167,6 +180,12 @@ type ExternalPlugin struct {
 	// server to the external plugin. If no events are specified,
 	// everything is sent.
 	Events []string `json:"events,omitempty"`
+}
+
+type Blunderbuss struct {
+	// ReviewerCount is the number of reviewers to request reviews from.
+	// A value of 0 will default to requesting reviews from 2 reviewers.
+	ReviewerCount int `json:"request_count,omitempty"`
 }
 
 // Owners contains configuration related to handling OWNERS files.
@@ -196,6 +215,33 @@ func (pa *PluginAgent) MDYAMLEnabled(org, repo string) bool {
 	}
 	return false
 
+}
+
+// RequireSIG specifies configuration for the require-sig plugin.
+type RequireSIG struct {
+	// GroupListURL is the URL where a list of the available SIGs can be found.
+	GroupListURL string `json:"group_list_url,omitempty"`
+}
+
+// SigMention specifies configuration for the sigmention plugin.
+type SigMention struct {
+	// Regexp parses comments and should return matches to team mentions.
+	// These mentions enable labeling issues or PRs with sig/team labels.
+	// Furthermore, teams with the following suffixes will be mapped to
+	// kind/* labels:
+	//
+	// * @org/team-bugs             --maps to--> kind/bug
+	// * @org/team-feature-requests --maps to--> kind/feature
+	// * @org/team-api-reviews      --maps to--> kind/api-change
+	// * @org/team-proposals        --maps to--> kind/design
+	//
+	// Note that you need to make sure your regexp covers the above
+	// mentions if you want to use the extra labeling. Defaults to:
+	// (?m)@kubernetes/sig-([\w-]*)-(misc|test-failures|bugs|feature-requests|proposals|pr-reviews|api-reviews)
+	//
+	// Compiles into Re during config load.
+	Regexp string         `json:"regexp,omitempty"`
+	Re     *regexp.Regexp `json:"-"`
 }
 
 /*
@@ -251,6 +297,10 @@ type Trigger struct {
 	// TrustedOrg is the org whose members' PRs will be automatically built
 	// for PRs to the above repos. The default is the PR's org.
 	TrustedOrg string `json:"trusted_org,omitempty"`
+	// JoinOrgURL is a link that redirects users to a location where they
+	// should be able to read more about joining the organization in order
+	// to become trusted members. Defaults to the Github link of TrustedOrg.
+	JoinOrgURL string `json:"join_org_url,omitempty"`
 }
 
 type Heart struct {
@@ -329,6 +379,18 @@ func (c *Configuration) setDefaults() {
 			c.ExternalPlugins[repo][i].Endpoint = fmt.Sprintf("http://%s", p.Name)
 		}
 	}
+	if c.Blunderbuss.ReviewerCount == 0 {
+		c.Blunderbuss.ReviewerCount = defaultBlunderbussReviewerCount
+	}
+	for i, trigger := range c.Triggers {
+		if trigger.TrustedOrg == "" || trigger.JoinOrgURL != "" {
+			continue
+		}
+		c.Triggers[i].JoinOrgURL = fmt.Sprintf("https://github.com/orgs/%s/people", trigger.TrustedOrg)
+	}
+	if c.SigMention.Regexp == "" {
+		c.SigMention.Regexp = `(?m)@kubernetes/sig-([\w-]*)-(misc|test-failures|bugs|feature-requests|proposals|pr-reviews|api-reviews)`
+	}
 }
 
 // Load attempts to load config from the path. It returns an error if either
@@ -355,6 +417,10 @@ func (pa *PluginAgent) Load(path string) error {
 	if err := validateExternalPlugins(np.ExternalPlugins); err != nil {
 		return err
 	}
+	// regexp compilation should run after defaulting
+	if err := compileRegexps(np); err != nil {
+		return err
+	}
 
 	pa.Set(np)
 	return nil
@@ -372,7 +438,7 @@ func validatePlugins(plugins map[string][]string) error {
 	var errors []string
 	for _, configuration := range plugins {
 		for _, plugin := range configuration {
-			if _, ok := allPlugins[plugin]; !ok {
+			if _, ok := pluginHelp[plugin]; !ok {
 				errors = append(errors, fmt.Sprintf("unknown plugin: %s", plugin))
 			}
 		}
@@ -432,6 +498,15 @@ func validateExternalPlugins(pluginMap map[string][]ExternalPlugin) error {
 	if len(errors) > 0 {
 		return fmt.Errorf("invalid plugin configuration:\n\t%v", strings.Join(errors, "\n\t"))
 	}
+	return nil
+}
+
+func compileRegexps(pc *Configuration) error {
+	cRe, err := regexp.Compile(pc.SigMention.Regexp)
+	if err != nil {
+		return err
+	}
+	pc.SigMention.Re = cRe
 	return nil
 }
 
@@ -589,4 +664,73 @@ func (pa *PluginAgent) getPlugins(owner, repo string) []string {
 	plugins = append(plugins, pa.configuration.Plugins[fullName]...)
 
 	return plugins
+}
+
+func EventsForPlugin(name string) []string {
+	var events []string
+	if _, ok := issueHandlers[name]; ok {
+		events = append(events, "issue")
+	}
+	if _, ok := issueCommentHandlers[name]; ok {
+		events = append(events, "issue_comment")
+	}
+	if _, ok := pullRequestHandlers[name]; ok {
+		events = append(events, "pull_request")
+	}
+	if _, ok := pushEventHandlers[name]; ok {
+		events = append(events, "push")
+	}
+	if _, ok := reviewEventHandlers[name]; ok {
+		events = append(events, "pull_request_review")
+	}
+	if _, ok := reviewCommentEventHandlers[name]; ok {
+		events = append(events, "pull_request_review_comment")
+	}
+	if _, ok := statusEventHandlers[name]; ok {
+		events = append(events, "status")
+	}
+	if _, ok := genericCommentHandlers[name]; ok {
+		events = append(events, "GenericCommentEvent (any event for user text)")
+	}
+	return events
+}
+
+func (c *Configuration) EnabledReposForPlugin(plugin string) (orgs, repos []string) {
+	for repo, plugins := range c.Plugins {
+		found := false
+		for _, candidate := range plugins {
+			if candidate == plugin {
+				found = true
+				break
+			}
+		}
+		if found {
+			if strings.Contains(repo, "/") {
+				repos = append(repos, repo)
+			} else {
+				orgs = append(orgs, repo)
+			}
+		}
+	}
+	return
+}
+
+func (c *Configuration) EnabledReposForExternalPlugin(plugin string) (orgs, repos []string) {
+	for repo, plugins := range c.ExternalPlugins {
+		found := false
+		for _, candidate := range plugins {
+			if candidate.Name == plugin {
+				found = true
+				break
+			}
+		}
+		if found {
+			if strings.Contains(repo, "/") {
+				repos = append(repos, repo)
+			} else {
+				orgs = append(orgs, repo)
+			}
+		}
+	}
+	return
 }

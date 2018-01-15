@@ -25,10 +25,9 @@ TMP_GOPATH=$(mktemp -d)
   e26fc85d14a1d3dc25569831acc06919673c545a \
   "${TMP_GOPATH}"
 
-# The gazelle commit should match the rules_go commit in the WORKSPACE file.
 "${TESTINFRA_ROOT}/hack/go_install_from_commit.sh" \
-  github.com/bazelbuild/rules_go/go/tools/gazelle/gazelle \
-  c72631a220406c4fae276861ee286aaec82c5af2 \
+  github.com/bazelbuild/bazel-gazelle/cmd/gazelle \
+  0.8 \
   "${TMP_GOPATH}"
 
 touch "${TESTINFRA_ROOT}/vendor/BUILD"
@@ -36,7 +35,6 @@ touch "${TESTINFRA_ROOT}/vendor/BUILD"
 gazelle_diff=$("${TMP_GOPATH}/bin/gazelle" fix \
   -build_file_name=BUILD,BUILD.bazel \
   -external=vendored \
-  -proto=legacy \
   -mode=diff \
   -repo_root="${TESTINFRA_ROOT}")
 
@@ -45,9 +43,16 @@ kazel_diff=$("${TMP_GOPATH}/bin/kazel" \
   -print-diff \
   -root="${TESTINFRA_ROOT}")
 
-if [[ -n "${gazelle_diff}" || -n "${kazel_diff}" ]]; then
+# check if there are vendor/*_test.go
+# previously we used godeps which did this, but `dep` does not handle this
+# properly yet. some of these tests don't build well. see:
+# ref: https://github.com/kubernetes/test-infra/pull/5411
+vendor_tests=$(find ${TESTINFRA_ROOT}/vendor/ -name "*_test.go" | wc -l)
+
+if [[ -n "${gazelle_diff}" || -n "${kazel_diff}" || "${vendor_tests}" -ne "0" ]]; then
   echo "${gazelle_diff}"
   echo "${kazel_diff}"
+  echo "number of vendor/*_test.go: ${vendor_tests} (want: 0)"
   echo
   echo "Run ./hack/update-bazel.sh"
   exit 1

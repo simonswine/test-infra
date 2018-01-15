@@ -25,15 +25,18 @@ import (
 
 func TestNewKubernetesAnywhere(t *testing.T) {
 	cases := []struct {
-		name              string
-		phase2            string
-		kubeadmVersion    string
-		kubeadmUpgrade    string
-		kubeletCIVersion  string
-		kubeletVersion    string
-		kubernetesVersion string
-		cni               string
-		expectConfigLines []string
+		name                string
+		phase2              string
+		kubeadmVersion      string
+		kubeadmUpgrade      string
+		kubeletCIVersion    string
+		kubeletVersion      string
+		kubernetesVersion   string
+		cni                 string
+		expectConfigLines   []string
+		kubeproxyMode       string
+		osImage             string
+		KubeadmFeatureGates string
 	}{
 		{
 			name:   "kubeadm defaults",
@@ -137,6 +140,55 @@ func TestNewKubernetesAnywhere(t *testing.T) {
 				".phase3.cni=\"weave\"",
 			},
 		},
+		{
+			name:          "kubeadm with kube-proxy in ipvs mode",
+			phase2:        "kubeadm",
+			kubeproxyMode: "ipvs",
+
+			expectConfigLines: []string{
+				".phase2.provider=\"kubeadm\"",
+				".phase2.kubeadm.version=\"\"",
+				".phase2.kubeadm.master_upgrade.method=\"\"",
+				".phase2.kubernetes_version=\"\"",
+				".phase2.kubelet_version=\"\"",
+				".phase2.proxy_mode=\"ipvs\"",
+				".phase3.cni=\"weave\"",
+			},
+		},
+		{
+			name:   "kubeadm with default os_image",
+			phase2: "kubeadm",
+
+			expectConfigLines: []string{
+				".phase1.gce.os_image=\"ubuntu-1604-xenial-v20171212\"",
+				".phase2.provider=\"kubeadm\"",
+			},
+		},
+		{
+			name:    "kubeadm with specific os_image",
+			phase2:  "kubeadm",
+			osImage: "my-awesome-os-image",
+
+			expectConfigLines: []string{
+				".phase1.gce.os_image=\"my-awesome-os-image\"",
+				".phase2.provider=\"kubeadm\"",
+			},
+		},
+		{
+			name:                "kubeadm with SelfHosting feature enabled",
+			phase2:              "kubeadm",
+			KubeadmFeatureGates: "SelfHosting=true",
+
+			expectConfigLines: []string{
+				".phase2.provider=\"kubeadm\"",
+				".phase2.kubeadm.version=\"\"",
+				".phase2.kubeadm.master_upgrade.method=\"\"",
+				".phase2.kubernetes_version=\"\"",
+				".phase2.kubelet_version=\"\"",
+				".phase2.kubeadm.feature_gates=\"SelfHosting=true\"",
+				".phase3.cni=\"weave\"",
+			},
+		},
 	}
 
 	mockGSFiles := map[string]string{
@@ -172,6 +224,11 @@ func TestNewKubernetesAnywhere(t *testing.T) {
 		*kubernetesAnywhereKubeletCIVersion = tc.kubeletCIVersion
 		*kubernetesAnywhereUpgradeMethod = tc.kubeadmUpgrade
 		*kubernetesAnywhereCNI = tc.cni
+		*kubernetesAnywhereProxyMode = tc.kubeproxyMode
+		if tc.osImage != "" {
+			*kubernetesAnywhereOSImage = tc.osImage
+		}
+		*kubernetesAnywhereKubeadmFeatureGates = tc.KubeadmFeatureGates
 
 		_, err = newKubernetesAnywhere("fake-project", "fake-zone")
 		if err != nil {

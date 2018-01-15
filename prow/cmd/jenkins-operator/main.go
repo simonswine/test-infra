@@ -19,13 +19,17 @@ package main
 import (
 	"bytes"
 	"flag"
+	"fmt"
 	"io/ioutil"
+	"net/http"
 	"net/url"
 	"os"
 	"os/signal"
 	"syscall"
 	"time"
 
+	"github.com/NYTimes/gziphandler"
+	"github.com/prometheus/client_golang/prometheus/promhttp"
 	"github.com/sirupsen/logrus"
 
 	"k8s.io/test-infra/prow/config"
@@ -33,6 +37,7 @@ import (
 	"k8s.io/test-infra/prow/jenkins"
 	"k8s.io/test-infra/prow/kube"
 	"k8s.io/test-infra/prow/kube/labels"
+	m "k8s.io/test-infra/prow/metrics"
 )
 
 var (
@@ -89,7 +94,8 @@ func main() {
 	} else {
 		logger.Fatal("An auth token for basic or bearer token auth must be supplied.")
 	}
-	jc := jenkins.NewClient(*jenkinsURL, ac, nil)
+	metrics := jenkins.NewMetrics()
+	jc := jenkins.NewClient(*jenkinsURL, ac, logger, metrics.ClientMetrics)
 
 	oauthSecretRaw, err := ioutil.ReadFile(*githubTokenFile)
 	if err != nil {
@@ -109,11 +115,19 @@ func main() {
 		ghc = github.NewClient(oauthSecret, *githubEndpoint)
 	}
 
-	c := jenkins.NewController(kc, jc, ghc, configAgent, *selector)
+	c := jenkins.NewController(kc, jc, ghc, logger, configAgent, *selector)
 
-	// Serve Jenkins logs from here and proxy deck to use this endpoint
-	// instead of baking agent-specific logic in deck.
-	go serveLogs(jc)
+	// Push metrics to the configured prometheus pushgateway endpoint.
+	pushGateway := configAgent.Config().PushGateway
+	if pushGateway.Endpoint != "" {
+		go m.PushMetrics("jenkins-operator", pushGateway.Endpoint, pushGateway.Interval)
+	}
+	// Serve Jenkins logs here and proxy deck to use this endpoint
+	// instead of baking agent-specific logic in deck. This func also
+	// serves prometheus metrics.
+	go serve(jc)
+	// gather metrics for the jobs handled by the jenkins controller.
+	go gather(c, logger)
 
 	tick := time.Tick(30 * time.Second)
 	sig := make(chan os.Signal, 1)
@@ -126,9 +140,11 @@ func main() {
 			if err := c.Sync(); err != nil {
 				logger.WithError(err).Error("Error syncing.")
 			}
-			logger.Infof("Sync time: %v", time.Since(start))
+			duration := time.Since(start)
+			logger.WithField("duration", fmt.Sprintf("%v", duration)).Info("Synced")
+			metrics.ResyncPeriod.Observe(duration.Seconds())
 		case <-sig:
-			logger.Infof("Jenkins operator is shutting down...")
+			logger.Info("Jenkins operator is shutting down...")
 			return
 		}
 	}
@@ -140,4 +156,33 @@ func loadToken(file string) (string, error) {
 		return "", err
 	}
 	return string(bytes.TrimSpace(raw)), nil
+}
+
+// serve starts a http server and serves Jenkins logs
+// and prometheus metrics. Meant to be called inside
+// a goroutine.
+func serve(jc *jenkins.Client) {
+	http.Handle("/", gziphandler.GzipHandler(handleLog(jc)))
+	http.Handle("/metrics", promhttp.Handler())
+	logrus.WithError(http.ListenAndServe(":8080", nil)).Fatal("ListenAndServe returned.")
+}
+
+// gather metrics from the jenkins controller.
+// Meant to be called inside a goroutine.
+func gather(c *jenkins.Controller, logger *logrus.Entry) {
+	tick := time.Tick(30 * time.Second)
+	sig := make(chan os.Signal, 1)
+	signal.Notify(sig, os.Interrupt, syscall.SIGTERM)
+
+	for {
+		select {
+		case <-tick:
+			start := time.Now()
+			c.SyncMetrics()
+			logger.WithField("metrics-duration", fmt.Sprintf("%v", time.Since(start))).Debug("Metrics synced")
+		case <-sig:
+			logger.Debug("Jenkins operator gatherer is shutting down...")
+			return
+		}
+	}
 }

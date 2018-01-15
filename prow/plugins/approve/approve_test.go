@@ -26,7 +26,7 @@ import (
 
 	"github.com/ghodss/yaml"
 
-	"k8s.io/kubernetes/pkg/util/sets"
+	"k8s.io/apimachinery/pkg/util/sets"
 	"k8s.io/test-infra/prow/github"
 	"k8s.io/test-infra/prow/github/fakegithub"
 	"k8s.io/test-infra/prow/plugins"
@@ -174,7 +174,7 @@ func TestHandleGenericComment(t *testing.T) {
 
 This pull-request has been approved by: *<a href="#" title="Author self-approved">cjwagner</a>*
 
-The full list of commands accepted by this bot can be found [here](https://github.com/kubernetes/test-infra/blob/master/commands.md).
+The full list of commands accepted by this bot can be found [here](https://go.k8s.io/bot-commands).
 
 <details >
 Needs approval from an approver in each of these OWNERS Files:
@@ -204,7 +204,7 @@ We suggest the following additional approver: **cjwagner**
 
 Assign the PR to them by writing ` + "`/assign @cjwagner`" + ` in a comment when ready.
 
-The full list of commands accepted by this bot can be found [here](https://github.com/kubernetes/test-infra/blob/master/commands.md).
+The full list of commands accepted by this bot can be found [here](https://go.k8s.io/bot-commands).
 
 <details open>
 Needs approval from an approver in each of these OWNERS Files:
@@ -233,7 +233,7 @@ This pull-request has been approved by: *<a href="" title="Approved">Alice</a>*
 
 Associated issue requirement bypassed by: *<a href="" title="Approved">Alice</a>*
 
-The full list of commands accepted by this bot can be found [here](https://github.com/kubernetes/test-infra/blob/master/commands.md).
+The full list of commands accepted by this bot can be found [here](https://go.k8s.io/bot-commands).
 
 <details >
 Needs approval from an approver in each of these OWNERS Files:
@@ -261,9 +261,9 @@ You can cancel your approval by writing ` + "`/approve cancel`" + ` in a comment
 
 This pull-request has been approved by: *<a href="" title="Approved">Alice</a>*
 
-Associated issue: *42*
+Associated issue: *#42*
 
-The full list of commands accepted by this bot can be found [here](https://github.com/kubernetes/test-infra/blob/master/commands.md).
+The full list of commands accepted by this bot can be found [here](https://go.k8s.io/bot-commands).
 
 <details >
 Needs approval from an approver in each of these OWNERS Files:
@@ -303,7 +303,7 @@ This pull-request has been approved by: *<a href="" title="Approved">ALIcE</a>*,
 
 *No associated issue*. Update pull-request body to add a reference to an issue, or get approval with `+"`/approve no-issue`"+`
 
-The full list of commands accepted by this bot can be found [here](https://github.com/kubernetes/test-infra/blob/master/commands.md).
+The full list of commands accepted by this bot can be found [here](https://go.k8s.io/bot-commands).
 
 <details >
 Needs approval from an approver in each of these OWNERS Files:
@@ -347,7 +347,7 @@ Assign the PR to them by writing ` + "`/assign @alice`" + ` in a comment when re
 
 *No associated issue*. Update pull-request body to add a reference to an issue, or get approval with ` + "`/approve no-issue`" + `
 
-The full list of commands accepted by this bot can be found [here](https://github.com/kubernetes/test-infra/blob/master/commands.md).
+The full list of commands accepted by this bot can be found [here](https://go.k8s.io/bot-commands).
 
 <details open>
 Needs approval from an approver in each of these OWNERS Files:
@@ -392,6 +392,22 @@ You can cancel your approval by writing ` + "`/approve cancel`" + ` in a comment
 			expectComment: true,
 		},
 		{
+			name:     "cancel implicit self approve (with lgtm-after-commit message)",
+			prBody:   "Changes the thing.\n fixes #42",
+			hasLabel: true,
+			files:    []string{"c/c.go"},
+			comments: []github.IssueComment{
+				newTestComment("k8s-ci-robot", "[APPROVALNOTIFIER] This PR is **APPROVED**\n\nblah"),
+				newTestCommentTime(time.Now(), "CJWagner", "/lgtm cancel //PR changed after LGTM, removing LGTM."),
+			},
+			selfApprove: true,
+			needsIssue:  true,
+
+			expectDelete:  true,
+			expectToggle:  true,
+			expectComment: true,
+		},
+		{
 			name:     "up to date, poked by pr sync",
 			prBody:   "Finally fixes kubernetes/kubernetes#1\n",
 			hasLabel: true,
@@ -402,9 +418,9 @@ You can cancel your approval by writing ` + "`/approve cancel`" + ` in a comment
 
 This pull-request has been approved by: *<a href="" title="LGTM">alice</a>*
 
-Associated issue: *1*
+Associated issue: *#1*
 
-The full list of commands accepted by this bot can be found [here](https://github.com/kubernetes/test-infra/blob/master/commands.md).
+The full list of commands accepted by this bot can be found [here](https://go.k8s.io/bot-commands).
 
 <details >
 Needs approval from an approver in each of these OWNERS Files:
@@ -459,7 +475,7 @@ Approval requirements bypassed by manually added approval.
 
 This pull-request has been approved by: 
 
-The full list of commands accepted by this bot can be found [here](https://github.com/kubernetes/test-infra/blob/master/commands.md).
+The full list of commands accepted by this bot can be found [here](https://go.k8s.io/bot-commands).
 
 <details >
 Needs approval from an approver in each of these OWNERS Files:

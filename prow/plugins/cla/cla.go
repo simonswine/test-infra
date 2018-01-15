@@ -23,6 +23,7 @@ import (
 	"github.com/sirupsen/logrus"
 
 	"k8s.io/test-infra/prow/github"
+	"k8s.io/test-infra/prow/pluginhelp"
 	"k8s.io/test-infra/prow/plugins"
 )
 
@@ -33,7 +34,7 @@ const (
 	claNoLabel             = "cncf-cla: no"
 	cncfclaNotFoundMessage = `Thanks for your pull request. Before we can look at your pull request, you'll need to sign a Contributor License Agreement (CLA).
 
-:memo: **Please follow instructions at <https://github.com/kubernetes/kubernetes/wiki/CLA-FAQ> to sign the CLA.**
+:memo: **Please follow instructions at <https://git.k8s.io/community/CLA.md#the-contributor-license-agreement> to sign the CLA.**
 
 It may take a couple minutes for the CLA signature to be fully registered; after that, please reply here with a new comment and we'll verify.  Thanks.
 
@@ -54,7 +55,16 @@ It may take a couple minutes for the CLA signature to be fully registered; after
 )
 
 func init() {
-	plugins.RegisterStatusEventHandler(pluginName, handleStatusEvent)
+	plugins.RegisterStatusEventHandler(pluginName, handleStatusEvent, helpProvider)
+}
+
+func helpProvider(config *plugins.Configuration, enabledRepos []string) (*pluginhelp.PluginHelp, error) {
+	// The {WhoCanUse, Usage, Examples, Config} fields are omitted because this plugin cannot be
+	// manually triggered and is not configurable.
+	return &pluginhelp.PluginHelp{
+			Description: "The cla plugin manages the application and removal of the 'cncf-cla' prefixed labels on pull requests as a reaction to the " + claContextName + " github status context. It is also responsible for warning unauthorized PR authors that they need to sign the CNCF CLA before their PR will be merged.",
+		},
+		nil
 }
 
 type gitHubClient interface {

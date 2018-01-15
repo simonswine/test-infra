@@ -30,22 +30,23 @@ const (
 	needsOkToTest = "needs-ok-to-test"
 )
 
-func handlePR(c client, trustedOrg string, pr github.PullRequestEvent) error {
+func handlePR(c client, trustedOrg, joinOrgURL string, pr github.PullRequestEvent) error {
 	author := pr.PullRequest.User.Login
 	switch pr.Action {
 	case github.PullRequestActionOpened:
 		// When a PR is opened, if the author is in the org then build it.
 		// Otherwise, ask for "/ok-to-test". There's no need to look for previous
 		// "/ok-to-test" comments since the PR was just opened!
-		member, err := c.GitHubClient.IsMember(trustedOrg, author)
+		member, err := isUserTrusted(c.GitHubClient, author, trustedOrg, pr.Repo.Owner.Login)
 		if err != nil {
 			return fmt.Errorf("could not check membership: %s", err)
-		} else if member {
+		}
+		if member {
 			c.Logger.Info("Starting all jobs for new PR.")
-			return buildAll(c, pr.PullRequest)
+			return buildAll(c, pr.PullRequest, pr.GUID)
 		} else {
 			c.Logger.Infof("Welcome message to PR author %q.", author)
-			if err := welcomeMsg(c.GitHubClient, pr.PullRequest, trustedOrg); err != nil {
+			if err := welcomeMsg(c.GitHubClient, pr.PullRequest, trustedOrg, joinOrgURL); err != nil {
 				return fmt.Errorf("could not welcome non-org member %q: %v", author, err)
 			}
 		}
@@ -67,7 +68,7 @@ func handlePR(c client, trustedOrg string, pr github.PullRequestEvent) error {
 			// Just try to remove "needs-ok-to-test" label if existing, we don't care about the result.
 			c.GitHubClient.RemoveLabel(trustedOrg, pr.PullRequest.Base.Repo.Name, pr.PullRequest.Number, needsOkToTest)
 			c.Logger.Info("Starting all jobs for updated PR.")
-			return buildAll(c, pr.PullRequest)
+			return buildAll(c, pr.PullRequest, pr.GUID)
 		}
 	case github.PullRequestActionSynchronize:
 		// When a PR is updated, check that the user is in the org or that an org
@@ -86,7 +87,7 @@ func handlePR(c client, trustedOrg string, pr github.PullRequestEvent) error {
 				c.Logger.Warnf("Failed to clear stale comments: %v.", err)
 			}
 			c.Logger.Info("Starting all jobs for updated PR.")
-			return buildAll(c, pr.PullRequest)
+			return buildAll(c, pr.PullRequest, pr.GUID)
 		}
 	case github.PullRequestActionLabeled:
 		comments, err := c.GitHubClient.ListIssueComments(pr.PullRequest.Base.Repo.Owner.Login, pr.PullRequest.Base.Repo.Name, pr.PullRequest.Number)
@@ -100,29 +101,33 @@ func handlePR(c client, trustedOrg string, pr github.PullRequestEvent) error {
 				return fmt.Errorf("could not validate PR: %s", err)
 			} else if !trusted {
 				c.Logger.Info("Starting all jobs for untrusted PR with LGTM.")
-				return buildAll(c, pr.PullRequest)
+				return buildAll(c, pr.PullRequest, pr.GUID)
 			}
 		}
 	}
 	return nil
 }
 
-func welcomeMsg(ghc githubClient, pr github.PullRequest, trustedOrg string) error {
+func welcomeMsg(ghc githubClient, pr github.PullRequest, trustedOrg, joinOrgURL string) error {
 	commentTemplate := `Hi @%s. Thanks for your PR.
 
-I'm waiting for a [%s](https://github.com/orgs/%s/people) member to verify that this patch is reasonable to test. If it is, they should reply with ` + "`/ok-to-test`" + ` on its own line. Until that is done, I will not automatically test new commits in this PR, but the usual testing commands by org members will still work. Regular contributors should join the org to skip this step.
+I'm waiting for a [%s](https://github.com/orgs/%s/people) %smember to verify that this patch is reasonable to test. If it is, they should reply with ` + "`/ok-to-test`" + ` on its own line. Until that is done, I will not automatically test new commits in this PR, but the usual testing commands by org members will still work. Regular contributors should [join the org](%s) to skip this step.
 
-I understand the commands that are listed [here](https://github.com/kubernetes/test-infra/blob/master/commands.md).
+I understand the commands that are listed [here](https://go.k8s.io/bot-commands).
 
 <details>
 
 %s
 </details>
 `
-	comment := fmt.Sprintf(commentTemplate, pr.User.Login, trustedOrg, trustedOrg, plugins.AboutThisBotWithoutCommands)
-
 	owner := pr.Base.Repo.Owner.Login
 	name := pr.Base.Repo.Name
+	var more string
+	if owner != trustedOrg {
+		more = fmt.Sprintf("or [%s](https://github.com/orgs/%s/people) ", owner, owner)
+	}
+	comment := fmt.Sprintf(commentTemplate, pr.User.Login, trustedOrg, trustedOrg, more, joinOrgURL, plugins.AboutThisBotWithoutCommands)
+
 	err1 := ghc.AddLabel(owner, name, pr.Number, needsOkToTest)
 	err2 := ghc.CreateComment(owner, name, pr.Number, comment)
 	if err1 != nil || err2 != nil {
@@ -136,11 +141,13 @@ I understand the commands that are listed [here](https://github.com/kubernetes/t
 // comments by org members.
 func trustedPullRequest(ghc githubClient, pr github.PullRequest, trustedOrg string, comments []github.IssueComment) (bool, error) {
 	author := pr.User.Login
+	org := pr.Base.Repo.Owner.Login
 	// First check if the author is a member of the org.
-	orgMember, err := ghc.IsMember(trustedOrg, author)
+	orgMember, err := isUserTrusted(ghc, author, trustedOrg, org)
 	if err != nil {
 		return false, err
-	} else if orgMember {
+	}
+	if orgMember {
 		return true, nil
 	}
 	botName, err := ghc.BotName()
@@ -155,17 +162,18 @@ func trustedPullRequest(ghc githubClient, pr github.PullRequest, trustedOrg stri
 			continue
 		}
 		// Ensure that the commenter is in the org.
-		commentAuthorMember, err := ghc.IsMember(trustedOrg, commentAuthor)
+		commentAuthorMember, err := isUserTrusted(ghc, commentAuthor, trustedOrg, org)
 		if err != nil {
 			return false, err
-		} else if commentAuthorMember {
+		}
+		if commentAuthorMember {
 			return true, nil
 		}
 	}
 	return false, nil
 }
 
-func buildAll(c client, pr github.PullRequest) error {
+func buildAll(c client, pr github.PullRequest, eventGUID string) error {
 	org := pr.Base.Repo.Owner.Login
 	repo := pr.Base.Repo.Name
 	var ref string
@@ -221,7 +229,14 @@ func buildAll(c client, pr github.PullRequest) error {
 				},
 			},
 		}
-		if _, err := c.KubeClient.CreateProwJob(pjutil.NewProwJob(pjutil.PresubmitSpec(job, kr), job.Labels)); err != nil {
+		labels := make(map[string]string)
+		for k, v := range job.Labels {
+			labels[k] = v
+		}
+		labels[github.EventGUID] = eventGUID
+		pj := pjutil.NewProwJob(pjutil.PresubmitSpec(job, kr), labels)
+		c.Logger.WithFields(pjutil.ProwJobFields(&pj)).Info("Creating a new prowjob.")
+		if _, err := c.KubeClient.CreateProwJob(pj); err != nil {
 			return err
 		}
 	}
@@ -235,7 +250,11 @@ func clearStaleComments(gc githubClient, trustedOrg string, pr github.PullReques
 		return err
 	}
 
-	waitingComment := fmt.Sprintf("I'm waiting for a [%s](https://github.com/orgs/%s/people) member to verify that this patch is reasonable to test.", trustedOrg, trustedOrg)
+	var more string
+	if org := pr.Base.Repo.Owner.Login; org != trustedOrg {
+		more = fmt.Sprintf("or [%s](https://github.com/orgs/%s/people) ", org, org)
+	}
+	waitingComment := fmt.Sprintf("I'm waiting for a [%s](https://github.com/orgs/%s/people) %smember to verify that this patch is reasonable to test.", trustedOrg, trustedOrg, more)
 
 	return gc.DeleteStaleComments(
 		trustedOrg,

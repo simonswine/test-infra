@@ -72,3 +72,36 @@ func TestGetLog(t *testing.T) {
 		t.Fatalf("Failed to get log: %v", err)
 	}
 }
+
+func TestProwJobs(t *testing.T) {
+	kc := fkc{
+		kube.ProwJob{
+			Spec: kube.ProwJobSpec{
+				Agent: kube.KubernetesAgent,
+				Job:   "job",
+				Refs: kube.Refs{
+					Org:  "kubernetes",
+					Repo: "test-infra",
+				},
+			},
+			Status: kube.ProwJobStatus{
+				PodName: "wowowow",
+				BuildID: "123",
+			},
+		},
+	}
+	ja := &JobAgent{
+		kc:  kc,
+		pkc: &fpkc{},
+	}
+	if err := ja.update(); err != nil {
+		t.Fatalf("Updating: %v", err)
+	}
+	pjs := ja.ProwJobs()
+	if expect, got := 1, len(pjs); expect != got {
+		t.Fatalf("Expected %d prowjobs, but got %d.", expect, got)
+	}
+	if expect, got := "kubernetes", pjs[0].Spec.Refs.Org; expect != got {
+		t.Errorf("Expected prowjob to have org %q, but got %q.", expect, got)
+	}
+}

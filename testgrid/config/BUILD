@@ -1,3 +1,9 @@
+# gazelle:proto legacy
+# Gazelle gets confused by the config.proto file here, since it is in the same directory
+# but a different package from main.go.
+# Also, we can't even use the default proto rules, since we apply nonstandard tags to the
+# generated code to support YAML.
+
 package(default_visibility = ["//visibility:public"])
 
 load(
@@ -21,8 +27,8 @@ genrule(
 
 go_binary(
     name = "config",
+    embed = [":go_default_library"],
     importpath = "k8s.io/test-infra/testgrid/config",
-    library = ":go_default_library",
 )
 
 go_test(
@@ -32,8 +38,8 @@ go_test(
         "config.yaml",
         "//mungegithub:submit-queue/deployment/kubernetes/configmap.yaml",
     ],
+    embed = [":go_default_library"],
     importpath = "k8s.io/test-infra/testgrid/config",
-    library = ":go_default_library",
     deps = [
         "//testgrid/config/yaml2proto:go_default_library",
         "//vendor/gopkg.in/yaml.v2:go_default_library",

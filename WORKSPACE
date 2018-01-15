@@ -6,27 +6,29 @@ http_archive(
 )
 
 load("@io_kubernetes_build//defs:bazel_version.bzl", "check_version")
+
 # Ensure minimum supported bazel version
-check_version("0.6.0")
+check_version("0.8.0")
 
 git_repository(
     name = "io_bazel_rules_go",
-    commit = "c72631a220406c4fae276861ee286aaec82c5af2",
     remote = "https://github.com/bazelbuild/rules_go.git",
+    tag = "0.8.1",
 )
 
 load("@io_bazel_rules_go//go:def.bzl", "go_rules_dependencies", "go_register_toolchains")
 
 go_rules_dependencies()
+
 go_register_toolchains(
-    go_version = "1.9.1",
+    go_version = "1.9.2",
 )
 
 http_archive(
     name = "io_bazel_rules_docker",
-    sha256 = "076a8204c93071a130952c1ba4398d4085f60289bc9a12b530078d100608b1eb",
-    strip_prefix = "rules_docker-cdd259b3ba67fd4ef814c88070a2ebc7bec28dc5",
-    urls = ["https://github.com/bazelbuild/rules_docker/archive/cdd259b3ba67fd4ef814c88070a2ebc7bec28dc5.tar.gz"],
+    sha256 = "c919051945ab388c8440ea92d7ceb429fdbbf0a53639e6e0159b231881ceed02",
+    strip_prefix = "rules_docker-3caf72f166f8b6b0e529442477a74871ad4d35e9",
+    urls = ["https://github.com/bazelbuild/rules_docker/archive/3caf72f166f8b6b0e529442477a74871ad4d35e9.tar.gz"],
 )
 
 load("@io_bazel_rules_docker//docker:docker.bzl", "docker_repositories", "docker_pull")
@@ -35,15 +37,39 @@ docker_repositories()
 
 docker_pull(
     name = "distroless-base",
-    digest = "sha256:d19b95495f226aa64cd63a95863aca4da123bde22410a273e68e091113222e4f",  # latest
+    # latest circa 2017/11/29
+    digest = "sha256:bef8d030c7f36dfb73a8c76137616faeea73ac5a8495d535f27c911d0db77af3",
     registry = "gcr.io",
     repository = "distroless/base",
 )
 
+load(
+    "@io_bazel_rules_docker//go:image.bzl",
+    _go_repositories = "repositories",
+)
+
+_go_repositories()
+
+docker_pull(
+    name = "alpine-base",
+    # 0.1 as of 2017/11/29
+    digest = "sha256:317d39ece9dd09992fa81236964be3f3919b940f42e3143379dd66e4af930f3a",
+    registry = "gcr.io",
+    repository = "k8s-prow/alpine",
+)
+
+docker_pull(
+    name = "git-base",
+    # 0.1 as of 2017/11/29
+    digest = "sha256:92423bd3b24b0274198bb90c00e91b70d81c32e1d6bd26af30c00ca9f5faeb74",
+    registry = "gcr.io",
+    repository = "k8s-prow/git",
+)
+
 git_repository(
     name = "org_dropbox_rules_node",
-    remote = "https://github.com/dropbox/rules_node.git",
     commit = "4fe6494f3f8d1a272d47d32ecc66698f6c43ed09",
+    remote = "https://github.com/dropbox/rules_node.git",
 )
 
 load("@org_dropbox_rules_node//node:defs.bzl", "node_repositories")

@@ -33,7 +33,14 @@ func handlePE(c client, pe github.PushEvent) error {
 			BaseRef: pe.Branch(),
 			BaseSHA: pe.After,
 		}
-		if _, err := c.KubeClient.CreateProwJob(pjutil.NewProwJob(pjutil.PostsubmitSpec(j, kr), j.Labels)); err != nil {
+		labels := make(map[string]string)
+		for k, v := range j.Labels {
+			labels[k] = v
+		}
+		labels[github.EventGUID] = pe.GUID
+		pj := pjutil.NewProwJob(pjutil.PostsubmitSpec(j, kr), labels)
+		c.Logger.WithFields(pjutil.ProwJobFields(&pj)).Info("Creating a new prowjob.")
+		if _, err := c.KubeClient.CreateProwJob(pj); err != nil {
 			return err
 		}
 	}

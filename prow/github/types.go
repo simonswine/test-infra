@@ -21,6 +21,21 @@ import (
 	"time"
 )
 
+const (
+	// EventGUID is sent by Github in a header of every webhook request.
+	// Used as a log field across prow.
+	EventGUID = "event-GUID"
+	// PrLogField is the number of a PR.
+	// Used as a log field across prow.
+	PrLogField = "pr"
+	// OrgLogField is the organization of a PR.
+	// Used as a log field across prow.
+	OrgLogField = "org"
+	// RepoLogField is the repository of a PR.
+	// Used as a log field across prow.
+	RepoLogField = "repo"
+)
+
 // These are possible State entries for a Status.
 const (
 	StatusPending = "pending"
@@ -38,6 +53,18 @@ const (
 	ReactionHeart                     = "heart"
 	ReactionHooray                    = "hooray"
 	stateCannotBeChangedMessagePrefix = "state cannot be changed."
+)
+
+// PullRequestMergeType enumerates the types of merges the GitHub API can
+// perform
+// https://developer.github.com/v3/pulls/#merge-a-pull-request-merge-button
+type PullRequestMergeType string
+
+// Possible types of merges for the GitHub merge API
+const (
+	MergeMerge  PullRequestMergeType = "merge"
+	MergeRebase PullRequestMergeType = "rebase"
+	MergeSquash PullRequestMergeType = "squash"
 )
 
 // ClientError represents https://developer.github.com/v3/#client-errors
@@ -106,6 +133,9 @@ type PullRequestEvent struct {
 	Repo        Repo                   `json:"repository"`
 	Label       Label                  `json:"label"`
 	Sender      User                   `json:"sender"`
+
+	// GUID is included in the header of the request received by Github.
+	GUID string
 }
 
 // PullRequest contains information about a PullRequest.
@@ -128,6 +158,12 @@ type PullRequest struct {
 	// If Merged is false, MergeSHA is a commit SHA that github created to test if
 	// the PR can be merged automatically.
 	MergeSHA *string `json:"merge_commit_sha"`
+	// ref https://developer.github.com/v3/pulls/#response-1
+	// The value of the mergeable attribute can be true, false, or null. If the value
+	// is null, this means that the mergeability hasn't been computed yet, and a
+	// background job was started to compute it. When the job is complete, the response
+	// will include a non-null value for the mergeable attribute.
+	Mergable *bool `json:"mergeable,omitempty"`
 }
 
 // PullRequestBranch contains information about a particular branch in a PR.
@@ -174,6 +210,31 @@ type Repo struct {
 	Fork     bool   `json:"fork"`
 }
 
+type Branch struct {
+	Name      string `json:"name"`
+	Protected bool   `json:"protected"`
+}
+
+// https://developer.github.com/v3/repos/branches/#update-branch-protection
+type BranchProtectionRequest struct {
+	RequiredStatusChecks       RequiredStatusChecks        `json:"required_status_checks"`
+	EnforceAdmins              bool                        `json:"enforce_admins"`
+	RequiredPullRequestReviews *RequiredPullRequestReviews `json:"required_pull_request_reviews"`
+	Restrictions               Restrictions                `json:"restrictions"`
+}
+
+type RequiredStatusChecks struct {
+	Strict   bool     `json:"strict"`
+	Contexts []string `json:"contexts"`
+}
+
+type RequiredPullRequestReviews struct{}
+
+type Restrictions struct {
+	Users []string `json:"users"`
+	Teams []string `json:"teams"`
+}
+
 // IssueEventAction enumerates the triggers for this
 // webhook payload type. See also:
 // https://developer.github.com/v3/activity/events/types/#issuesevent
@@ -197,6 +258,9 @@ type IssueEvent struct {
 	Action IssueEventAction `json:"action"`
 	Issue  Issue            `json:"issue"`
 	Repo   Repo             `json:"repository"`
+
+	// GUID is included in the header of the request received by Github.
+	GUID string
 }
 
 // ListedIssueEvent represents an issue event from the events API (not from a webhook payload).
@@ -224,6 +288,9 @@ type IssueCommentEvent struct {
 	Issue   Issue                   `json:"issue"`
 	Comment IssueComment            `json:"comment"`
 	Repo    Repo                    `json:"repository"`
+
+	// GUID is included in the header of the request received by Github.
+	GUID string
 }
 
 type Issue struct {
@@ -287,6 +354,9 @@ type StatusEvent struct {
 	Context     string `json:"context,omitempty"`
 	Sender      User   `json:"sender,omitempty"`
 	Repo        Repo   `json:"repository,omitempty"`
+
+	// GUID is included in the header of the request received by Github.
+	GUID string
 }
 
 // IssuesSearchResult represents the result of an issues search.
@@ -306,6 +376,9 @@ type PushEvent struct {
 	// Sender contains more information that Pusher about the user.
 	Sender User `json:"sender"`
 	Repo   Repo `json:"repository"`
+
+	// GUID is included in the header of the request received by Github.
+	GUID string
 }
 
 func (pe PushEvent) Branch() string {
@@ -338,6 +411,9 @@ type ReviewEvent struct {
 	PullRequest PullRequest       `json:"pull_request"`
 	Repo        Repo              `json:"repository"`
 	Review      Review            `json:"review"`
+
+	// GUID is included in the header of the request received by Github.
+	GUID string
 }
 
 // Review describes a Pull Request review.
@@ -367,6 +443,9 @@ type ReviewCommentEvent struct {
 	PullRequest PullRequest              `json:"pull_request"`
 	Repo        Repo                     `json:"repository"`
 	Comment     ReviewComment            `json:"comment"`
+
+	// GUID is included in the header of the request received by Github.
+	GUID string
 }
 
 // ReviewComment describes a Pull Request review.

@@ -1,5 +1,6 @@
 package(default_visibility = ["//visibility:public"])
 
+load("@io_bazel_rules_docker//go:image.bzl", "go_image")
 load(
     "@io_bazel_rules_go//go:def.bzl",
     "go_binary",
@@ -7,13 +8,25 @@ load(
     "go_test",
 )
 
+go_image(
+    name = "image",
+    base = "@git-base//image",
+    data = [
+        "//prow:configs",
+    ],
+    embed = [":go_default_library"],
+    importpath = "k8s.io/test-infra/prow/cmd/hook",
+    pure = "on",
+)
+
 go_binary(
     name = "hook",
     data = [
         "//prow:configs",
     ],
+    embed = [":go_default_library"],
     importpath = "k8s.io/test-infra/prow/cmd/hook",
-    library = ":go_default_library",
+    pure = "on",
 )
 
 go_test(
@@ -22,8 +35,8 @@ go_test(
     data = [
         "//prow:configs",
     ],
+    embed = [":go_default_library"],
     importpath = "k8s.io/test-infra/prow/cmd/hook",
-    library = ":go_default_library",
     deps = ["//prow/plugins:go_default_library"],
 )
 
@@ -38,6 +51,7 @@ go_library(
         "//prow/hook:go_default_library",
         "//prow/kube:go_default_library",
         "//prow/metrics:go_default_library",
+        "//prow/pluginhelp/hook:go_default_library",
         "//prow/plugins:go_default_library",
         "//prow/repoowners:go_default_library",
         "//prow/slack:go_default_library",

@@ -63,7 +63,6 @@ class JobTest(unittest.TestCase):
         'jenkins/job-configs/bootstrap-maintenance.yaml' : 'suffix',
         'jenkins/job-configs/kubernetes-jenkins-pull/bootstrap-pull-json.yaml' : 'jsonsuffix',
         'jenkins/job-configs/kubernetes-jenkins-pull/bootstrap-security-pull.yaml' : 'suffix',
-        'jenkins/job-configs/kubernetes-jenkins/bootstrap-ci.yaml' : 'suffix',
         'jenkins/job-configs/kubernetes-jenkins/bootstrap-ci-commit.yaml' : 'commit-suffix',
         'jenkins/job-configs/kubernetes-jenkins/bootstrap-ci-repo.yaml' : 'repo-suffix',
         'jenkins/job-configs/kubernetes-jenkins/bootstrap-ci-soak.yaml' : 'soak-suffix',
@@ -170,21 +169,6 @@ class JobTest(unittest.TestCase):
                 self.assertEquals(job[attr], job2[attr])
 
 
-    def test_bootstrap_ci_yaml(self):
-        def check(job, name):
-            job_name = 'ci-%s' % name
-            self.assertIn('frequency', job)
-            self.assertIn('trigger-job', job)
-            self.assertNotIn('branch', job)
-            self.assertNotIn('json', job)
-            self.assertGreater(job['timeout'], 0, job_name)
-            self.assertGreaterEqual(job['jenkins-timeout'], job['timeout']+100, job_name)
-            return job_name
-
-        self.check_bootstrap_yaml(
-            'jenkins/job-configs/kubernetes-jenkins/bootstrap-ci.yaml',
-            check)
-
     def test_bootstrap_ci_commit_yaml(self):
         def check(job, name):
             job_name = 'ci-%s' % name
@@ -266,7 +250,7 @@ class JobTest(unittest.TestCase):
             for container in spec.get('containers'):
                 if 'args' in container:
                     for arg in container.get('args'):
-                        match = re.match(r'--timeout=(\d+)', arg)
+                        match = re.match(r'[\'"]?--timeout=(\d+)', arg)
                         if match:
                             real_job['timeout'] = match.group(1)
         if 'pull-' not in name and name in self.realjobs and name not in self.prowjobs:
@@ -717,6 +701,15 @@ class JobTest(unittest.TestCase):
             'ci-kubernetes-e2e-gce-ubuntudev-k8sstable1-default': 'ci-kubernetes-e2e-gce-ubuntu*',
             'ci-kubernetes-e2e-gce-ubuntudev-k8sstable1-serial': 'ci-kubernetes-e2e-gce-ubuntu*',
             'ci-kubernetes-e2e-gce-ubuntudev-k8sstable1-slow': 'ci-kubernetes-e2e-gce-ubuntu*',
+            'ci-kubernetes-e2e-gce-ubuntudev-k8sstable2-default': 'ci-kubernetes-e2e-gce-ubuntu*',
+            'ci-kubernetes-e2e-gce-ubuntudev-k8sstable2-serial': 'ci-kubernetes-e2e-gce-ubuntu*',
+            'ci-kubernetes-e2e-gce-ubuntudev-k8sstable2-slow': 'ci-kubernetes-e2e-gce-ubuntu*',
+            'ci-kubernetes-e2e-gce-ubuntudev2-k8sdev-default': 'ci-kubernetes-e2e-gce-ubuntu*',
+            'ci-kubernetes-e2e-gce-ubuntudev2-k8sdev-serial': 'ci-kubernetes-e2e-gce-ubuntu*',
+            'ci-kubernetes-e2e-gce-ubuntudev2-k8sdev-slow': 'ci-kubernetes-e2e-gce-ubuntu*',
+            'ci-kubernetes-e2e-gce-ubuntudev2-k8sbeta-default': 'ci-kubernetes-e2e-gce-ubuntu*',
+            'ci-kubernetes-e2e-gce-ubuntudev2-k8sbeta-serial': 'ci-kubernetes-e2e-gce-ubuntu*',
+            'ci-kubernetes-e2e-gce-ubuntudev2-k8sbeta-slow': 'ci-kubernetes-e2e-gce-ubuntu*',
             'ci-kubernetes-e2e-gce-ubuntustable1-k8sdev-default': 'ci-kubernetes-e2e-gce-ubuntu*',
             'ci-kubernetes-e2e-gce-ubuntustable1-k8sdev-serial': 'ci-kubernetes-e2e-gce-ubuntu*',
             'ci-kubernetes-e2e-gce-ubuntustable1-k8sdev-slow': 'ci-kubernetes-e2e-gce-ubuntu*',
@@ -745,6 +738,10 @@ class JobTest(unittest.TestCase):
             'ci-kubernetes-e2enode-ubuntustable1-k8sdev-gkespec': 'ci-kubernetes-e2e-ubuntu-node*',
             'ci-kubernetes-e2enode-ubuntudev-k8sstable1-gkespec': 'ci-kubernetes-e2e-ubuntu-node*',
             'ci-kubernetes-e2enode-ubuntudev-k8sstable2-serial': 'ci-kubernetes-e2e-ubuntu-node*',
+            'ci-kubernetes-e2enode-ubuntudev2-k8sdev-gkespec': 'ci-kubernetes-e2e-ubuntu-node*',
+            'ci-kubernetes-e2enode-ubuntudev2-k8sdev-serial': 'ci-kubernetes-e2e-ubuntu-node*',
+            'ci-kubernetes-e2enode-ubuntudev2-k8sbeta-gkespec': 'ci-kubernetes-e2e-ubuntu-node*',
+            'ci-kubernetes-e2enode-ubuntudev2-k8sbeta-serial': 'ci-kubernetes-e2e-ubuntu-node*',
             'ci-kubernetes-e2enode-ubuntustable1-k8sstable1-gkespec': 'ci-kubernetes-e2e-ubuntu-node*',
             'ci-kubernetes-e2enode-ubuntudev-k8sstable2-gkespec': 'ci-kubernetes-e2e-ubuntu-node*',
             'ci-kubernetes-e2enode-ubuntudev-k8sdev-serial': 'ci-kubernetes-e2e-ubuntu-node*',
@@ -784,6 +781,7 @@ class JobTest(unittest.TestCase):
             'ci-kubernetes-e2e-gce': 'ci-kubernetes-e2e-gce-*',
             'ci-kubernetes-e2e-gce-canary': 'ci-kubernetes-e2e-gce-*',
             'ci-kubernetes-node-kubelet-serial': 'ci-kubernetes-node-kubelet-*',
+            'ci-kubernetes-node-kubelet-serial-cpu-manager': 'ci-kubernetes-node-kubelet-*',
             'ci-kubernetes-node-kubelet-flaky': 'ci-kubernetes-node-kubelet-*',
             'ci-kubernetes-node-kubelet-conformance': 'ci-kubernetes-node-kubelet-*',
             'ci-kubernetes-node-kubelet-benchmark': 'ci-kubernetes-node-kubelet-*',
@@ -791,7 +789,15 @@ class JobTest(unittest.TestCase):
             'ci-kubernetes-node-kubelet-stable1': 'ci-kubernetes-node-kubelet-*',
             'ci-kubernetes-node-kubelet-stable2': 'ci-kubernetes-node-kubelet-*',
             'ci-kubernetes-node-kubelet-stable3': 'ci-kubernetes-node-kubelet-*',
+            'ci-kubernetes-node-kubelet-beta': 'ci-kubernetes-node-kubelet-*',
             'ci-kubernetes-node-kubelet-non-cri-1-6': 'ci-kubernetes-node-kubelet-*',
+            # The cri-containerd validation node e2e jobs intentionally share projects.
+            'ci-cri-containerd-node-e2e': 'cri-containerd-node-e2e-*',
+            'ci-cri-containerd-node-e2e-serial': 'cri-containerd-node-e2e-*',
+            'ci-cri-containerd-node-e2e-flaky': 'cri-containerd-node-e2e-*',
+            # ingress-GCE e2e jobs
+            'pull-ingress-gce-e2e': 'e2e-ingress-gce',
+            'ci-ingress-gce-e2e': 'e2e-ingress-gce',
         }
         for soak_prefix in [
                 'ci-kubernetes-soak-gce-1.5',

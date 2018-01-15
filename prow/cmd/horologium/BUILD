@@ -1,5 +1,6 @@
 package(default_visibility = ["//visibility:public"])
 
+load("@io_bazel_rules_docker//go:image.bzl", "go_image")
 load(
     "@io_bazel_rules_go//go:def.bzl",
     "go_binary",
@@ -7,10 +8,19 @@ load(
     "go_test",
 )
 
+go_image(
+    name = "image",
+    base = "@alpine-base//image",
+    embed = [":go_default_library"],
+    importpath = "k8s.io/test-infra/prow/cmd/horologium",
+    pure = "on",
+)
+
 go_binary(
     name = "horologium",
+    embed = [":go_default_library"],
     importpath = "k8s.io/test-infra/prow/cmd/horologium",
-    library = ":go_default_library",
+    pure = "on",
 )
 
 go_library(
@@ -42,8 +52,8 @@ filegroup(
 go_test(
     name = "go_default_test",
     srcs = ["main_test.go"],
+    embed = [":go_default_library"],
     importpath = "k8s.io/test-infra/prow/cmd/horologium",
-    library = ":go_default_library",
     deps = [
         "//prow/config:go_default_library",
         "//prow/kube:go_default_library",

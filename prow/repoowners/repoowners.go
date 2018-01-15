@@ -28,7 +28,7 @@ import (
 	"github.com/ghodss/yaml"
 	"github.com/sirupsen/logrus"
 
-	"k8s.io/kubernetes/pkg/util/sets"
+	"k8s.io/apimachinery/pkg/util/sets"
 	"k8s.io/test-infra/prow/git"
 	"k8s.io/test-infra/prow/github"
 )
@@ -48,7 +48,6 @@ type dirOptions struct {
 
 type ownersConfig struct {
 	Options   dirOptions `json:"options,omitempty"`
-	Assignees []string   `json:"assignees,omitempty"`
 	Approvers []string   `json:"approvers,omitempty"`
 	Reviewers []string   `json:"reviewers,omitempty"`
 	Labels    []string   `json:"labels,omitempty"`
@@ -118,7 +117,7 @@ func (c *Client) LoadRepoAliases(org, repo string) (RepoAliases, error) {
 	defer c.lock.Unlock()
 	entry, ok := c.cache[fullName]
 	if !ok || entry.sha != sha {
-		// entry is non-existant or stale.
+		// entry is non-existent or stale.
 		gitRepo, err := c.git.Clone(fullName)
 		if err != nil {
 			return nil, fmt.Errorf("failed to clone %s: %v", fullName, err)
@@ -338,8 +337,8 @@ func normLogins(logins []string) sets.String {
 var defaultDirOptions = dirOptions{}
 
 func (o *RepoOwners) applyConfigToPath(path string, config *ownersConfig) {
-	if len(config.Approvers) > 0 || len(config.Assignees) > 0 {
-		o.approvers[path] = o.ExpandAliases(normLogins(config.Approvers).Union(normLogins(config.Assignees)))
+	if len(config.Approvers) > 0 {
+		o.approvers[path] = o.ExpandAliases(normLogins(config.Approvers))
 	}
 	if len(config.Reviewers) > 0 {
 		o.reviewers[path] = o.ExpandAliases(normLogins(config.Reviewers))

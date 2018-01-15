@@ -25,8 +25,8 @@ import (
 	"time"
 
 	"github.com/ghodss/yaml"
-	"github.com/robfig/cron"
 	"github.com/sirupsen/logrus"
+	cron "gopkg.in/robfig/cron.v2"
 
 	"k8s.io/test-infra/prow/kube"
 	"k8s.io/test-infra/prow/kube/labels"
@@ -41,10 +41,11 @@ type Config struct {
 	// Periodics are not associated with any repo.
 	Periodics []Periodic `json:"periodics,omitempty"`
 
-	Tide   Tide   `json:"tide,omitempty"`
-	Plank  Plank  `json:"plank,omitempty"`
-	Sinker Sinker `json:"sinker,omitempty"`
-	Deck   Deck   `json:"deck,omitempty"`
+	Tide             Tide             `json:"tide,omitempty"`
+	Plank            Plank            `json:"plank,omitempty"`
+	Sinker           Sinker           `json:"sinker,omitempty"`
+	Deck             Deck             `json:"deck,omitempty"`
+	BranchProtection BranchProtection `json:"branch-protection,omitempty"`
 
 	// TODO: Move this out of the main config.
 	JenkinsOperator JenkinsOperator `json:"jenkins_operator,omitempty"`
@@ -74,15 +75,16 @@ type Config struct {
 	PushGateway PushGateway `json:"push_gateway,omitempty"`
 }
 
+// PushGateway is a prometheus push gateway.
 type PushGateway struct {
+	// Endpoint is the location of the prometheus pushgateway
+	// where prow will push metrics to.
 	Endpoint string `json:"endpoint,omitempty"`
-}
-
-// Tide is config for the tide pool.
-type Tide struct {
-	// These must be valid GitHub search queries. They should not overlap,
-	// which is to say two queries should never return the same PR.
-	Queries []string `json:"queries,omitempty"`
+	// IntervalString compiles into Interval at load time.
+	IntervalString string `json:"interval,omitempty"`
+	// Interval specifies how often prow will push metrics
+	// to the pushgateway. Defaults to 1m.
+	Interval time.Duration `json:"-"`
 }
 
 // Controller holds configuration applicable to all agent-specific
@@ -105,6 +107,11 @@ type Controller struct {
 	// MaxConcurrency is the maximum number of tests running concurrently that
 	// will be allowed by the controller. 0 implies no limit.
 	MaxConcurrency int `json:"max_concurrency,omitempty"`
+
+	// MaxGoroutines is the maximum number of goroutines spawned inside the
+	// controller to handle tests. Defaults to 20. Needs to be a positive
+	// number.
+	MaxGoroutines int `json:"max_goroutines,omitempty"`
 
 	// AllowCancellations enables aborting presubmit jobs for commits that
 	// have been superseded by newer commits in Github pull requests.
@@ -142,6 +149,14 @@ type Sinker struct {
 
 // Deck holds config for deck.
 type Deck struct {
+	// TideUpdatePeriodString compiles into TideUpdatePeriod at load time.
+	TideUpdatePeriodString string `json:"tide_update_period,omitempty"`
+	// TideUpdatePeriod specifies how often Deck will fetch status from Tide. Defaults to 10s.
+	TideUpdatePeriod time.Duration `json:"-"`
+	// HiddenRepos is a list of orgs and/or repos that should not be displayed by Deck.
+	HiddenRepos []string `json:"hidden_repos,omitempty"`
+	// ExternalAgentLogs ensures external agents can expose
+	// their logs in prow.
 	ExternalAgentLogs []ExternalAgentLog `json:"external_agent_logs,omitempty"`
 }
 
@@ -194,8 +209,14 @@ func parseConfig(c *Config) error {
 		name := v.Name
 		agent := v.Agent
 		// Ensure that k8s presubmits have a pod spec.
-		if agent == string(kube.KubernetesAgent) && v.Spec == nil {
-			return fmt.Errorf("job %s has no spec", name)
+		if agent == string(kube.KubernetesAgent) {
+			if v.Spec == nil {
+				return fmt.Errorf("job %s has no spec", name)
+			} else {
+				if len(v.Spec.Containers) > 1 {
+					return fmt.Errorf("job %s has more than one container; see https://github.com/kubernetes/test-infra/pull/5403 for discussion on this restriction", name)
+				}
+			}
 		}
 		// Ensure agent is a known value.
 		if agent != string(kube.KubernetesAgent) && agent != string(kube.JenkinsAgent) {
@@ -212,9 +233,14 @@ func parseConfig(c *Config) error {
 	for _, j := range c.AllPostsubmits(nil) {
 		name := j.Name
 		agent := j.Agent
-		// Ensure that k8s postsubmits have a pod spec.
-		if agent == string(kube.KubernetesAgent) && j.Spec == nil {
-			return fmt.Errorf("job %s has no spec", name)
+		if agent == string(kube.KubernetesAgent) {
+			if j.Spec == nil {
+				return fmt.Errorf("job %s has no spec", name)
+			} else {
+				if len(j.Spec.Containers) > 1 {
+					return fmt.Errorf("job %s has more than one container; see https://github.com/kubernetes/test-infra/pull/5403 for discussion on this restriction", name)
+				}
+			}
 		}
 		// Ensure agent is a known value.
 		if agent != string(kube.KubernetesAgent) && agent != string(kube.JenkinsAgent) {
@@ -231,8 +257,14 @@ func parseConfig(c *Config) error {
 	for _, p := range c.AllPeriodics() {
 		name := p.Name
 		agent := p.Agent
-		if agent == string(kube.KubernetesAgent) && p.Spec == nil {
-			return fmt.Errorf("job %s has no spec", name)
+		if agent == string(kube.KubernetesAgent) {
+			if p.Spec == nil {
+				return fmt.Errorf("job %s has no spec", name)
+			} else {
+				if len(p.Spec.Containers) > 1 {
+					return fmt.Errorf("job %s has more than one container; see https://github.com/kubernetes/test-infra/pull/5403 for discussion on this restriction", name)
+				}
+			}
 		}
 		if agent != string(kube.KubernetesAgent) && agent != string(kube.JenkinsAgent) {
 			return fmt.Errorf("job %s has invalid agent (%s), it needs to be one of the following: %s %s",
@@ -282,12 +314,32 @@ func parseConfig(c *Config) error {
 		c.Deck.ExternalAgentLogs[i].Selector = s
 	}
 
+	if c.Deck.TideUpdatePeriodString == "" {
+		c.Deck.TideUpdatePeriod = time.Second * 10
+	} else {
+		period, err := time.ParseDuration(c.Deck.TideUpdatePeriodString)
+		if err != nil {
+			return fmt.Errorf("cannot parse duration for deck.tide_update_period: %v", err)
+		}
+		c.Deck.TideUpdatePeriod = period
+	}
+
+	if c.PushGateway.IntervalString == "" {
+		c.PushGateway.Interval = time.Minute
+	} else {
+		interval, err := time.ParseDuration(c.PushGateway.IntervalString)
+		if err != nil {
+			return fmt.Errorf("cannot parse duration for push_gateway.interval: %v", err)
+		}
+		c.PushGateway.Interval = interval
+	}
+
 	if c.Sinker.ResyncPeriodString == "" {
 		c.Sinker.ResyncPeriod = time.Hour
 	} else {
 		resyncPeriod, err := time.ParseDuration(c.Sinker.ResyncPeriodString)
 		if err != nil {
-			return fmt.Errorf("cannot parse duration for resync_period: %v", err)
+			return fmt.Errorf("cannot parse duration for sinker.resync_period: %v", err)
 		}
 		c.Sinker.ResyncPeriod = resyncPeriod
 	}
@@ -310,6 +362,16 @@ func parseConfig(c *Config) error {
 			return fmt.Errorf("cannot parse duration for max_pod_age: %v", err)
 		}
 		c.Sinker.MaxPodAge = maxPodAge
+	}
+
+	if c.Tide.SyncPeriodString == "" {
+		c.Tide.SyncPeriod = time.Minute
+	} else {
+		period, err := time.ParseDuration(c.Tide.SyncPeriodString)
+		if err != nil {
+			return fmt.Errorf("cannot parse duration for tide.sync_period: %v", err)
+		}
+		c.Tide.SyncPeriod = period
 	}
 
 	if c.ProwJobNamespace == "" {
@@ -346,6 +408,12 @@ func ValidateController(c *Controller) error {
 	c.ReportTemplate = reportTmpl
 	if c.MaxConcurrency < 0 {
 		return fmt.Errorf("controller has invalid max_concurrency (%d), it needs to be a non-negative number", c.MaxConcurrency)
+	}
+	if c.MaxGoroutines == 0 {
+		c.MaxGoroutines = 20
+	}
+	if c.MaxGoroutines <= 0 {
+		return fmt.Errorf("controller has invalid max_goroutines (%d), it needs to be a positive number", c.MaxGoroutines)
 	}
 	return nil
 }

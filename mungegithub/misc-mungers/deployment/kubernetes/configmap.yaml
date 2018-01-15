@@ -3,9 +3,7 @@ app: misc-mungers
 http-cache-dir: /cache/httpcache
 organization: kubernetes
 project: kubernetes
-# Run blunderbuss before approval-handler, so that we can suggest approvers
-# based on assigned reviewer.
-pr-mungers: blunderbuss,approval-handler,lgtm-after-commit,cherrypick-auto-approve,label-unapproved-picks,needs-rebase,path-label,stale-green-ci,comment-deleter,close-stale,sig-mention-handler,milestone-maintainer
+pr-mungers: blunderbuss,lgtm-after-commit,cherrypick-auto-approve,label-unapproved-picks,needs-rebase,path-label,stale-green-ci,comment-deleter,milestone-maintainer
 state: open
 token-file: /etc/secret-volume/token
 period: 60s
@@ -19,6 +17,7 @@ github-key-file: /etc/hook-secret-volume/secret
 required-retest-contexts: "\
   pull-kubernetes-bazel-build,\
   pull-kubernetes-bazel-test,\
+  pull-kubernetes-cross,\
   pull-kubernetes-e2e-gce,\
   pull-kubernetes-e2e-kops-aws,\
   pull-kubernetes-kubemark-e2e-gce,\
@@ -28,13 +27,11 @@ required-retest-contexts: "\
 
 # munger specific options.
 path-label-config: "/etc/munge-config/path-label.txt"
-approval-requires-issue: true
-implicit-self-approval: true
 number-of-old-test-results: 5
 generated-files-config: .generated_files
 label-file: "/gitrepos/kubernetes/labels.yaml"
 alias-file: "/gitrepos/kubernetes/OWNERS_ALIASES"
 use-reviewers: true
 # milestone-maintainer
-milestone-modes: v1.8=dev,v1.9=dev
-milestone-freeze-date: TBD
+milestone-modes: v1.8=dev,v1.9=dev,v1.10=dev
+milestone-freeze-date: "TBD"

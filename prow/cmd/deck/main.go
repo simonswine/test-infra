@@ -20,6 +20,7 @@ import (
 	"bufio"
 	"bytes"
 	"encoding/json"
+	"errors"
 	"flag"
 	"fmt"
 	"io"
@@ -28,6 +29,7 @@ import (
 	"net/url"
 	"regexp"
 	"strconv"
+	"time"
 
 	"github.com/NYTimes/gziphandler"
 	"github.com/ghodss/yaml"
@@ -36,12 +38,16 @@ import (
 	"k8s.io/test-infra/prow/config"
 	"k8s.io/test-infra/prow/kube"
 	"k8s.io/test-infra/prow/pjutil"
+	"k8s.io/test-infra/prow/pluginhelp"
 )
 
 var (
 	configPath   = flag.String("config-path", "/etc/config/config", "Path to config.yaml.")
 	buildCluster = flag.String("build-cluster", "", "Path to file containing a YAML-marshalled kube.Cluster object. If empty, uses the local cluster.")
 	tideURL      = flag.String("tide-url", "", "Path to tide. If empty, do not serve tide data.")
+	hookURL      = flag.String("hook-url", "", "Path to hook plugin help endpoint.")
+	// use when behind a load balancer
+	redirectHTTPTo = flag.String("redirect-http-to", "", "host to redirect http->https to based on x-forwarded-proto == http.")
 )
 
 // Matches letters, numbers, hyphens, and underscores.
@@ -61,6 +67,8 @@ func main() {
 	if err != nil {
 		logger.WithError(err).Fatal("Error getting client.")
 	}
+	kc.SetHiddenReposProvider(func() []string { return configAgent.Config().Deck.HiddenRepos })
+
 	var pkc *kube.Client
 	if *buildCluster == "" {
 		pkc = kc.Namespace(configAgent.Config().PodNamespace)
@@ -78,21 +86,52 @@ func main() {
 	}
 	ja.Start()
 
-	http.Handle("/", gziphandler.GzipHandler(http.FileServer(http.Dir("/static"))))
-	http.Handle("/data.js", gziphandler.GzipHandler(handleData(ja)))
-	http.Handle("/log", gziphandler.GzipHandler(handleLog(ja)))
-	http.Handle("/rerun", gziphandler.GzipHandler(handleRerun(kc)))
+	mux := http.NewServeMux()
+
+	mux.Handle("/", gziphandler.GzipHandler(http.FileServer(http.Dir("/static"))))
+	mux.Handle("/data.js", gziphandler.GzipHandler(handleData(ja)))
+	mux.Handle("/prowjobs.js", gziphandler.GzipHandler(handleProwJobs(ja)))
+	mux.Handle("/log", gziphandler.GzipHandler(handleLog(ja)))
+	mux.Handle("/rerun", gziphandler.GzipHandler(handleRerun(kc)))
+	mux.Handle("/config", gziphandler.GzipHandler(handleConfig(configAgent)))
+
+	if *hookURL != "" {
+		mux.Handle("/plugin-help.js", gziphandler.GzipHandler(handlePluginHelp(newHelpAgent(*hookURL))))
+	}
 
 	if *tideURL != "" {
 		ta := &tideAgent{
-			log:  logger.WithField("agent", "tide"),
-			path: *tideURL,
+			log:          logger.WithField("agent", "tide"),
+			path:         *tideURL,
+			updatePeriod: func() time.Duration { return configAgent.Config().Deck.TideUpdatePeriod },
 		}
 		ta.start()
-		http.Handle("/tide.js", gziphandler.GzipHandler(handleTide(ta)))
+		mux.Handle("/tide.js", gziphandler.GzipHandler(handleTide(configAgent, ta)))
 	}
 
-	logger.WithError(http.ListenAndServe(":8080", nil)).Fatal("ListenAndServe returned.")
+	// optionally inject http->https redirect handler when behind loadbalancer
+	if *redirectHTTPTo != "" {
+		redirectMux := http.NewServeMux()
+		redirectMux.Handle("/", func(oldMux *http.ServeMux, host string) http.HandlerFunc {
+			return func(w http.ResponseWriter, r *http.Request) {
+				if r.Header.Get("x-forwarded-proto") == "http" {
+					redirectURL, err := url.Parse(r.URL.String())
+					if err != nil {
+						logger.Errorf("Failed to parse URL: %s.", r.URL.String())
+						http.Error(w, "Failed to perform https redirect.", http.StatusInternalServerError)
+						return
+					}
+					redirectURL.Scheme = "https"
+					redirectURL.Host = host
+					http.Redirect(w, r, redirectURL.String(), http.StatusMovedPermanently)
+				} else {
+					oldMux.ServeHTTP(w, r)
+				}
+			}
+		}(mux, *redirectHTTPTo))
+		mux = redirectMux
+	}
+	logger.WithError(http.ListenAndServe(":8080", mux)).Fatal("ListenAndServe returned.")
 }
 
 func loadToken(file string) (string, error) {
@@ -101,6 +140,27 @@ func loadToken(file string) (string, error) {
 		return "", err
 	}
 	return string(bytes.TrimSpace(raw)), nil
+}
+
+func handleProwJobs(ja *JobAgent) http.HandlerFunc {
+	return func(w http.ResponseWriter, r *http.Request) {
+		w.Header().Set("Cache-Control", "no-cache")
+		jobs := ja.ProwJobs()
+		jd, err := json.Marshal(struct {
+			Items []kube.ProwJob `json:"items"`
+		}{jobs})
+		if err != nil {
+			logrus.WithError(err).Error("Error marshaling jobs.")
+			jd = []byte("{}")
+		}
+		// If we have a "var" query, then write out "var value = {...};".
+		// Otherwise, just write out the JSON.
+		if v := r.URL.Query().Get("var"); v != "" {
+			fmt.Fprintf(w, "var %s = %s;", v, string(jd))
+		} else {
+			fmt.Fprint(w, string(jd))
+		}
+	}
 }
 
 func handleData(ja *JobAgent) http.HandlerFunc {
@@ -122,17 +182,28 @@ func handleData(ja *JobAgent) http.HandlerFunc {
 	}
 }
 
-func handleTide(ta *tideAgent) http.HandlerFunc {
+func handleTide(ca *config.Agent, ta *tideAgent) http.HandlerFunc {
 	return func(w http.ResponseWriter, r *http.Request) {
 		w.Header().Set("Cache-Control", "no-cache")
+		queryConfigs := ca.Config().Tide.Queries
+		queries := make([]string, 0, len(queryConfigs))
+		for _, qc := range queryConfigs {
+			queries = append(queries, qc.Query())
+		}
+
 		ta.Lock()
 		defer ta.Unlock()
-		pd, err := json.Marshal(ta.pools)
-		if err != nil {
-			logrus.WithError(err).Error("Error marshaling pools.")
-			pd = []byte("[]")
+		payload := tideData{
+			Queries:     queries,
+			TideQueries: queryConfigs,
+			Pools:       ta.pools,
 		}
-		// If we have a "var" query, then write out "var value = [...];".
+		pd, err := json.Marshal(payload)
+		if err != nil {
+			logrus.WithError(err).Error("Error marshaling payload.")
+			pd = []byte("{}")
+		}
+		// If we have a "var" query, then write out "var value = {...};".
 		// Otherwise, just write out the JSON.
 		if v := r.URL.Query().Get("var"); v != "" {
 			fmt.Fprintf(w, "var %s = %s;", v, string(pd))
@@ -140,6 +211,29 @@ func handleTide(ta *tideAgent) http.HandlerFunc {
 			fmt.Fprint(w, string(pd))
 		}
 
+	}
+}
+
+func handlePluginHelp(ha *helpAgent) http.HandlerFunc {
+	return func(w http.ResponseWriter, r *http.Request) {
+		w.Header().Set("Cache-Control", "no-cache")
+		help, err := ha.getHelp()
+		if err != nil {
+			logrus.WithError(err).Error("Getting plugin help from hook.")
+			help = &pluginhelp.Help{}
+		}
+		b, err := json.Marshal(*help)
+		if err != nil {
+			logrus.WithError(err).Error("Marshaling plugin help.")
+			b = []byte("[]")
+		}
+		// If we have a "var" query, then write out "var value = [...];".
+		// Otherwise, just write out the JSON.
+		if v := r.URL.Query().Get("var"); v != "" {
+			fmt.Fprintf(w, "var %s = %s;", v, string(b))
+		} else {
+			fmt.Fprint(w, string(b))
+		}
 	}
 }
 
@@ -197,41 +291,51 @@ func handleLog(lc logClient) http.HandlerFunc {
 			w.Header().Set("Transfer-Encoding", "chunked")
 			logStreamRequested = true
 		}
-		if job != "" && id != "" {
-			if !objReg.MatchString(job) {
-				http.Error(w, "Invalid job query", http.StatusBadRequest)
-				return
-			}
-			if !objReg.MatchString(id) {
-				http.Error(w, "Invalid ID query", http.StatusBadRequest)
-				return
-			}
-			if !logStreamRequested {
-				log, err := lc.GetJobLog(job, id)
-				if err != nil {
-					http.Error(w, fmt.Sprintf("Log not found: %v", err), http.StatusNotFound)
-					logrus.WithError(err).Warning("Error returned.")
-					return
-				}
-				if _, err = w.Write(log); err != nil {
-					logrus.WithError(err).Warning("Error writing log.")
-				}
-			} else {
-				//run http chunking
-				options := getOptions(r.URL.Query())
-				log, err := lc.GetJobLogStream(job, id, options)
-				if err != nil {
-					http.Error(w, fmt.Sprintf("Log stream caused: %v", err), http.StatusNotFound)
-					logrus.WithError(err).Warning("Error returned.")
-					return
-				}
-				httpChunking(log, w)
-			}
-		} else {
-			http.Error(w, "Missing job and ID query", http.StatusBadRequest)
+		if err := validateLogRequest(r); err != nil {
+			http.Error(w, err.Error(), http.StatusBadRequest)
 			return
 		}
+		if !logStreamRequested {
+			log, err := lc.GetJobLog(job, id)
+			if err != nil {
+				http.Error(w, fmt.Sprintf("Log not found: %v", err), http.StatusNotFound)
+				logrus.WithError(err).Warning("Error returned.")
+				return
+			}
+			if _, err = w.Write(log); err != nil {
+				logrus.WithError(err).Warning("Error writing log.")
+			}
+		} else {
+			//run http chunking
+			options := getOptions(r.URL.Query())
+			log, err := lc.GetJobLogStream(job, id, options)
+			if err != nil {
+				http.Error(w, fmt.Sprintf("Log stream caused: %v", err), http.StatusNotFound)
+				logrus.WithError(err).Warning("Error returned.")
+				return
+			}
+			httpChunking(log, w)
+		}
 	}
+}
+
+func validateLogRequest(r *http.Request) error {
+	job := r.URL.Query().Get("job")
+	id := r.URL.Query().Get("id")
+
+	if job == "" {
+		return errors.New("Missing job query")
+	}
+	if id == "" {
+		return errors.New("Missing ID query")
+	}
+	if !objReg.MatchString(job) {
+		return fmt.Errorf("Invalid job query: %s", job)
+	}
+	if !objReg.MatchString(id) {
+		return fmt.Errorf("Invalid ID query: %s", id)
+	}
+	return nil
 }
 
 type pjClient interface {
@@ -260,6 +364,26 @@ func handleRerun(kc pjClient) http.HandlerFunc {
 		}
 		if _, err := w.Write(b); err != nil {
 			logrus.WithError(err).Error("Error writing log.")
+		}
+	}
+}
+
+func handleConfig(ca configAgent) http.HandlerFunc {
+	return func(w http.ResponseWriter, r *http.Request) {
+		// TODO(bentheelder): add the ability to query for portions of the config?
+		w.Header().Set("Cache-Control", "no-cache")
+		config := ca.Config()
+		b, err := yaml.Marshal(config)
+		if err != nil {
+			logrus.WithError(err).Error("Error marshaling config.")
+			http.Error(w, "Failed to marhshal config.", http.StatusInternalServerError)
+			return
+		}
+		buff := bytes.NewBuffer(b)
+		_, err = buff.WriteTo(w)
+		if err != nil {
+			logrus.WithError(err).Error("Error writing config.")
+			http.Error(w, "Failed to write config.", http.StatusInternalServerError)
 		}
 	}
 }

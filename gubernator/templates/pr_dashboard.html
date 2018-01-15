@@ -2,6 +2,7 @@
 {% block title %}PR Dashboard{% endblock %}
 % block head
 <link rel="stylesheet" href="{{'octicons/octicons.css'|static}}" />
+<script src="{{'pr.js'|static}}"></script>
 {{ super() }}
 % endblock
 % block header
@@ -36,7 +37,7 @@ View
 	% if sub_prs
 	<table class="pr pr-dash">
 	<thead>
-		<tr><th>Repo<th>Number<th>Author<th>Status<th>Updated<th>Assignees<th>Size<th>Title<th></th></tr>
+		<tr><th>Repo<th>Number<th>Author<th>Status<th>&#9660; Updated<th>Assignees<th>Size<th>Title</tr>
 	</thead>
 		% for pr in sub_prs
 			% set pl = pr.payload
@@ -63,7 +64,7 @@ View
 % endfor
 
 <div id="help">
-<p><b>Needs Attention</b> is a heuristic grouping based on a <a href="https://github.com/kubernetes/test-infra/blob/master/gubernator/github/classifier.py#L288">simple state machine</a>. Use the "ACK" button to remove a PR from "Needs Attention" until something new occurs.
-<p>Have a problem? <a href="https://github.com/kubernetes/test-infra/issues/new?title=PR%20Dashboard:&labels=gubernator&assignee=rmmh">File a bug!</a>
+  <p><b>Needs Attention</b> is a heuristic grouping based on a <a href="https://git.k8s.io/test-infra/gubernator/github/classifier.py#L397">simple state machine</a>. {% if user != login or not login %}<a href="/pr">Login</a> to use {% else %}Use {% endif %} the "ACK" button to remove a PR from "Needs Attention" until something new occurs.
+<p>Have a problem? <a href="https://github.com/kubernetes/test-infra/issues/new?title=PR%20Dashboard:&labels=area/gubernator&assignee=rmmh">File a bug!</a>
 </div>
 % endblock

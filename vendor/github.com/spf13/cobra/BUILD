@@ -1,4 +1,4 @@
-load("@io_bazel_rules_go//go:def.bzl", "go_library", "go_test")
+load("@io_bazel_rules_go//go:def.bzl", "go_library")
 
 go_library(
     name = "go_default_library",
@@ -6,9 +6,38 @@ go_library(
         "bash_completions.go",
         "cobra.go",
         "command.go",
-        "command_notwin.go",
     ] + select({
-        "@io_bazel_rules_go//go/platform:windows_amd64": [
+        "@io_bazel_rules_go//go/platform:android": [
+            "command_notwin.go",
+        ],
+        "@io_bazel_rules_go//go/platform:darwin": [
+            "command_notwin.go",
+        ],
+        "@io_bazel_rules_go//go/platform:dragonfly": [
+            "command_notwin.go",
+        ],
+        "@io_bazel_rules_go//go/platform:freebsd": [
+            "command_notwin.go",
+        ],
+        "@io_bazel_rules_go//go/platform:linux": [
+            "command_notwin.go",
+        ],
+        "@io_bazel_rules_go//go/platform:nacl": [
+            "command_notwin.go",
+        ],
+        "@io_bazel_rules_go//go/platform:netbsd": [
+            "command_notwin.go",
+        ],
+        "@io_bazel_rules_go//go/platform:openbsd": [
+            "command_notwin.go",
+        ],
+        "@io_bazel_rules_go//go/platform:plan9": [
+            "command_notwin.go",
+        ],
+        "@io_bazel_rules_go//go/platform:solaris": [
+            "command_notwin.go",
+        ],
+        "@io_bazel_rules_go//go/platform:windows": [
             "command_win.go",
         ],
         "//conditions:default": [],
@@ -18,23 +47,11 @@ go_library(
     deps = [
         "//vendor/github.com/spf13/pflag:go_default_library",
     ] + select({
-        "@io_bazel_rules_go//go/platform:windows_amd64": [
+        "@io_bazel_rules_go//go/platform:windows": [
             "//vendor/github.com/inconshreveable/mousetrap:go_default_library",
         ],
         "//conditions:default": [],
     }),
-)
-
-go_test(
-    name = "go_default_test",
-    srcs = [
-        "bash_completions_test.go",
-        "cobra_test.go",
-        "command_test.go",
-    ],
-    importpath = "github.com/spf13/cobra",
-    library = ":go_default_library",
-    deps = ["//vendor/github.com/spf13/pflag:go_default_library"],
 )
 
 filegroup(

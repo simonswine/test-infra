@@ -8,8 +8,9 @@ load(
 
 go_binary(
     name = "gcsweb",
+    embed = [":go_default_library"],
     importpath = "k8s.io/test-infra/gcsweb/cmd/gcsweb",
-    library = ":go_default_library",
+    pure = "on",
 )
 
 go_library(

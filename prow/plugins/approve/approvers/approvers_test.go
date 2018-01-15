@@ -23,7 +23,7 @@ import (
 
 	"reflect"
 
-	"k8s.io/kubernetes/pkg/util/sets"
+	"k8s.io/apimachinery/pkg/util/sets"
 )
 
 func TestUnapprovedFiles(t *testing.T) {
@@ -714,7 +714,7 @@ Assign the PR to them by writing ` + "`/assign @alice`" + ` in a comment when re
 
 *No associated issue*. Update pull-request body to add a reference to an issue, or get approval with ` + "`/approve no-issue`" + `
 
-The full list of commands accepted by this bot can be found [here](https://github.com/kubernetes/test-infra/blob/master/commands.md).
+The full list of commands accepted by this bot can be found [here](https://go.k8s.io/bot-commands).
 
 <details open>
 Needs approval from an approver in each of these OWNERS Files:
@@ -754,7 +754,7 @@ This pull-request has been approved by: *<a href="REFERENCE" title="Approved">Al
 
 *No associated issue*. Update pull-request body to add a reference to an issue, or get approval with ` + "`/approve no-issue`" + `
 
-The full list of commands accepted by this bot can be found [here](https://github.com/kubernetes/test-infra/blob/master/commands.md).
+The full list of commands accepted by this bot can be found [here](https://go.k8s.io/bot-commands).
 
 <details >
 Needs approval from an approver in each of these OWNERS Files:
@@ -795,7 +795,7 @@ Assign the PR to them by writing ` + "`/assign @alice @bill`" + ` in a comment w
 
 *No associated issue*. Update pull-request body to add a reference to an issue, or get approval with ` + "`/approve no-issue`" + `
 
-The full list of commands accepted by this bot can be found [here](https://github.com/kubernetes/test-infra/blob/master/commands.md).
+The full list of commands accepted by this bot can be found [here](https://go.k8s.io/bot-commands).
 
 <details open>
 Needs approval from an approver in each of these OWNERS Files:
@@ -835,9 +835,9 @@ func TestGetMessageApprovedIssueAssociated(t *testing.T) {
 
 This pull-request has been approved by: *<a href="REFERENCE" title="Approved">Alice</a>*, *<a href="REFERENCE" title="Approved">Bill</a>*, *<a href="REFERENCE" title="Author self-approved">John</a>*
 
-Associated issue: *12345*
+Associated issue: *#12345*
 
-The full list of commands accepted by this bot can be found [here](https://github.com/kubernetes/test-infra/blob/master/commands.md).
+The full list of commands accepted by this bot can be found [here](https://go.k8s.io/bot-commands).
 
 <details >
 Needs approval from an approver in each of these OWNERS Files:
@@ -878,7 +878,7 @@ This pull-request has been approved by: *<a href="REFERENCE" title="Approved">Al
 
 Associated issue requirement bypassed by: *<a href="REFERENCE" title="Approved">Alice</a>*, *<a href="REFERENCE" title="Approved">Bill</a>*
 
-The full list of commands accepted by this bot can be found [here](https://github.com/kubernetes/test-infra/blob/master/commands.md).
+The full list of commands accepted by this bot can be found [here](https://go.k8s.io/bot-commands).
 
 <details >
 Needs approval from an approver in each of these OWNERS Files:

@@ -15,7 +15,8 @@ the different services interact.
   - [Gubernator](https://k8s-gubernator.appspot.com/) formats the output of each run
 * [PR Dashboard](https://k8s-gubernator.appspot.com/pr) finds PRs that need your attention
 * [Prow](https://prow.k8s.io) schedules testing and updates issues
-  - Prow responds to GitHub events, timers and manual commands
+  - Prow responds to GitHub events, timers and [manual commands](commands.md)
+    given in GitHub comments.
   - The [prow dashboard](https://prow.k8s.io/) shows what it is currently testing
   - Configure prow to run new tests at [prow/config.yaml](prow/config.yaml)
 * [Triage Dashboard](https://go.k8s.io/triage) aggregates failures
@@ -57,9 +58,9 @@ you'll need to do the following:
   - If this is a kubetest job create the corresponding `jobs/env/FOO.env` file
   - It will pick a free project from [boskos](/boskos) pool by default, or
   - You can also set --gcp-project=foo in [`jobs/config.json`] for a dedicated project, make sure the project has the right [IAM grants](jenkins/check_projects.py)
-* Add the job name to the `test_groups` list in [`testgrid/config/config.yaml`](https://github.com/kubernetes/test-infra/blob/master/testgrid/config/config.yaml)
+* Add the job name to the `test_groups` list in [`testgrid/config/config.yaml`](testgrid/config/config.yaml)
   - Also the group to at least one `dashboard_tab`
-* Add the job to the appropriate section in [`prow/config.yaml`](https://github.com/kubernetes/test-infra/blob/master/prow/config.yaml)
+* Add the job to the appropriate section in [`prow/config.yaml`](prow/config.yaml)
   - Presubmit jobs run on unmerged code in PRs
   - Postsubmit jobs run after merging code
   - Periodic job run on a timed basis
@@ -80,9 +81,34 @@ $GOPATH/src/k8s.io/test-infra/jenkins/bootstrap.py \
 # Note: create a service account at the cloud console for the project J uses
 ```
 
+#### Release branch jobs & Image validation jobs
+
+Release branch jobs and image validation jobs are defined in [test_config.yaml](experiment/test_config.yaml). 
+We test different master/node image versions against multiple k8s branches on different features.
+
+Those jobs are using channel based versions, current supported testing map is:
+- k8s-dev : master
+- k8s-beta : release-1.9
+- k8s-stable1 : release-1.8
+- k8s-stable2 : release-1.7
+- k8s-stable3 : release-1.6
+
+Our build job will generate a ci/(channel-name) file pointer in gcs.
+
+After you update [test_config.yaml](experiment/test_config.yaml), please run
+
+```
+bazel run //experiment:generate_tests -- --yaml-config-path=experiment/test_config.yaml --json-config-path=jobs/config.json  --prow-config-path=prow/config.yaml && bazel run //jobs:config_sort
+```
+
+to regenerate the job configs.
+
+We are moving towards making more jobs to fit into the generated config.
+
+
 Presubmit will tell you if you forget to do any of this correctly.
 
-Merge your PR and the bot will deploy your change automatically.
+Merge your PR and @k8s-ci-robot will deploy your change automatically.
 
 ### Update an existing job
 
@@ -102,7 +128,7 @@ Update where the job appears on testgrid by changing [`testgrid/config/config.ya
 The reverse of creating a new job: delete the appropriate entries in
 [`jobs/config.json`], [`prow/config.yaml`] and [`testgrid/config/config.yaml`].
 
-The [test-infra oncall] must push prow changes (`make -C prow update-config`).
+Merge your PR and @k8s-ci-robot will deploy your change automatically.
 
 ## Building and testing the test-infra
 
@@ -111,19 +137,18 @@ The commands `bazel build //...` and `bazel test //...` should be all you need
 for most cases. If you modify Go code, run `./hack/update-bazel.sh` to keep
 `BUILD` files up-to-date.
 
-## Federated Testing
+## Contributing Test Results
 
 The Kubernetes project encourages organizations to contribute execution of e2e
-test jobs for a variety of platforms (e.g., Azure, rktnetes).  The test-history
-scripts gather e2e results from these federated jobs.  For information about
-how to contribute test results, see [Federated Testing](docs/federated_testing.md).
+test jobs for a variety of platforms (e.g., Azure, rktnetes). For information about
+how to contribute test results, see [Contributing Test Results](docs/contributing-test-results.md).
 
 ## Other Docs
 
 * [kubernetes/test-infra dependency management](docs/dep.md)
 
 
-[`jobs/config.json`]: https://github.com/kubernetes/test-infra/blob/master/jobs/config.json
-[`prow/config.yaml`]: https://github.com/kubernetes/test-infra/blob/master/prow/config.yaml
-[`testgrid/config/config.yaml`]: https://github.com/kubernetes/test-infra/blob/master/testgrid/config/config.yaml
+[`jobs/config.json`]: /jobs/config.json
+[`prow/config.yaml`]: /prow/config.yaml
+[`testgrid/config/config.yaml`]: /testgrid/config/config.yaml
 [test-infra oncall]: https://go.k8s.io/oncall

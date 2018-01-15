@@ -21,6 +21,7 @@ import (
 	"context"
 	"encoding/base64"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"io"
 	"io/ioutil"
@@ -29,6 +30,7 @@ import (
 	"strconv"
 	"strings"
 	"sync"
+	"sync/atomic"
 	"time"
 
 	"github.com/shurcooL/githubql"
@@ -36,24 +38,36 @@ import (
 	"golang.org/x/oauth2"
 )
 
-type Logger interface {
-	Debugf(s string, v ...interface{})
+type timeClient interface {
+	Sleep(time.Duration)
+	Until(time.Time) time.Duration
+}
+
+type standardTime struct{}
+
+func (s *standardTime) Sleep(d time.Duration) {
+	time.Sleep(d)
+}
+func (s *standardTime) Until(t time.Time) time.Duration {
+	return time.Until(t)
 }
 
 type Client struct {
 	// If logger is non-nil, log all method calls with it.
-	logger Logger
+	logger *logrus.Entry
+	time   timeClient
 
-	gqlc   *githubql.Client
-	client *http.Client
-	token  string
-	base   string
-	dry    bool
-	fake   bool
+	gqlc     gqlClient
+	client   httpClient
+	token    string
+	base     string
+	dry      bool
+	fake     bool
+	throttle throttler
 
-	// botName is protected by this mutex.
-	mut     sync.Mutex
+	mut     sync.Mutex // protects botName and email
 	botName string
+	email   string
 }
 
 const (
@@ -63,10 +77,110 @@ const (
 	initialDelay  = 2 * time.Second
 )
 
+// Interface for how prow interacts with the http client, which we may throttle.
+type httpClient interface {
+	Do(req *http.Request) (*http.Response, error)
+}
+
+// Inteface for how prow interacts with the graphql client, which we may throttle.
+type gqlClient interface {
+	Query(ctx context.Context, q interface{}, vars map[string]interface{}) error
+}
+
+// throttler sets a ceiling on the rate of github requests.
+// Configure with Client.Throttle()
+type throttler struct {
+	ticker   *time.Ticker
+	throttle chan time.Time
+	http     httpClient
+	graph    gqlClient
+	slow     int32 // Helps log once when requests start/stop being throttled
+	lock     sync.RWMutex
+}
+
+func (t *throttler) Wait() {
+	log := logrus.WithFields(logrus.Fields{"client": "github", "throttled": true})
+	t.lock.RLock()
+	defer t.lock.RUnlock()
+	var more bool
+	select {
+	case _, more = <-t.throttle:
+		// If we were throttled and the channel is now somewhat (25%+) full, note this
+		if len(t.throttle) > cap(t.throttle)/4 && atomic.CompareAndSwapInt32(&t.slow, 1, 0) {
+			log.Debug("Unthrottled")
+		}
+		if !more {
+			log.Debug("Throttle channel closed")
+		}
+		return
+	default: // Do not wait if nothing is available right now
+	}
+	// If this is the first time we are waiting, note this
+	if slow := atomic.SwapInt32(&t.slow, 1); slow == 0 {
+		log.Debug("Throttled")
+	}
+	_, more = <-t.throttle
+	if !more {
+		log.Debug("Throttle channel closed")
+	}
+}
+
+func (t *throttler) Do(req *http.Request) (*http.Response, error) {
+	t.Wait()
+	return t.http.Do(req)
+}
+
+func (t *throttler) Query(ctx context.Context, q interface{}, vars map[string]interface{}) error {
+	t.Wait()
+	return t.graph.Query(ctx, q, vars)
+}
+
+// Throttle client to a rate of at most hourlyTokens requests per hour,
+// allowing burst tokens.
+func (c *Client) Throttle(hourlyTokens, burst int) {
+	c.log("Throttle", hourlyTokens, burst)
+	c.throttle.lock.Lock()
+	defer c.throttle.lock.Unlock()
+	previouslyThrottled := c.throttle.ticker != nil
+	if hourlyTokens <= 0 || burst <= 0 { // Disable throttle
+		if previouslyThrottled { // Unwrap clients if necessary
+			c.client = c.throttle.http
+			c.gqlc = c.throttle.graph
+			c.throttle.ticker.Stop()
+			c.throttle.ticker = nil
+		}
+		return
+	}
+	rate := time.Hour / time.Duration(hourlyTokens)
+	ticker := time.NewTicker(rate)
+	throttle := make(chan time.Time, burst)
+	for i := 0; i < burst; i++ { // Fill up the channel
+		throttle <- time.Now()
+	}
+	go func() {
+		// Refill the channel
+		for t := range ticker.C {
+			select {
+			case throttle <- t:
+			default:
+			}
+		}
+	}()
+	if !previouslyThrottled { // Wrap clients if we haven't already
+		c.throttle.http = c.client
+		c.throttle.graph = c.gqlc
+		c.client = &c.throttle
+		c.gqlc = &c.throttle
+	}
+	c.throttle.ticker = ticker
+	c.throttle.throttle = throttle
+}
+
 // NewClient creates a new fully operational GitHub client.
 func NewClient(token, base string) *Client {
 	return &Client{
 		logger: logrus.WithField("client", "github"),
+		time:   &standardTime{},
 		gqlc:   githubql.NewClient(oauth2.NewClient(context.Background(), oauth2.StaticTokenSource(&oauth2.Token{AccessToken: token}))),
 		client: &http.Client{},
 		token:  token,
@@ -81,6 +195,8 @@ func NewClient(token, base string) *Client {
 func NewDryRunClient(token, base string) *Client {
 	return &Client{
 		logger: logrus.WithField("client", "github"),
+		time:   &standardTime{},
+		gqlc:   githubql.NewClient(oauth2.NewClient(context.Background(), oauth2.StaticTokenSource(&oauth2.Token{AccessToken: token}))),
 		client: &http.Client{},
 		token:  token,
 		base:   base,
@@ -92,6 +208,7 @@ func NewDryRunClient(token, base string) *Client {
 func NewFakeClient() *Client {
 	return &Client{
 		logger: logrus.WithField("client", "github"),
+		time:   &standardTime{},
 		fake:   true,
 		dry:    true,
 	}
@@ -105,10 +222,8 @@ func (c *Client) log(methodName string, args ...interface{}) {
 	for _, arg := range args {
 		as = append(as, fmt.Sprintf("%v", arg))
 	}
-	c.logger.Debugf("%s(%s)", methodName, strings.Join(as, ", "))
+	c.logger.Infof("%s(%s)", methodName, strings.Join(as, ", "))
 }
-
-var timeSleep = time.Sleep
 
 type request struct {
 	method      string
@@ -130,17 +245,32 @@ func (r requestError) Error() string {
 // Make a request with retries. If ret is not nil, unmarshal the response body
 // into it. Returns an error if the exit code is not one of the provided codes.
 func (c *Client) request(r *request, ret interface{}) (int, error) {
+	statusCode, b, err := c.requestRaw(r)
+	if err != nil {
+		return statusCode, err
+	}
+	if ret != nil {
+		if err := json.Unmarshal(b, ret); err != nil {
+			return statusCode, err
+		}
+	}
+	return statusCode, nil
+}
+
+// requestRaw makes a request with retries and returns the response body.
+// Returns an error if the exit code is not one of the provided codes.
+func (c *Client) requestRaw(r *request) (int, []byte, error) {
 	if c.fake || (c.dry && r.method != http.MethodGet) {
-		return r.exitCodes[0], nil
+		return r.exitCodes[0], nil, nil
 	}
 	resp, err := c.requestRetry(r.method, r.path, r.accept, r.requestBody)
 	if err != nil {
-		return 0, err
+		return 0, nil, err
 	}
 	defer resp.Body.Close()
 	b, err := ioutil.ReadAll(resp.Body)
 	if err != nil {
-		return 0, err
+		return 0, nil, err
 	}
 	var okCode bool
 	for _, code := range r.exitCodes {
@@ -151,20 +281,15 @@ func (c *Client) request(r *request, ret interface{}) (int, error) {
 	}
 	if !okCode {
 		clientError := ClientError{}
-		if err := json.Unmarshal(b, clientError); err != nil {
-			return resp.StatusCode, err
+		if err := json.Unmarshal(b, &clientError); err != nil {
+			return resp.StatusCode, b, err
 		}
-		return resp.StatusCode, requestError{
+		return resp.StatusCode, b, requestError{
 			ClientError: clientError,
 			ErrorString: fmt.Sprintf("status code %d not one of %v, body: %s", resp.StatusCode, r.exitCodes, string(b)),
 		}
 	}
-	if ret != nil {
-		if err := json.Unmarshal(b, ret); err != nil {
-			return 0, err
-		}
-	}
-	return resp.StatusCode, nil
+	return resp.StatusCode, b, nil
 }
 
 // Retry on transport failures. Retries on 500s, retries after sleep on
@@ -184,7 +309,7 @@ func (c *Client) requestRetry(method, path, accept string, body interface{}) (*h
 				// be caused by a bad API call and we'll just burn through API
 				// tokens.
 				resp.Body.Close()
-				timeSleep(backoff)
+				c.time.Sleep(backoff)
 				backoff *= 2
 			} else if resp.StatusCode == 403 {
 				if resp.Header.Get("X-RateLimit-Remaining") == "0" {
@@ -194,9 +319,9 @@ func (c *Client) requestRetry(method, path, accept string, body interface{}) (*h
 					if t, err = strconv.Atoi(resp.Header.Get("X-RateLimit-Reset")); err == nil {
 						// Sleep an extra second plus how long GitHub wants us to
 						// sleep. If it's going to take too long, then break.
-						sleepTime := time.Until(time.Unix(int64(t), 0)) + time.Second
+						sleepTime := c.time.Until(time.Unix(int64(t), 0)) + time.Second
 						if sleepTime > 0 && sleepTime < maxSleepTime {
-							timeSleep(sleepTime)
+							c.time.Sleep(sleepTime)
 						} else {
 							break
 						}
@@ -212,11 +337,11 @@ func (c *Client) requestRetry(method, path, accept string, body interface{}) (*h
 			} else {
 				// Retry 500 after a break.
 				resp.Body.Close()
-				timeSleep(backoff)
+				c.time.Sleep(backoff)
 				backoff *= 2
 			}
 		} else {
-			timeSleep(backoff)
+			c.time.Sleep(backoff)
 			backoff *= 2
 		}
 	}
@@ -250,27 +375,54 @@ func (c *Client) doRequest(method, path, accept string, body interface{}) (*http
 	return c.client.Do(req)
 }
 
+// Not thread-safe - callers need to hold c.mut.
+func (c *Client) getUserData() error {
+	var u User
+	_, err := c.request(&request{
+		method:    http.MethodGet,
+		path:      fmt.Sprintf("%s/user", c.base),
+		exitCodes: []int{200},
+	}, &u)
+	if err != nil {
+		return err
+	}
+	c.botName = u.Login
+	// email needs to be publicly accessible via the profile
+	// of the current account. Read below for more info
+	// https://developer.github.com/v3/users/#get-a-single-user
+	c.email = u.Email
+	return nil
+}
+
 func (c *Client) BotName() (string, error) {
 	c.mut.Lock()
 	defer c.mut.Unlock()
 	if c.botName == "" {
-		var u User
-		_, err := c.request(&request{
-			method:    http.MethodGet,
-			path:      fmt.Sprintf("%s/user", c.base),
-			exitCodes: []int{200},
-		}, &u)
-		if err != nil {
+		if err := c.getUserData(); err != nil {
 			return "", fmt.Errorf("fetching bot name from GitHub: %v", err)
 		}
-		c.botName = u.Login
 	}
 	return c.botName, nil
+}
+
+func (c *Client) Email() (string, error) {
+	c.mut.Lock()
+	defer c.mut.Unlock()
+	if c.email == "" {
+		if err := c.getUserData(); err != nil {
+			return "", fmt.Errorf("fetching e-mail from GitHub: %v", err)
+		}
+	}
+	return c.email, nil
 }
 
 // IsMember returns whether or not the user is a member of the org.
 func (c *Client) IsMember(org, user string) (bool, error) {
 	c.log("IsMember", org, user)
+	if org == user {
+		// Make it possible to run a couple of plugins on personal repos.
+		return true, nil
+	}
 	code, err := c.request(&request{
 		method:    http.MethodGet,
 		path:      fmt.Sprintf("%s/orgs/%s/members/%s", c.base, org, user),
@@ -448,6 +600,18 @@ func (c *Client) GetPullRequest(org, repo string, number int) (*PullRequest, err
 	return &pr, err
 }
 
+// GetPullRequestPatch gets the patch version of a pull request.
+func (c *Client) GetPullRequestPatch(org, repo string, number int) ([]byte, error) {
+	c.log("GetPullRequestPatch", org, repo, number)
+	_, patch, err := c.requestRaw(&request{
+		accept:    "application/vnd.github.VERSION.patch",
+		method:    http.MethodGet,
+		path:      fmt.Sprintf("%s/repos/%s/%s/pulls/%d", c.base, org, repo, number),
+		exitCodes: []int{200},
+	})
+	return patch, err
+}
+
 // CreatePullRequest creates a new pull request and returns its number if
 // the creation is successful, otherwise any error that is encountered.
 func (c *Client) CreatePullRequest(org, repo, title, body, head, base string, canModify bool) (int, error) {
@@ -558,15 +722,40 @@ func (c *Client) ListReviews(org, repo string, number int) ([]Review, error) {
 }
 
 // CreateStatus creates or updates the status of a commit.
-func (c *Client) CreateStatus(org, repo, ref string, s Status) error {
-	c.log("CreateStatus", org, repo, ref, s)
+func (c *Client) CreateStatus(org, repo, sha string, s Status) error {
+	c.log("CreateStatus", org, repo, sha, s)
 	_, err := c.request(&request{
 		method:      http.MethodPost,
-		path:        fmt.Sprintf("%s/repos/%s/%s/statuses/%s", c.base, org, repo, ref),
+		path:        fmt.Sprintf("%s/repos/%s/%s/statuses/%s", c.base, org, repo, sha),
 		requestBody: &s,
 		exitCodes:   []int{201},
 	}, nil)
 	return err
+}
+
+// ListStatuses gets commit statuses for a given ref.
+func (c *Client) ListStatuses(org, repo, ref string) ([]Status, error) {
+	c.log("ListStatuses", org, repo, ref)
+	var statuses []Status
+	_, err := c.request(&request{
+		method:    http.MethodGet,
+		path:      fmt.Sprintf("%s/repos/%s/%s/statuses/%s", c.base, org, repo, ref),
+		exitCodes: []int{200},
+	}, &statuses)
+	return statuses, err
+}
+
+// GetRepo returns the repo for the provided owner/name combination.
+func (c *Client) GetRepo(owner, name string) (Repo, error) {
+	c.log("GetRepo", owner, name)
+
+	var repo Repo
+	_, err := c.request(&request{
+		method:    http.MethodGet,
+		path:      fmt.Sprintf("%s/repos/%s/%s", c.base, owner, name),
+		exitCodes: []int{200},
+	}, &repo)
+	return repo, err
 }
 
 func (c *Client) GetRepos(org string, isUser bool) ([]Repo, error) {
@@ -608,6 +797,48 @@ func (c *Client) GetRepos(org string, isUser bool) ([]Repo, error) {
 	return repos, nil
 }
 
+func (c *Client) GetBranches(org, repo string) ([]Branch, error) {
+	c.log("GetBranches", org, repo)
+	var branches []Branch
+	_, err := c.request(&request{
+		method:    http.MethodGet,
+		path:      fmt.Sprintf("%s/repos/%s/%s/branches", c.base, org, repo),
+		exitCodes: []int{200},
+	}, &branches)
+	return branches, err
+}
+
+func (c *Client) RemoveBranchProtection(org, repo, branch string) error {
+	c.log("RemoveBranchProtection", org, repo, branch)
+	_, err := c.request(&request{
+		method:    http.MethodDelete,
+		path:      fmt.Sprintf("%s/repos/%s/%s/branches/%s/protection", c.base, org, repo, branch),
+		exitCodes: []int{204},
+	}, nil)
+	return err
+}
+
+func (c *Client) UpdateBranchProtection(org, repo, branch string, requiredContexts []string, pushers []string) error {
+	c.log("UpdateBranchProtection", org, repo, branch, requiredContexts, pushers)
+	_, err := c.request(&request{
+		method: http.MethodPut,
+		path:   fmt.Sprintf("%s/repos/%s/%s/branches/%s/protection", c.base, org, repo, branch),
+		requestBody: BranchProtectionRequest{
+			RequiredStatusChecks: RequiredStatusChecks{
+				Strict:   false,
+				Contexts: requiredContexts,
+			},
+			EnforceAdmins:              false,
+			RequiredPullRequestReviews: nil,
+			Restrictions: Restrictions{
+				Teams: pushers,
+			},
+		},
+		exitCodes: []int{200},
+	}, nil)
+	return err
+}
+
 // Adds Label label/color to given org/repo
 func (c *Client) AddRepoLabel(org, repo, label, color string) error {
 	c.log("AddRepoLabel", org, repo, label, color)
@@ -620,14 +851,26 @@ func (c *Client) AddRepoLabel(org, repo, label, color string) error {
 	return err
 }
 
-// Updates org/repo label to label/color
-func (c *Client) UpdateRepoLabel(org, repo, label, color string) error {
-	c.log("UpdateRepoLabel", org, repo, label, color)
+// Updates org/repo label to new name and color
+func (c *Client) UpdateRepoLabel(org, repo, label, name, color string) error {
+	c.log("UpdateRepoLabel", org, repo, label, name, color)
 	_, err := c.request(&request{
 		method:      http.MethodPatch,
 		path:        fmt.Sprintf("%s/repos/%s/%s/labels/%s", c.base, org, repo, label),
-		requestBody: Label{Name: label, Color: color},
+		requestBody: Label{Name: name, Color: color},
 		exitCodes:   []int{200},
+	}, nil)
+	return err
+}
+
+// Delete label in org/repo
+func (c *Client) DeleteRepoLabel(org, repo, label string) error {
+	c.log("DeleteRepoLabel", org, repo, label)
+	_, err := c.request(&request{
+		method:      http.MethodDelete,
+		path:        fmt.Sprintf("%s/repos/%s/%s/labels/%s", c.base, org, repo, label),
+		requestBody: Label{Name: label},
+		exitCodes:   []int{204},
 	}, nil)
 	return err
 }
@@ -1196,4 +1439,32 @@ func (c *Client) ListIssueEvents(org, repo string, num int) ([]ListedIssueEvent,
 		return nil, err
 	}
 	return events, nil
+}
+
+// IsMergeable determines if a PR can be merged.
+// Mergeability is calculated by a background job on github and is not immediately available when
+// new commits are added so the PR must be polled until the background job completes.
+func (c *Client) IsMergeable(org, repo string, number int, sha string) (bool, error) {
+	backoff := time.Second * 3
+	maxTries := 3
+	for try := 0; try < maxTries; try++ {
+		pr, err := c.GetPullRequest(org, repo, number)
+		if err != nil {
+			return false, err
+		}
+		if pr.Head.SHA != sha {
+			return false, fmt.Errorf("pull request head changed while checking mergeability (%s -> %s)", sha, pr.Head.SHA)
+		}
+		if pr.Merged {
+			return false, errors.New("pull request was merged while checking mergeability")
+		}
+		if pr.Mergable != nil {
+			return *pr.Mergable, nil
+		}
+		if try+1 < maxTries {
+			c.time.Sleep(backoff)
+			backoff *= 2
+		}
+	}
+	return false, fmt.Errorf("reached maximum number of retries (%d) checking mergeability", maxTries)
 }

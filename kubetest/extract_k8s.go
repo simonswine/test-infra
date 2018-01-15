@@ -38,7 +38,7 @@ const (
 	local               // local
 	gci                 // gci/FAMILY
 	gciCi               // gci/FAMILY/CI_VERSION
-	gke                 // gke, gke-staging, gke-test
+	gke                 // gke(deprecated), gke-default, gke-latest
 	ci                  // ci/latest, ci/latest-1.5
 	rc                  // release/latest, release/latest-1.5
 	stable              // release/stable, release/stable-1.5
@@ -69,7 +69,7 @@ func (l *extractStrategies) String() string {
 func (l *extractStrategies) Set(value string) error {
 	var strategies = map[string]extractMode{
 		`^(local)`:                    local,
-		`^gke-?(staging|test)?$`:      gke,
+		`^gke-?(default|latest)?$`:    gke,
 		`^gci/([\w-]+)$`:              gci,
 		`^gci/([\w-]+)/(.+)$`:         gciCi,
 		`^ci/(.+)$`:                   ci,
@@ -224,6 +224,31 @@ var (
 // This will download version from the specified url subdir and extract
 // the tarballs.
 var getKube = func(url, version string, getSrc bool) error {
+	// TODO(krzyzacy): migrate rest of the get-kube.sh logic into kubetest, using getNamedBinaries
+	// get/extract the src tarball first since bazel needs a clean tree
+	if getSrc {
+		cwd, err := os.Getwd()
+		if err != nil {
+			return err
+		}
+		if cwd != "kubernetes" {
+			if err = os.Mkdir("kubernetes", 0755); err != nil {
+				return err
+			}
+			if err = os.Chdir("kubernetes"); err != nil {
+				return err
+			}
+		}
+
+		if err := os.Setenv("KUBE_GIT_VERSION", version); err != nil {
+			return err
+		}
+
+		if err := getNamedBinaries(url, version, "kubernetes-src.tar.gz", 3); err != nil {
+			return err
+		}
+	}
+
 	k, err := ensureKube()
 	if err != nil {
 		return err
@@ -262,12 +287,6 @@ var getKube = func(url, version string, getSrc bool) error {
 		sleep(time.Duration(i) * time.Second)
 	}
 
-	// TODO(krzyzacy): migrate rest of the get-kube.sh logic into kubetest, using getNamedBinaries
-	if getSrc {
-		if err := getNamedBinaries(url, version, "kubernetes-src.tar.gz", 3); err != nil {
-			return err
-		}
-	}
 	return nil
 }
 
@@ -373,6 +392,23 @@ func (e extractStrategy) Extract(project, zone string, extractSrc bool) error {
 		if zone == "" {
 			return fmt.Errorf("--gcp-zone unset")
 		}
+		if e.value == "gke" {
+			log.Print("*** --extract=gke is deprecated, migrate to --extract=gke-default ***")
+		}
+		if e.option == "latest" {
+			// get latest supported master version
+			res, err := output(exec.Command("gcloud", "container", "get-server-config", fmt.Sprintf("--project=%v", project), fmt.Sprintf("--zone=%v", zone), "--format=value(validMasterVersions)"))
+			if err != nil {
+				return err
+			}
+			versions := strings.Split(string(res), ";")
+			if len(versions) == 0 {
+				return fmt.Errorf("invalid gke master version string: %s", string(res))
+			}
+			return getKube("https://storage.googleapis.com/kubernetes-release-gke/release", "v"+versions[0], extractSrc)
+		}
+
+		// get default cluster version for default extract strategy
 		ci, err := output(exec.Command("gcloud", "container", "get-server-config", fmt.Sprintf("--project=%v", project), fmt.Sprintf("--zone=%v", zone), "--format=value(defaultClusterVersion)"))
 		if err != nil {
 			return err

@@ -166,7 +166,7 @@ func TestAccumulateBatch(t *testing.T) {
 			pjs = append(pjs, npj)
 		}
 		merges, pending := accumulateBatch(test.presubmits, pulls, pjs)
-		if pending != test.pending {
+		if (len(pending) > 0) != test.pending {
 			t.Errorf("For case \"%s\", got wrong pending.", test.name)
 		}
 		testPullsMatchList(t, test.name, merges, test.merges)
@@ -318,8 +318,9 @@ func TestAccumulate(t *testing.T) {
 }
 
 type fgc struct {
-	refs   map[string]string
-	merged int
+	refs      map[string]string
+	merged    int
+	setStatus bool
 }
 
 func (f *fgc) GetRef(o, r, ref string) (string, error) {
@@ -333,6 +334,135 @@ func (f *fgc) Query(ctx context.Context, q interface{}, vars map[string]interfac
 func (f *fgc) Merge(org, repo string, number int, details github.MergeDetails) error {
 	f.merged++
 	return nil
+}
+
+func (f *fgc) CreateStatus(org, repo, ref string, s github.Status) error {
+	switch s.State {
+	case github.StatusSuccess, github.StatusError, github.StatusPending, github.StatusFailure:
+		f.setStatus = true
+		return nil
+	}
+	return fmt.Errorf("invalid 'state' value: %q", s.State)
+}
+
+func TestSetStatuses(t *testing.T) {
+	testcases := []struct {
+		name string
+
+		inPool     bool
+		hasContext bool
+		state      githubql.StatusState
+		desc       string
+
+		shouldSet bool
+	}{
+		{
+			name: "in pool with proper context",
+
+			inPool:     true,
+			hasContext: true,
+			state:      githubql.StatusStateSuccess,
+			desc:       statusInPool,
+
+			shouldSet: false,
+		},
+		{
+			name: "in pool without context",
+
+			inPool:     true,
+			hasContext: false,
+
+			shouldSet: true,
+		},
+		{
+			name: "in pool with improper context",
+
+			inPool:     true,
+			hasContext: true,
+			state:      githubql.StatusStateSuccess,
+			desc:       statusNotInPool,
+
+			shouldSet: true,
+		},
+		{
+			name: "in pool with wrong state",
+
+			inPool:     true,
+			hasContext: true,
+			state:      githubql.StatusStatePending,
+			desc:       statusInPool,
+
+			shouldSet: true,
+		},
+		{
+			name: "not in pool with proper context",
+
+			inPool:     false,
+			hasContext: true,
+			state:      githubql.StatusStatePending,
+			desc:       statusNotInPool,
+
+			shouldSet: false,
+		},
+		{
+			name: "not in pool with improper context",
+
+			inPool:     false,
+			hasContext: true,
+			state:      githubql.StatusStatePending,
+			desc:       statusInPool,
+
+			shouldSet: true,
+		},
+		{
+			name: "not in pool with no context",
+
+			inPool:     false,
+			hasContext: false,
+
+			shouldSet: true,
+		},
+	}
+	for _, tc := range testcases {
+		var pr PullRequest
+		pr.Commits.Nodes = []struct{ Commit Commit }{{}}
+		if tc.hasContext {
+			pr.Commits.Nodes[0].Commit.Status.Contexts = []Context{
+				{
+					Context:     githubql.String(statusContext),
+					State:       tc.state,
+					Description: githubql.String(tc.desc),
+				},
+			}
+		}
+		var pool []PullRequest
+		if tc.inPool {
+			pool = []PullRequest{pr}
+		}
+		fc := &fgc{}
+		ca := &config.Agent{}
+		ca.Set(&config.Config{})
+		// setStatuses logs instead of returning errors.
+		// Construct a logger to watch for errors to be printed.
+		log := logrus.WithField("component", "tide")
+		initialLog, err := log.String()
+		if err != nil {
+			t.Fatalf("Failed to get log output before testing: %v", err)
+		}
+
+		c := &Controller{ghc: fc, ca: ca, logger: log}
+		c.setStatuses([]PullRequest{pr}, pool)
+		if str, err := log.String(); err != nil {
+			t.Fatalf("For case %s: failed to get log output: %v", tc.name, err)
+		} else if str != initialLog {
+			t.Errorf("For case %s: error setting status: %s", tc.name, str)
+		}
+		if tc.shouldSet && !fc.setStatus {
+			t.Errorf("For case %s: should set but didn't", tc.name)
+		} else if !tc.shouldSet && fc.setStatus {
+			t.Errorf("For case %s: should not set but did", tc.name)
+		}
+	}
 }
 
 // TestDividePool ensures that subpools returned by dividePool satisfy a few
@@ -547,12 +677,11 @@ func TestPickBatch(t *testing.T) {
 		var pr PullRequest
 		pr.Number = githubql.Int(i)
 		pr.Commits.Nodes = []struct {
-			Commit struct {
-				Status struct{ State githubql.String }
-			}
+			Commit Commit
 		}{{}}
-		if testpr.success {
-			pr.Commits.Nodes[0].Commit.Status.State = githubql.String("SUCCESS")
+		pr.Commits.Nodes[0].Commit.Status.Contexts = append(pr.Commits.Nodes[0].Commit.Status.Contexts, Context{State: githubql.StatusStateSuccess})
+		if !testpr.success {
+			pr.Commits.Nodes[0].Commit.Status.Contexts[0].State = githubql.StatusStateFailure
 		}
 		pr.HeadRef.Target.OID = githubql.String(fmt.Sprintf("origin/pr-%d", i))
 		sp.prs = append(sp.prs, pr)
@@ -572,8 +701,10 @@ func TestPickBatch(t *testing.T) {
 				break
 			}
 		}
-		if found != testpr.included {
+		if found && !testpr.included {
 			t.Errorf("PR %d should not be picked.", i)
+		} else if !found && testpr.included {
+			t.Errorf("PR %d should be picked.", i)
 		}
 	}
 }
@@ -760,11 +891,8 @@ func TestTakeAction(t *testing.T) {
 				var pr PullRequest
 				pr.Number = githubql.Int(i)
 				pr.Commits.Nodes = []struct {
-					Commit struct {
-						Status struct{ State githubql.String }
-					}
+					Commit Commit
 				}{{}}
-				pr.Commits.Nodes[0].Commit.Status.State = githubql.String("SUCCESS")
 				pr.HeadRef.Target.OID = githubql.String(fmt.Sprintf("origin/pr-%d", i))
 				sp.prs = append(sp.prs, pr)
 				prs = append(prs, pr)
@@ -780,8 +908,12 @@ func TestTakeAction(t *testing.T) {
 			ca:     ca,
 			kc:     &fkc,
 		}
+		var batchPending []PullRequest
+		if tc.batchPending {
+			batchPending = []PullRequest{{}}
+		}
 		t.Logf("Test case: %s", tc.name)
-		if act, _, err := c.takeAction(sp, tc.batchPending, genPulls(tc.successes), genPulls(tc.pendings), genPulls(tc.nones), genPulls(tc.batchMerges)); err != nil {
+		if act, _, err := c.takeAction(sp, batchPending, genPulls(tc.successes), genPulls(tc.pendings), genPulls(tc.nones), genPulls(tc.batchMerges)); err != nil {
 			t.Errorf("Error in takeAction: %v", err)
 			continue
 		} else if act != tc.action {

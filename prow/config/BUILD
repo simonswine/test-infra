@@ -11,6 +11,7 @@ go_test(
     srcs = [
         "config_test.go",
         "jobs_test.go",
+        "tide_test.go",
     ],
     data = [
         "//jobs",
@@ -18,11 +19,11 @@ go_test(
         "//prow:configs",
         "//scenarios",
     ],
+    embed = [":go_default_library"],
     importpath = "k8s.io/test-infra/prow/config",
-    library = ":go_default_library",
     deps = [
+        "//prow/github:go_default_library",
         "//prow/kube:go_default_library",
-        "//vendor/github.com/ghodss/yaml:go_default_library",
     ],
 )
 
@@ -30,16 +31,19 @@ go_library(
     name = "go_default_library",
     srcs = [
         "agent.go",
+        "branch_protection.go",
         "config.go",
         "jobs.go",
+        "tide.go",
     ],
     importpath = "k8s.io/test-infra/prow/config",
     deps = [
+        "//prow/github:go_default_library",
         "//prow/kube:go_default_library",
         "//prow/kube/labels:go_default_library",
         "//vendor/github.com/ghodss/yaml:go_default_library",
-        "//vendor/github.com/robfig/cron:go_default_library",
         "//vendor/github.com/sirupsen/logrus:go_default_library",
+        "//vendor/gopkg.in/robfig/cron.v2:go_default_library",
     ],
 )
 

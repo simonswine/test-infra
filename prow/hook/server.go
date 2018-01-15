@@ -72,39 +72,53 @@ func ValidateWebhook(w http.ResponseWriter, r *http.Request, hmacSecret []byte) 
 
 	// Header checks: It must be a POST with an event type and a signature.
 	if r.Method != http.MethodPost {
-		http.Error(w, "405 Method not allowed", http.StatusMethodNotAllowed)
+		resp := "405 Method not allowed"
+		logrus.Debug(resp)
+		http.Error(w, resp, http.StatusMethodNotAllowed)
 		return "", "", nil, false
 	}
 	eventType := r.Header.Get("X-GitHub-Event")
 	if eventType == "" {
-		http.Error(w, "400 Bad Request: Missing X-GitHub-Event Header", http.StatusBadRequest)
+		resp := "400 Bad Request: Missing X-GitHub-Event Header"
+		logrus.Debug(resp)
+		http.Error(w, resp, http.StatusBadRequest)
 		return "", "", nil, false
 	}
 	eventGUID := r.Header.Get("X-GitHub-Delivery")
 	if eventGUID == "" {
-		http.Error(w, "400 Bad Request: Missing X-GitHub-Delivery Header", http.StatusBadRequest)
+		resp := "400 Bad Request: Missing X-GitHub-Delivery Header"
+		logrus.Debug(resp)
+		http.Error(w, resp, http.StatusBadRequest)
 		return "", "", nil, false
 	}
 	sig := r.Header.Get("X-Hub-Signature")
 	if sig == "" {
-		http.Error(w, "403 Forbidden: Missing X-Hub-Signature", http.StatusForbidden)
+		resp := "403 Forbidden: Missing X-Hub-Signature"
+		logrus.Debug(resp)
+		http.Error(w, resp, http.StatusForbidden)
 		return "", "", nil, false
 	}
 	contentType := r.Header.Get("content-type")
 	if contentType != "application/json" {
-		http.Error(w, "400 Bad Request: Hook only accepts content-type: application/json - please reconfigure this hook on GitHub", http.StatusBadRequest)
+		resp := "400 Bad Request: Hook only accepts content-type: application/json - please reconfigure this hook on GitHub"
+		logrus.Debug(resp)
+		http.Error(w, resp, http.StatusBadRequest)
 		return "", "", nil, false
 	}
 
 	payload, err := ioutil.ReadAll(r.Body)
 	if err != nil {
-		http.Error(w, "500 Internal Server Error: Failed to read request body", http.StatusInternalServerError)
+		resp := "500 Internal Server Error: Failed to read request body"
+		logrus.Debug(resp)
+		http.Error(w, resp, http.StatusInternalServerError)
 		return "", "", nil, false
 	}
 
 	// Validate the payload with our HMAC secret.
 	if !github.ValidatePayload(payload, sig, hmacSecret) {
-		http.Error(w, "403 Forbidden: Invalid X-Hub-Signature", http.StatusForbidden)
+		resp := "403 Forbidden: Invalid X-Hub-Signature"
+		logrus.Debug(resp)
+		http.Error(w, resp, http.StatusForbidden)
 		return "", "", nil, false
 	}
 
@@ -114,8 +128,8 @@ func ValidateWebhook(w http.ResponseWriter, r *http.Request, hmacSecret []byte) 
 func (s *Server) demuxEvent(eventType, eventGUID string, payload []byte, h http.Header) error {
 	l := logrus.WithFields(
 		logrus.Fields{
-			"event-type": eventType,
-			"event-GUID": eventGUID,
+			"event-type":     eventType,
+			github.EventGUID: eventGUID,
 		},
 	)
 	// We don't want to fail the webhook due to a metrics error.
@@ -131,6 +145,7 @@ func (s *Server) demuxEvent(eventType, eventGUID string, payload []byte, h http.
 		if err := json.Unmarshal(payload, &i); err != nil {
 			return err
 		}
+		i.GUID = eventGUID
 		srcRepo = i.Repo.FullName
 		go s.handleIssueEvent(l, i)
 	case "issue_comment":
@@ -138,6 +153,7 @@ func (s *Server) demuxEvent(eventType, eventGUID string, payload []byte, h http.
 		if err := json.Unmarshal(payload, &ic); err != nil {
 			return err
 		}
+		ic.GUID = eventGUID
 		srcRepo = ic.Repo.FullName
 		go s.handleIssueCommentEvent(l, ic)
 	case "pull_request":
@@ -145,6 +161,7 @@ func (s *Server) demuxEvent(eventType, eventGUID string, payload []byte, h http.
 		if err := json.Unmarshal(payload, &pr); err != nil {
 			return err
 		}
+		pr.GUID = eventGUID
 		srcRepo = pr.Repo.FullName
 		go s.handlePullRequestEvent(l, pr)
 	case "pull_request_review":
@@ -152,6 +169,7 @@ func (s *Server) demuxEvent(eventType, eventGUID string, payload []byte, h http.
 		if err := json.Unmarshal(payload, &re); err != nil {
 			return err
 		}
+		re.GUID = eventGUID
 		srcRepo = re.Repo.FullName
 		go s.handleReviewEvent(l, re)
 	case "pull_request_review_comment":
@@ -159,6 +177,7 @@ func (s *Server) demuxEvent(eventType, eventGUID string, payload []byte, h http.
 		if err := json.Unmarshal(payload, &rce); err != nil {
 			return err
 		}
+		rce.GUID = eventGUID
 		srcRepo = rce.Repo.FullName
 		go s.handleReviewCommentEvent(l, rce)
 	case "push":
@@ -166,6 +185,7 @@ func (s *Server) demuxEvent(eventType, eventGUID string, payload []byte, h http.
 		if err := json.Unmarshal(payload, &pe); err != nil {
 			return err
 		}
+		pe.GUID = eventGUID
 		srcRepo = pe.Repo.FullName
 		go s.handlePushEvent(l, pe)
 	case "status":
@@ -173,6 +193,7 @@ func (s *Server) demuxEvent(eventType, eventGUID string, payload []byte, h http.
 		if err := json.Unmarshal(payload, &se); err != nil {
 			return err
 		}
+		se.GUID = eventGUID
 		srcRepo = se.Repo.FullName
 		go s.handleStatusEvent(l, se)
 	}
@@ -228,7 +249,9 @@ func (s *Server) demuxExternal(l *logrus.Entry, externalPlugins []plugins.Extern
 	for _, p := range externalPlugins {
 		go func(p plugins.ExternalPlugin) {
 			if err := s.dispatch(p.Endpoint, payload, h); err != nil {
-				l.WithError(err).Errorf("Error dispatching event to external plugin %q.", p.Name)
+				l.WithError(err).WithField("external-plugin", p.Name).Error("Error dispatching event to external plugin.")
+			} else {
+				l.WithField("external-plugin", p.Name).Info("Dispatched event to external plugin")
 			}
 		}(p)
 	}

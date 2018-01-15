@@ -27,7 +27,7 @@ const botName = "k8s-ci-robot"
 
 type FakeClient struct {
 	Issues              []github.Issue
-	OrgMembers          []string
+	OrgMembers          map[string][]string
 	Collaborators       []string
 	IssueComments       map[int][]github.IssueComment
 	IssueCommentID      int
@@ -36,6 +36,7 @@ type FakeClient struct {
 	PullRequestComments map[int][]github.ReviewComment
 	Reviews             map[int][]github.Review
 	CombinedStatuses    map[string]*github.CombinedStatus
+	CreatedStatuses     map[string][]github.Status
 	IssueEvents         map[int][]github.ListedIssueEvent
 
 	//All Labels That Exist In The Repo
@@ -66,7 +67,7 @@ func (f *FakeClient) BotName() (string, error) {
 }
 
 func (f *FakeClient) IsMember(org, user string) (bool, error) {
-	for _, m := range f.OrgMembers {
+	for _, m := range f.OrgMembers[org] {
 		if m == user {
 			return true, nil
 		}
@@ -150,8 +151,27 @@ func (f *FakeClient) GetRef(owner, repo, ref string) (string, error) {
 	return "abcde", nil
 }
 
-func (f *FakeClient) CreateStatus(owner, repo, ref string, s github.Status) error {
+func (f *FakeClient) CreateStatus(owner, repo, sha string, s github.Status) error {
+	if f.CreatedStatuses == nil {
+		f.CreatedStatuses = make(map[string][]github.Status)
+	}
+	statuses := f.CreatedStatuses[sha]
+	var updated bool
+	for i := range statuses {
+		if statuses[i].Context == s.Context {
+			statuses[i] = s
+			updated = true
+		}
+	}
+	if !updated {
+		statuses = append(statuses, s)
+	}
+	f.CreatedStatuses[sha] = statuses
 	return nil
+}
+
+func (f *FakeClient) ListStatuses(org, repo, ref string) ([]github.Status, error) {
+	return f.CreatedStatuses[ref], nil
 }
 
 func (f *FakeClient) GetCombinedStatus(owner, repo, ref string) (*github.CombinedStatus, error) {

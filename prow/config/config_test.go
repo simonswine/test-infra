@@ -20,25 +20,30 @@ import (
 	"bytes"
 	"errors"
 	"fmt"
-	"io/ioutil"
+	"os"
 	"reflect"
 	"regexp"
 	"strings"
 	"testing"
 
-	"github.com/ghodss/yaml"
-
+	"k8s.io/test-infra/prow/github"
 	"k8s.io/test-infra/prow/kube"
 )
 
-func TestConfigLoads(t *testing.T) {
-	_, err := Load("../config.yaml")
+// Loaded at TestMain.
+var c *Config
+
+func TestMain(m *testing.M) {
+	conf, err := Load("../config.yaml")
 	if err != nil {
-		t.Fatalf("Could not load config: %v", err)
+		fmt.Printf("Could not load config: %v", err)
+		os.Exit(1)
 	}
+	c = conf
+	os.Exit(m.Run())
 }
 
-func Replace(j *Presubmit, ks *Presubmit) error {
+func replace(j *Presubmit, ks *Presubmit) error {
 	name := strings.Replace(j.Name, "pull-kubernetes", "pull-security-kubernetes", -1)
 	if name != ks.Name {
 		return fmt.Errorf("%s should match %s", name, ks.Name)
@@ -47,13 +52,30 @@ func Replace(j *Presubmit, ks *Presubmit) error {
 	j.RerunCommand = strings.Replace(j.RerunCommand, "pull-kubernetes", "pull-security-kubernetes", -1)
 	j.Trigger = strings.Replace(j.Trigger, "pull-kubernetes", "pull-security-kubernetes", -1)
 	j.Context = strings.Replace(j.Context, "pull-kubernetes", "pull-security-kubernetes", -1)
+
+	if j.Agent == "kubernetes" {
+		if len(j.Spec.Containers) != 1 {
+			return fmt.Errorf("expected a single container for %s", name)
+		}
+		for i, arg := range j.Spec.Containers[0].Args {
+			// handle --repo substitution for main repo
+			if strings.HasPrefix(arg, "--repo=k8s.io/kubernetes") || strings.HasPrefix(arg, "--repo=k8s.io/$(REPO_NAME)") {
+				j.Spec.Containers[0].Args[i] = strings.Replace(arg, "k8s.io/", "github.com/kubernetes-security/", 1)
+
+				// handle upload bucket
+			} else if strings.HasPrefix(arg, "--upload=") {
+				j.Spec.Containers[0].Args[i] = "--upload=gs://kubernetes-security-jenkins/pr-logs"
+			}
+		}
+	}
+
 	j.re = ks.re
 	if len(j.RunAfterSuccess) != len(ks.RunAfterSuccess) {
 		return fmt.Errorf("length of RunAfterSuccess should match. - %s", name)
 	}
 
 	for i := range j.RunAfterSuccess {
-		if err := Replace(&j.RunAfterSuccess[i], &ks.RunAfterSuccess[i]); err != nil {
+		if err := replace(&j.RunAfterSuccess[i], &ks.RunAfterSuccess[i]); err != nil {
 			return err
 		}
 	}
@@ -61,45 +83,46 @@ func Replace(j *Presubmit, ks *Presubmit) error {
 	return nil
 }
 
-func CheckContext(t *testing.T, repo string, p Presubmit) {
+func checkContext(t *testing.T, repo string, p Presubmit) {
 	if p.Name != p.Context {
 		t.Errorf("Context does not match job name: %s in %s", p.Name, repo)
 	}
 	for _, c := range p.RunAfterSuccess {
-		CheckContext(t, repo, c)
+		checkContext(t, repo, c)
 	}
 }
 
 func TestContextMatches(t *testing.T) {
-	c, err := Load("../config.yaml")
-	if err != nil {
-		t.Fatalf("Could not load config: %v", err)
-	}
-
 	for repo, presubmits := range c.Presubmits {
 		for _, p := range presubmits {
-			CheckContext(t, repo, p)
+			checkContext(t, repo, p)
 		}
 	}
 }
 
-func CheckRetest(t *testing.T, repo string, presubmits []Presubmit) {
+func checkRetest(t *testing.T, repo string, presubmits []Presubmit) {
 	for _, p := range presubmits {
 		expected := fmt.Sprintf("/test %s", p.Name)
 		if p.RerunCommand != expected {
 			t.Errorf("%s in %s rerun_command: %s != expected: %s", repo, p.Name, p.RerunCommand, expected)
 		}
-		CheckRetest(t, repo, p.RunAfterSuccess)
+		checkRetest(t, repo, p.RunAfterSuccess)
 	}
 }
 
 func TestRetestMatchJobsName(t *testing.T) {
-	c, err := Load("../config.yaml")
-	if err != nil {
-		t.Fatalf("Could not load config: %v", err)
-	}
 	for repo, presubmits := range c.Presubmits {
-		CheckRetest(t, repo, presubmits)
+		checkRetest(t, repo, presubmits)
+	}
+}
+
+func TestTideMergeMethod(t *testing.T) {
+	for name, method := range c.Tide.MergeType {
+		if method != github.MergeMerge &&
+			method != github.MergeRebase &&
+			method != github.MergeSquash {
+			t.Errorf("Merge type %q for %s is not a valid type", method, name)
+		}
 	}
 }
 
@@ -108,13 +131,13 @@ type SubmitQueueConfig struct {
 	RequiredRetestContexts string `json:"required-retest-contexts"`
 }
 
-func FindRequired(t *testing.T, presubmits []Presubmit) []string {
+func findRequired(t *testing.T, presubmits []Presubmit) []string {
 	var required []string
 	for _, p := range presubmits {
 		if !p.AlwaysRun {
 			continue
 		}
-		for _, r := range FindRequired(t, p.RunAfterSuccess) {
+		for _, r := range findRequired(t, p.RunAfterSuccess) {
 			required = append(required, r)
 		}
 		if p.SkipReport {
@@ -125,50 +148,19 @@ func FindRequired(t *testing.T, presubmits []Presubmit) []string {
 	return required
 }
 
-func TestRequiredRetestContextsMatch(t *testing.T) {
-	c, err := Load("../config.yaml")
-	if err != nil {
-		t.Fatalf("Could not load config: %v", err)
-	}
-	b, err := ioutil.ReadFile("../../mungegithub/submit-queue/deployment/kubernetes/configmap.yaml")
-	if err != nil {
-		t.Fatalf("Could not load submit queue configmap: %v", err)
-	}
-	sqc := &SubmitQueueConfig{}
-	if err = yaml.Unmarshal(b, sqc); err != nil {
-		t.Fatalf("Could not parse submit queue configmap: %v", err)
-	}
-	required := strings.Split(sqc.RequiredRetestContexts, ",")
-
-	running := FindRequired(t, c.Presubmits["kubernetes/kubernetes"])
-
-	for _, r := range required {
-		found := false
-		for _, s := range running {
-			if s == r {
-				found = true
-				break
-			}
-		}
-		if !found {
-			t.Errorf("Required context: %s does not always run: %s", r, running)
-		}
-	}
-}
-
 func TestConfigSecurityJobsMatch(t *testing.T) {
-	c, err := Load("../config.yaml")
+	conf, err := Load("../config.yaml")
 	if err != nil {
-		t.Fatalf("Could not load config: %v", err)
+		t.Fatalf("fail to load config for TestConfigSecurityJobsMatch : %v", err)
 	}
-	kp := c.Presubmits["kubernetes/kubernetes"]
-	sp := c.Presubmits["kubernetes-security/kubernetes"]
+	kp := conf.Presubmits["kubernetes/kubernetes"]
+	sp := conf.Presubmits["kubernetes-security/kubernetes"]
 	if len(kp) != len(sp) {
 		t.Fatalf("length of kubernetes/kubernetes presubmits %d does not equal length of kubernetes-security/kubernetes presubmits %d", len(kp), len(sp))
 	}
 	for i, j := range kp {
-		if err := Replace(&j, &sp[i]); err != nil {
-			t.Fatalf("[Replace] : %v", err)
+		if err := replace(&j, &sp[i]); err != nil {
+			t.Fatalf("[replace] : %v", err)
 		}
 
 		if !reflect.DeepEqual(j, sp[i]) {
@@ -177,9 +169,9 @@ func TestConfigSecurityJobsMatch(t *testing.T) {
 	}
 }
 
-// CheckDockerSocketVolumes returns an error if any volume uses a hostpath
+// checkDockerSocketVolumes returns an error if any volume uses a hostpath
 // to the docker socket. we do not want to allow this
-func CheckDockerSocketVolumes(volumes []kube.Volume) error {
+func checkDockerSocketVolumes(volumes []kube.Volume) error {
 	for _, volume := range volumes {
 		if volume.HostPath != nil && volume.HostPath.Path == "/var/run/docker.sock" {
 			return errors.New("job uses HostPath with docker socket")
@@ -190,15 +182,10 @@ func CheckDockerSocketVolumes(volumes []kube.Volume) error {
 
 // Make sure jobs are not using the docker socket as a host path
 func TestJobDoesNotHaveDockerSocket(t *testing.T) {
-	c, err := Load("../config.yaml")
-	if err != nil {
-		t.Fatalf("Could not load config: %v", err)
-	}
-
 	for _, pres := range c.Presubmits {
 		for _, presubmit := range pres {
 			if presubmit.Spec != nil {
-				if err := CheckDockerSocketVolumes(presubmit.Spec.Volumes); err != nil {
+				if err := checkDockerSocketVolumes(presubmit.Spec.Volumes); err != nil {
 					t.Errorf("Error in presubmit: %v", err)
 				}
 			}
@@ -208,7 +195,7 @@ func TestJobDoesNotHaveDockerSocket(t *testing.T) {
 	for _, posts := range c.Postsubmits {
 		for _, postsubmit := range posts {
 			if postsubmit.Spec != nil {
-				if err := CheckDockerSocketVolumes(postsubmit.Spec.Volumes); err != nil {
+				if err := checkDockerSocketVolumes(postsubmit.Spec.Volumes); err != nil {
 					t.Errorf("Error in postsubmit: %v", err)
 				}
 			}
@@ -217,14 +204,14 @@ func TestJobDoesNotHaveDockerSocket(t *testing.T) {
 
 	for _, periodic := range c.Periodics {
 		if periodic.Spec != nil {
-			if err := CheckDockerSocketVolumes(periodic.Spec.Volumes); err != nil {
+			if err := checkDockerSocketVolumes(periodic.Spec.Volumes); err != nil {
 				t.Errorf("Error in periodic: %v", err)
 			}
 		}
 	}
 }
 
-func CheckBazelPortContainer(c kube.Container, cache bool) error {
+func checkBazelPortContainer(c kube.Container, cache bool) error {
 	if !cache {
 		if len(c.Ports) != 0 {
 			return errors.New("job does not use --cache-ssd and so should not set ports in spec")
@@ -242,25 +229,25 @@ func CheckBazelPortContainer(c kube.Container, cache bool) error {
 	return nil
 }
 
-func CheckBazelPortPresubmit(presubmits []Presubmit) error {
+func checkBazelPortPresubmit(presubmits []Presubmit) error {
 	for _, presubmit := range presubmits {
 		if presubmit.Spec == nil {
 			continue
 		}
 		hasCache := false
 		for _, volume := range presubmit.Spec.Volumes {
-			if volume.Name == "cache-ssd" {
+			if volume.Name == "cache-ssd" || volume.Name == "docker-graph" {
 				hasCache = true
 			}
 		}
 
 		for _, container := range presubmit.Spec.Containers {
-			if err := CheckBazelPortContainer(container, hasCache); err != nil {
+			if err := checkBazelPortContainer(container, hasCache); err != nil {
 				return fmt.Errorf("%s: %v", presubmit.Name, err)
 			}
 		}
 
-		if err := CheckBazelPortPresubmit(presubmit.RunAfterSuccess); err != nil {
+		if err := checkBazelPortPresubmit(presubmit.RunAfterSuccess); err != nil {
 			return fmt.Errorf("%s: %v", presubmit.Name, err)
 		}
 	}
@@ -268,22 +255,23 @@ func CheckBazelPortPresubmit(presubmits []Presubmit) error {
 	return nil
 }
 
-func CheckBazelPortPostsubmit(postsubmits []Postsubmit) error {
+func checkBazelPortPostsubmit(postsubmits []Postsubmit) error {
 	for _, postsubmit := range postsubmits {
 		hasCache := false
 		for _, volume := range postsubmit.Spec.Volumes {
-			if volume.Name == "cache-ssd" {
+			// TODO(bentheelder): rewrite these tests and the entire caching layout...
+			if volume.Name == "cache-ssd" || volume.Name == "docker-graph" {
 				hasCache = true
 			}
 		}
 
 		for _, container := range postsubmit.Spec.Containers {
-			if err := CheckBazelPortContainer(container, hasCache); err != nil {
+			if err := checkBazelPortContainer(container, hasCache); err != nil {
 				return fmt.Errorf("%s: %v", postsubmit.Name, err)
 			}
 		}
 
-		if err := CheckBazelPortPostsubmit(postsubmit.RunAfterSuccess); err != nil {
+		if err := checkBazelPortPostsubmit(postsubmit.RunAfterSuccess); err != nil {
 			return fmt.Errorf("%s: %v", postsubmit.Name, err)
 		}
 	}
@@ -291,22 +279,22 @@ func CheckBazelPortPostsubmit(postsubmits []Postsubmit) error {
 	return nil
 }
 
-func CheckBazelPortPeriodic(periodics []Periodic) error {
+func checkBazelPortPeriodic(periodics []Periodic) error {
 	for _, periodic := range periodics {
 		hasCache := false
 		for _, volume := range periodic.Spec.Volumes {
-			if volume.Name == "cache-ssd" {
+			if volume.Name == "cache-ssd" || volume.Name == "docker-graph" {
 				hasCache = true
 			}
 		}
 
 		for _, container := range periodic.Spec.Containers {
-			if err := CheckBazelPortContainer(container, hasCache); err != nil {
+			if err := checkBazelPortContainer(container, hasCache); err != nil {
 				return fmt.Errorf("%s: %v", periodic.Name, err)
 			}
 		}
 
-		if err := CheckBazelPortPeriodic(periodic.RunAfterSuccess); err != nil {
+		if err := checkBazelPortPeriodic(periodic.RunAfterSuccess); err != nil {
 			return fmt.Errorf("%s: %v", periodic.Name, err)
 		}
 	}
@@ -316,26 +304,21 @@ func CheckBazelPortPeriodic(periodics []Periodic) error {
 
 // Set the HostPort to 9999 for all bazel pods so that they are forced
 // onto different nodes. Once pod affinity is GA, use that instead.
-// Until https://github.com/kubernetes/community/blob/master/contributors/design-proposals/local-storage-overview.md
+// Until https://git.k8s.io/community/contributors/design-proposals/storage/local-storage-overview.md
 func TestBazelJobHasContainerPort(t *testing.T) {
-	c, err := Load("../config.yaml")
-	if err != nil {
-		t.Fatalf("Could not load config: %v", err)
-	}
-
 	for _, pres := range c.Presubmits {
-		if err := CheckBazelPortPresubmit(pres); err != nil {
+		if err := checkBazelPortPresubmit(pres); err != nil {
 			t.Errorf("Error in presubmit: %v", err)
 		}
 	}
 
 	for _, posts := range c.Postsubmits {
-		if err := CheckBazelPortPostsubmit(posts); err != nil {
+		if err := checkBazelPortPostsubmit(posts); err != nil {
 			t.Errorf("Error in postsubmit: %v", err)
 		}
 	}
 
-	if err := CheckBazelPortPeriodic(c.Periodics); err != nil {
+	if err := checkBazelPortPeriodic(c.Periodics); err != nil {
 		t.Errorf("Error in periodic: %v", err)
 	}
 }
@@ -343,11 +326,6 @@ func TestBazelJobHasContainerPort(t *testing.T) {
 // Load the config and extract all jobs, including any child jobs inside
 // RunAfterSuccess fields.
 func allJobs() ([]Presubmit, []Postsubmit, []Periodic, error) {
-	c, err := Load("../config.yaml")
-	if err != nil {
-		return nil, nil, nil, err
-	}
-
 	pres := []Presubmit{}
 	posts := []Postsubmit{}
 	peris := []Periodic{}
@@ -411,8 +389,8 @@ func allJobs() ([]Presubmit, []Postsubmit, []Periodic, error) {
 //   * Presubmit, postsubmit jobs specify at least one --repo flag, the first of which uses PULL_REFS and REPO_NAME vars
 //   * Prow injected vars like REPO_NAME, PULL_REFS, etc are only used on non-periodic jobs
 //   * Deprecated --branch, --pull flags are not used
-//   * Required --service-account, --upload, --git-cache, --job, --clean flags are present
-func CheckBazelbuildSpec(t *testing.T, name string, spec *kube.PodSpec, periodic bool) map[string]int {
+//   * Required --service-account, --upload, --job, --clean flags are present
+func checkBazelbuildSpec(t *testing.T, name string, spec *kube.PodSpec, periodic bool) map[string]int {
 	img := "gcr.io/k8s-testimages/bazelbuild"
 	tags := map[string]int{}
 	if spec == nil {
@@ -466,7 +444,6 @@ func CheckBazelbuildSpec(t *testing.T, name string, spec *kube.PodSpec, periodic
 		for _, f := range []string{
 			"--service-account",
 			"--upload",
-			"--git-cache",
 			"--job",
 			"--clean",
 		} {
@@ -512,6 +489,10 @@ func CheckBazelbuildSpec(t *testing.T, name string, spec *kube.PodSpec, periodic
 				t.Errorf("%s: non-periodic jobs need a --repo=org/$(REPO_NAME) somewhere", name)
 			}
 		}
+
+		if c.Resources.Requests == nil {
+			t.Errorf("%s: bazel jobs need to place a resource request", name)
+		}
 	}
 	return tags
 }
@@ -525,24 +506,25 @@ func TestBazelbuildArgs(t *testing.T) {
 
 	tags := map[string][]string{} // tag -> jobs map
 	for _, p := range pres {
-		for t := range CheckBazelbuildSpec(t, p.Name, p.Spec, false) {
+		for t := range checkBazelbuildSpec(t, p.Name, p.Spec, false) {
 			tags[t] = append(tags[t], p.Name)
 		}
 	}
 	for _, p := range posts {
-		for t := range CheckBazelbuildSpec(t, p.Name, p.Spec, false) {
+		for t := range checkBazelbuildSpec(t, p.Name, p.Spec, false) {
 			tags[t] = append(tags[t], p.Name)
 		}
 	}
 	for _, p := range peris {
-		for t := range CheckBazelbuildSpec(t, p.Name, p.Spec, true) {
+		for t := range checkBazelbuildSpec(t, p.Name, p.Spec, true) {
 			tags[t] = append(tags[t], p.Name)
 		}
 	}
 	pinnedJobs := map[string]string{
 		//job: reason for pinning
-		"pull-test-infra-bazel":              "test-infra adopts bazel upgrades first",
-		"ci-test-infra-bazel":                "test-infra adopts bazel upgrades first",
+		// these frequently need to be pinned...
+		//"pull-test-infra-bazel":              "test-infra adopts bazel upgrades first",
+		//"ci-test-infra-bazel":                "test-infra adopts bazel upgrades first",
 		"pull-test-infra-bazel-canary":       "canary testing the latest bazel",
 		"pull-kubernetes-bazel-build-canary": "canary testing the latest bazel",
 		"pull-kubernetes-bazel-test-canary":  "canary testing the latest bazel",
@@ -577,10 +559,6 @@ func TestBazelbuildArgs(t *testing.T) {
 }
 
 func TestURLTemplate(t *testing.T) {
-	c, err := Load("../config.yaml")
-	if err != nil {
-		t.Fatalf("Could not load config: %v", err)
-	}
 	testcases := []struct {
 		name    string
 		jobType kube.ProwJobType
@@ -693,10 +671,6 @@ func TestURLTemplate(t *testing.T) {
 }
 
 func TestReportTemplate(t *testing.T) {
-	c, err := Load("../config.yaml")
-	if err != nil {
-		t.Fatalf("Could not load config: %v", err)
-	}
 	var testcases = []struct {
 		org    string
 		repo   string
@@ -755,10 +729,6 @@ func TestReportTemplate(t *testing.T) {
 
 func TestPullKubernetesCross(t *testing.T) {
 	crossBuildJob := "pull-kubernetes-cross"
-	c, err := Load("../config.yaml")
-	if err != nil {
-		t.Fatalf("Could not load config: %v", err)
-	}
 	tests := []struct {
 		changedFile string
 		expected    bool
@@ -811,9 +781,9 @@ func TestPullKubernetesCross(t *testing.T) {
 	}
 }
 
-// CheckLatestUsesImagePullPolicy returns an error if an image is a `latest-.*` tag,
+// checkLatestUsesImagePullPolicy returns an error if an image is a `latest-.*` tag,
 // but doesn't have imagePullPolicy: Always
-func CheckLatestUsesImagePullPolicy(spec *kube.PodSpec) error {
+func checkLatestUsesImagePullPolicy(spec *kube.PodSpec) error {
 	for _, container := range spec.Containers {
 		if strings.Contains(container.Image, ":latest-") {
 			// If the job doesn't specify imagePullPolicy: Always,
@@ -836,15 +806,10 @@ func CheckLatestUsesImagePullPolicy(spec *kube.PodSpec) error {
 
 // Make sure jobs that use `latest-*` tags specify `imagePullPolicy: Always`
 func TestLatestUsesImagePullPolicy(t *testing.T) {
-	c, err := Load("../config.yaml")
-	if err != nil {
-		t.Fatalf("Could not load config: %v", err)
-	}
-
 	for _, pres := range c.Presubmits {
 		for _, presubmit := range pres {
 			if presubmit.Spec != nil {
-				if err := CheckLatestUsesImagePullPolicy(presubmit.Spec); err != nil {
+				if err := checkLatestUsesImagePullPolicy(presubmit.Spec); err != nil {
 					t.Errorf("Error in presubmit %q: %v", presubmit.Name, err)
 				}
 			}
@@ -854,7 +819,7 @@ func TestLatestUsesImagePullPolicy(t *testing.T) {
 	for _, posts := range c.Postsubmits {
 		for _, postsubmit := range posts {
 			if postsubmit.Spec != nil {
-				if err := CheckLatestUsesImagePullPolicy(postsubmit.Spec); err != nil {
+				if err := checkLatestUsesImagePullPolicy(postsubmit.Spec); err != nil {
 					t.Errorf("Error in postsubmit %q: %v", postsubmit.Name, err)
 				}
 			}
@@ -863,7 +828,7 @@ func TestLatestUsesImagePullPolicy(t *testing.T) {
 
 	for _, periodic := range c.Periodics {
 		if periodic.Spec != nil {
-			if err := CheckLatestUsesImagePullPolicy(periodic.Spec); err != nil {
+			if err := checkLatestUsesImagePullPolicy(periodic.Spec); err != nil {
 				t.Errorf("Error in periodic %q: %v", periodic.Name, err)
 			}
 		}

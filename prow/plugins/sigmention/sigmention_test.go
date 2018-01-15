@@ -19,6 +19,7 @@ package sigmention
 import (
 	"fmt"
 	"reflect"
+	"regexp"
 	"sort"
 	"strings"
 	"testing"
@@ -52,6 +53,7 @@ func TestSigMention(t *testing.T) {
 		expectedNewLabels []string
 		issueLabels       []string
 		repoLabels        []string
+		regexp            string
 	}
 	testcases := []testCase{
 		{
@@ -135,11 +137,21 @@ func TestSigMention(t *testing.T) {
 			issueLabels:       []string{"sig/api-machinery", "sig/testing"},
 			commenter:         nonOrgMember,
 		},
+		{
+			name:              "Works for non-specialized teams",
+			body:              "@openshift/sig-node",
+			expectedRepeats:   []string{},
+			expectedNewLabels: []string{"sig/node"},
+			repoLabels:        []string{"area/infra", "priority/urgent", "sig/node"},
+			issueLabels:       []string{},
+			commenter:         orgMember,
+			regexp:            `(?m)@openshift/sig-([\w-]*)`,
+		},
 	}
 
 	for _, tc := range testcases {
 		fakeClient := &fakegithub.FakeClient{
-			OrgMembers:     []string{orgMember, bot},
+			OrgMembers:     map[string][]string{"org": {orgMember, bot}},
 			ExistingLabels: tc.repoLabels,
 			IssueComments:  make(map[int][]github.IssueComment),
 		}
@@ -155,7 +167,17 @@ func TestSigMention(t *testing.T) {
 			User:   github.User{Login: tc.commenter},
 		}
 
-		if err := handle(fakeClient, logrus.WithField("plugin", pluginName), e); err != nil {
+		testRe := tc.regexp
+		if testRe == "" {
+			testRe = `(?m)@kubernetes/sig-([\w-]*)-(misc|test-failures|bugs|feature-requests|proposals|pr-reviews|api-reviews)`
+		}
+		re, err := regexp.Compile(testRe)
+		if err != nil {
+			t.Errorf("unexpected error: %v", err)
+			continue
+		}
+
+		if err := handle(fakeClient, logrus.WithField("plugin", pluginName), e, re); err != nil {
 			t.Errorf("(%s): Unexpected error from handle: %v.", tc.name, err)
 			continue
 		}

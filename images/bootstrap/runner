@@ -17,9 +17,63 @@ set -o errexit
 set -o nounset
 set -o pipefail
 
+cleanup_dind() {
+    # run custom docker data root cleanup binary
+    prune-docker || true
+    # list what images and volumes remain
+    echo "Remaining docker images and volumes are:"
+    docker images --all || true
+    docker volume ls || true
+}
+
+# Check if the job has opted-in to docker-in-docker availability.
+export DOCKER_IN_DOCKER_ENABLED=${DOCKER_IN_DOCKER_ENABLED:-false}
+if [[ "${DOCKER_IN_DOCKER_ENABLED}" == "true" ]]; then
+    echo "Docker in Docker enabled, initializing..."
+    printf '=%.0s' {1..80}; echo
+    # If we have opted in to docker in docker, start the docker daemon,
+    service docker start
+    # the service can be started but the docker socket not ready, wait for ready
+    WAIT_N=0
+    MAX_WAIT=5
+    while true; do
+        # docker ps -q should only work if the daemon is ready
+        docker ps -q > /dev/null 2>&1 && break
+        if [[ ${WAIT_N} -lt ${MAX_WAIT} ]]; then
+            WAIT_N=$((WAIT_N+1))
+            echo "Waiting for docker to be ready, sleeping for ${WAIT_N} seconds."
+            sleep ${WAIT_N}
+        else
+            echo "Reached maximum attempts, not waiting any longer..."
+            break
+        fi
+    done
+    cleanup_dind
+    printf '=%.0s' {1..80}; echo
+    echo "Done setting up docker in docker."
+else
+# TODO(bentheelder): remove this once we are no longer using Jenkins
+# If not, make sure `docker` points to the old one compatible with our Jenkins
+    export PATH=/docker-no-dind-bin/:$PATH
+fi
+
+# disable error exit so we can run post-command cleanup
+set +o errexit
+# Clone test-infra and start bootstrap
 git clone https://github.com/kubernetes/test-infra
 ./test-infra/jenkins/bootstrap.py \
     --job=${JOB_NAME} \
     --service-account=${GOOGLE_APPLICATION_CREDENTIALS} \
     --upload='gs://kubernetes-jenkins/logs' \
     "$@"
+EXIT_VALUE=$?
+# cleanup after job
+if [[ "${DOCKER_IN_DOCKER_ENABLED}" == "true" ]]; then
+    echo "Cleaning up after docker in docker."
+    printf '=%.0s' {1..80}; echo
+    cleanup_dind
+    printf '=%.0s' {1..80}; echo
+    echo "Done cleaning up after docker in docker."
+fi
+# preserve exit value from job / bootstrap
+exit ${EXIT_VALUE}

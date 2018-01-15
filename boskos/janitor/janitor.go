@@ -28,15 +28,16 @@ import (
 )
 
 var (
-	poolSize       = 100 // Maximum concurrent janitor goroutines TODO(krzyzacy): should remove this limit
-	bufferSize     = 1   // Maximum holding resources
+	bufferSize     = 1 // Maximum holding resources
 	serviceAccount = flag.String("service-account", "", "Path to projects service account")
 )
 
 var rTypes common.ResTypes
+var poolSize int
 
 func init() {
 	flag.Var(&rTypes, "resource-type", "comma-separated list of resources need to be cleaned up")
+	flag.IntVar(&poolSize, "pool-size", 20, "number of concurrent janitor goroutine")
 }
 
 func main() {
@@ -71,10 +72,12 @@ type clean func(string) error
 
 // Clean by janitor script
 func janitorClean(proj string) error {
-	cmd := exec.Command("/janitor.py", fmt.Sprintf("--project=%s", proj), "--hour=0")
-	b, err := cmd.CombinedOutput()
+	cmd := exec.Command("/bin/janitor.py", fmt.Sprintf("--project=%s", proj), "--hour=0")
+	err := cmd.Run()
 	if err != nil {
-		logrus.Infof("janitor.py has some issue: %s", string(b))
+		logrus.WithError(err).Errorf("failed to clean up project %s", proj)
+	} else {
+		logrus.Infof("successfully cleaned up project %s", proj)
 	}
 	return err
 }

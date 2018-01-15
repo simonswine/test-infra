@@ -89,8 +89,16 @@ type buildFederationStrategy struct {
 	buildStrategy
 }
 
+type buildIngressGCEStrategy struct {
+	buildStrategy
+}
+
 func (b *buildFederationStrategy) Type() string {
 	return "buildFederationStrategy"
+}
+
+func (b *buildIngressGCEStrategy) Type() string {
+	return "buildIngressGCEStrategy"
 }
 
 // Build federation according to specified strategy.

@@ -24,8 +24,10 @@ See also: [Life of a Prow Job](./architecture.md)
 
 New features added to each components:
 
+ - *November 14, 2017* `jenkins-operator:0.58` exposes prometheus metrics.
  - *November 8, 2017* `horologium:0.14` prow periodic job now support cron
-   triggers.
+   triggers. See https://godoc.org/gopkg.in/robfig/cron.v2 for doc to the 
+   cron library we are using. 
 
 Breaking changes to external APIs (labels, GitHub interactions, configuration
 or deployment) will be documented in this section. Prow is in a pre-release
@@ -34,6 +36,9 @@ Note: versions specified in these announcements may not include bug fixes made
 in more recent versions so it is recommended that the most recent versions are
 used when updating deployments.
 
+ - *November 30, 2017* If you use tide, you'll need to switch your query format
+ and bump all prow component versions to reflect the changes in #5754.
+ - *November 14, 2017* `horologium:0.17` fixes cron job not being scheduled.
  - *November 10, 2017* If you want to use cron feature in prow, you need to bump to:
  `hook:0.181`, `sinker:0.23`, `deck:0.62`, `splice:0.32`, `horologium:0.15`
  `plank:0.60`, `jenkins-operator:0.57` and `tide:0.12` to avoid error spamming from
@@ -103,15 +108,7 @@ Test with:
 bazel test --features=race //prow/...
 ```
 
-You can run `cmd/hook` in a local mode for testing, and hit it with arbitrary
-fake webhooks. To do this, run in one shell:
-```
-./bazel-bin/prow/cmd/hook/hook --local --config-path prow/config.yaml --plugin-config prow/plugins.yaml
-```
-This will listen on `localhost:8888` for webhooks. Send one with:
-```
-./bazel-bin/prow/cmd/phony/phony --event issue_comment --payload prow/cmd/phony/examples/test_comment.json
-```
+**TODO**(spxtr): Unify and document how to run prow components locally.
 
 ## How to run a given job on prow
 
@@ -292,5 +289,5 @@ Batch Job:
 [@k8s-ci-robot](https://github.com/k8s-ci-robot) and its silent counterpart
 [@k8s-bot](https://github.com/k8s-bot) both live here as triggers to GitHub
 messages defined in [config.yaml](config.yaml). Here is a
-[command list](https://github.com/kubernetes/test-infra/blob/master/commands.md)
+[command list](https://go.k8s.io/bot-commands)
 for them.

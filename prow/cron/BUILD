@@ -7,18 +7,19 @@ go_library(
     visibility = ["//visibility:public"],
     deps = [
         "//prow/config:go_default_library",
-        "//vendor/github.com/robfig/cron:go_default_library",
+        "//vendor/github.com/sirupsen/logrus:go_default_library",
+        "//vendor/gopkg.in/robfig/cron.v2:go_default_library",
     ],
 )
 
 go_test(
     name = "go_default_test",
     srcs = ["cron_test.go"],
+    embed = [":go_default_library"],
     importpath = "k8s.io/test-infra/prow/cron",
-    library = ":go_default_library",
     deps = [
         "//prow/config:go_default_library",
-        "//vendor/github.com/robfig/cron:go_default_library",
+        "//vendor/gopkg.in/robfig/cron.v2:go_default_library",
     ],
 )
 

@@ -16,6 +16,8 @@ filegroup(
     name = "all-srcs",
     srcs = [
         ":package-srcs",
+        "//prow/cmd/branchprotector:all-srcs",
+        "//prow/cmd/clonerefs:all-srcs",
         "//prow/cmd/config:all-srcs",
         "//prow/cmd/deck:all-srcs",
         "//prow/cmd/hook:all-srcs",
@@ -41,7 +43,9 @@ filegroup(
         "//prow/phony:all-srcs",
         "//prow/pjutil:all-srcs",
         "//prow/plank:all-srcs",
+        "//prow/pluginhelp:all-srcs",
         "//prow/plugins:all-srcs",
+        "//prow/pod-utils/clone:all-srcs",
         "//prow/repoowners:all-srcs",
         "//prow/report:all-srcs",
         "//prow/slack:all-srcs",

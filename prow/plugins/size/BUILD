@@ -11,8 +11,8 @@ load(
 go_test(
     name = "go_default_test",
     srcs = ["size_test.go"],
+    embed = [":go_default_library"],
     importpath = "k8s.io/test-infra/prow/plugins/size",
-    library = ":go_default_library",
     tags = ["automanaged"],
     deps = [
         "//prow/github:go_default_library",
@@ -28,6 +28,7 @@ go_library(
     deps = [
         "//prow/genfiles:go_default_library",
         "//prow/github:go_default_library",
+        "//prow/pluginhelp:go_default_library",
         "//prow/plugins:go_default_library",
         "//vendor/github.com/sirupsen/logrus:go_default_library",
     ],

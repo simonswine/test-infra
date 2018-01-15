@@ -14,33 +14,9 @@
 # See the License for the specific language governing permissions and
 # limitations under the License.
 
-import json
 import unittest
 
 import classifier
-
-
-class DeduperTest(unittest.TestCase):
-    @staticmethod
-    def dedup(obj):
-        return classifier.Deduper().dedup(obj)
-
-    def test_types(self):
-        a = (u'foo', 2, {'bar': ['foo', 'bar']})
-        self.assertEqual(self.dedup(a), a)
-
-    def test_dedupe(self):
-        # Python interns strings in structs, so...
-        a = ['foo', 'foo']
-        self.assertIs(a[0], a[1])
-
-        # Use json.loads to get around it
-        b = json.loads('["foo", "foo"]')
-        self.assertIsNot(b[0], b[1])
-
-        # When deduplicated, the strings are now the same object.
-        c = self.dedup(b)
-        self.assertIs(c[0], c[1])
 
 
 class MergedTest(unittest.TestCase):
@@ -69,8 +45,10 @@ def diffs_to_events(*diffs):
 
 
 class LabelsTest(unittest.TestCase):
-    def expect_labels(self, events, names):
+    def expect_labels(self, events, names, extra_events=None):
         labels = classifier.get_labels(events)
+        if extra_events:
+            labels = classifier.get_labels(extra_events, labels)
         self.assertEqual(sorted(labels.keys()), sorted(names))
 
     def test_empty(self):
@@ -88,6 +66,8 @@ class LabelsTest(unittest.TestCase):
         self.expect_labels(diffs_to_events('+a', '+a'), ['a'])
         self.expect_labels(diffs_to_events('+a', '-a'), [])
         self.expect_labels(diffs_to_events('+a', '+b', '-c', '-b'), ['a'])
+        self.expect_labels(diffs_to_events('+a', '+b', '-c'), ['a'],
+                           extra_events=diffs_to_events('-b'))
 
     def test_issue_overrides_action(self):
         labels = [{'name': 'x', 'color': 'y'}]
@@ -135,7 +115,7 @@ class CalculateTest(unittest.TestCase):
                     'label': {'name': 'release-note-none', 'color': 'orange'},
                 }, 3),
                 make_comment_event(2, 'k8s-merge-robot', '<!-- META={"approvers":["o"]} -->', ts=4),
-            ], {'e2e': ['failure', None, 'stuff is broken']}
+            ], status_fetcher={'abcdef': {'e2e': ['failure', None, 'stuff is broken']}}.get
         ),
         (True, True, ['a', 'b', 'o'],
          {
@@ -275,7 +255,7 @@ class CalculateTest(unittest.TestCase):
 class CommentsTest(unittest.TestCase):
     def test_basic(self):
         self.assertEqual(classifier.get_comments([make_comment_event(1, 'aaa', 'msg', ts=2016)]),
-            [{'author': 'aaa', 'comment': 'msg', 'timestamp': 2016}])
+            [{'id': 1, 'author': 'aaa', 'comment': 'msg', 'timestamp': 2016}])
 
     def test_deleted(self):
         self.assertEqual(classifier.get_comments([
@@ -288,7 +268,7 @@ class CommentsTest(unittest.TestCase):
         self.assertEqual(classifier.get_comments([
             make_comment_event(1, 'aaa', 'msg', ts=2016),
             make_comment_event(1, 'aaa', 'redacted', ts=2016.1, action='edited')]),
-            [{'author': 'aaa', 'comment': 'redacted', 'timestamp': 2016.1}])
+            [{'id': 1, 'author': 'aaa', 'comment': 'redacted', 'timestamp': 2016.1}])
 
 
 if __name__ == '__main__':

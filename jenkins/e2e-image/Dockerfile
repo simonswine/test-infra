@@ -15,8 +15,20 @@
 # This file creates a build environment for building and running kubernetes
 # unit and integration tests
 
-FROM gcr.io/k8s-testimages/bootstrap:v20171027-3ea22ce6
+FROM gcr.io/k8s-testimages/bootstrap:v20180102-695ace192
 LABEL maintainer "Sen Lu <senlu@google.com>"
+
+ENV KUBETEST_IN_DOCKER="true"
+
+# install cfssl to prevent https://github.com/kubernetes/kubernetes/issues/55589
+# The invocation at the end is to prevent download failures downloads as in the bug.
+# TODO(porridge): bump CFSSL_VERSION to one where cfssljson supports the -version flag and test it as well.
+ARG CFSSL_VERSION
+RUN wget -q -O cfssl "https://pkg.cfssl.org/${CFSSL_VERSION}/cfssl_linux-amd64" && \
+    wget -q -O cfssljson "https://pkg.cfssl.org/${CFSSL_VERSION}/cfssljson_linux-amd64" && \
+    chmod +x cfssl cfssljson && \
+    mv cfssl cfssljson /usr/local/bin && \
+    cfssl version
 
 # install go
 ARG GO_VERSION
@@ -38,6 +50,10 @@ ARG BAZEL_VERSION
 RUN INSTALLER="bazel-${BAZEL_VERSION}-installer-linux-x86_64.sh"; \
     wget -q "https://github.com/bazelbuild/bazel/releases/download/${BAZEL_VERSION}/${INSTALLER}" && \
     chmod +x "${INSTALLER}" && "./${INSTALLER}" && rm "${INSTALLER}"
+
+# add env we can debug with the image name:tag
+ARG IMAGE_ARG
+ENV IMAGE=${IMAGE_ARG}
 
 ADD ["e2e-runner.sh", \
     "kops-e2e-runner.sh", \

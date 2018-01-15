@@ -31,8 +31,7 @@ import (
 )
 
 const (
-	commentTag       = "<!-- test report -->"
-	parentJobChanged = "Parent Job Status Changed: "
+	commentTag = "<!-- test report -->"
 )
 
 type GithubClient interface {
@@ -47,11 +46,17 @@ type GithubClient interface {
 // reportStatus should be called on status different from Success.
 // Once a parent ProwJob is pending, all children should be marked as Pending
 // Same goes for failed status.
-func reportStatus(ghc GithubClient, pj kube.ProwJob, cd string) error {
+func reportStatus(ghc GithubClient, pj kube.ProwJob, childDescription string) error {
 	refs := pj.Spec.Refs
 	if pj.Spec.Report {
+		contextState := pj.Status.State
+		if contextState == kube.AbortedState {
+			contextState = kube.FailureState
+		}
 		if err := ghc.CreateStatus(refs.Org, refs.Repo, refs.Pulls[0].SHA, github.Status{
-			State:       string(pj.Status.State),
+			// The state of the status. Can be one of error, failure, pending, or success.
+			// https://developer.github.com/v3/repos/statuses/#create-a-status
+			State:       string(contextState),
 			Description: pj.Status.Description,
 			Context:     pj.Spec.Context,
 			TargetURL:   pj.Status.URL,
@@ -65,9 +70,9 @@ func reportStatus(ghc GithubClient, pj kube.ProwJob, cd string) error {
 		for _, nj := range pj.Spec.RunAfterSuccess {
 			cpj := pjutil.NewProwJob(nj, pj.Metadata.Labels)
 			cpj.Status.State = pj.Status.State
-			cpj.Status.Description = cd
+			cpj.Status.Description = childDescription
 			cpj.Spec.Refs = refs
-			if err := reportStatus(ghc, cpj, cd); err != nil {
+			if err := reportStatus(ghc, cpj, childDescription); err != nil {
 				return err
 			}
 		}
@@ -85,7 +90,8 @@ func Report(ghc GithubClient, reportTemplate *template.Template, pj kube.ProwJob
 	if len(refs.Pulls) != 1 {
 		return fmt.Errorf("prowjob %s has %d pulls, not 1", pj.Metadata.Name, len(refs.Pulls))
 	}
-	if err := reportStatus(ghc, pj, parentJobChanged+pj.Status.Description); err != nil {
+	childDescription := fmt.Sprintf("Waiting on: %s", pj.Spec.Context)
+	if err := reportStatus(ghc, pj, childDescription); err != nil {
 		return fmt.Errorf("error setting status: %v", err)
 	}
 	// Report manually aborted Jenkins jobs and jobs with invalid pod specs alongside

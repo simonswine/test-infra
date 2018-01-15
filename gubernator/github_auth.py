@@ -34,26 +34,32 @@ from webapp2_extras import security
 
 from google.appengine.api import urlfetch
 
+import secrets
 import view_base
 
 
 class Endpoint(view_base.BaseHandler):
     def github_client(self):
+        if not self.app.config['github_client']:
+            try:
+                self.app.config['github_client'] = secrets.get('github_client')
+            except KeyError:
+                self.abort(500,
+                           body_template=(
+                           'An admin must <a href="/config">'
+                           'configure Github secrets</a> first.'))
         client = self.app.config['github_client']
-        if not client:
-            self.abort(500)
         return client['id'], client['secret']
 
     def maybe_redirect(self, target):
-        '''
+        """
         Redirect to a given URL if it's determined to be safe.
-        '''
+        """
         if target.startswith('/pr'):
             self.redirect(target)
 
     def get(self, arg):
         # Documentation here: https://developer.github.com/v3/oauth/
-
         client_id, client_secret = self.github_client()
 
         if arg.endswith('/done'):

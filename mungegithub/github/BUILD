@@ -12,8 +12,8 @@ go_test(
         "github_test.go",
         "status_change_test.go",
     ],
+    embed = [":go_default_library"],
     importpath = "k8s.io/test-infra/mungegithub/github",
-    library = ":go_default_library",
     deps = [
         "//mungegithub/github/testing:go_default_library",
         "//vendor/github.com/google/go-github/github:go_default_library",
@@ -36,7 +36,7 @@ go_library(
         "//vendor/github.com/gregjones/httpcache/diskcache:go_default_library",
         "//vendor/github.com/peterbourgon/diskv:go_default_library",
         "//vendor/golang.org/x/oauth2:go_default_library",
-        "//vendor/k8s.io/kubernetes/pkg/util/sets:go_default_library",
+        "//vendor/k8s.io/apimachinery/pkg/util/sets:go_default_library",
     ],
 )
 

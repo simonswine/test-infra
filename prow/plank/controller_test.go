@@ -27,6 +27,7 @@ import (
 	"time"
 
 	"github.com/bwmarrin/snowflake"
+	"github.com/sirupsen/logrus"
 
 	"k8s.io/test-infra/prow/config"
 	"k8s.io/test-infra/prow/github"
@@ -75,6 +76,7 @@ func newFakeConfigAgent(t *testing.T, maxConcurrency int) *fca {
 				Controller: config.Controller{
 					JobURLTemplate: template.Must(template.New("test").Parse("{{.Metadata.Name}}/{{.Status.State}}")),
 					MaxConcurrency: maxConcurrency,
+					MaxGoroutines:  20,
 				},
 			},
 			Presubmits: presubmitMap,
@@ -339,7 +341,12 @@ func TestTerminateDupes(t *testing.T) {
 				},
 			},
 		}
-		c := Controller{kc: fkc, pkc: fkc, ca: fca}
+		c := Controller{
+			kc:  fkc,
+			pkc: fkc,
+			log: logrus.NewEntry(logrus.StandardLogger()),
+			ca:  fca,
+		}
 
 		if err := c.terminateDupes(fkc.prowjobs, tc.pm); err != nil {
 			t.Fatalf("Error terminating dupes: %v", err)
@@ -377,7 +384,7 @@ func handleTot(w http.ResponseWriter, r *http.Request) {
 	fmt.Fprint(w, "42")
 }
 
-func TestSyncNonPendingJobs(t *testing.T) {
+func TestSyncTriggeredJobs(t *testing.T) {
 	var testcases = []struct {
 		name string
 
@@ -397,30 +404,6 @@ func TestSyncNonPendingJobs(t *testing.T) {
 		expectedBuildID    string
 		expectError        bool
 	}{
-		{
-			name: "completed prow job",
-			pj: kube.ProwJob{
-				Status: kube.ProwJobStatus{
-					CompletionTime: time.Now(),
-					State:          kube.FailureState,
-				},
-			},
-			expectedState:    kube.FailureState,
-			expectedComplete: true,
-		},
-		{
-			name: "completed prow job, missing pod",
-			pj: kube.ProwJob{
-				Status: kube.ProwJobStatus{
-					CompletionTime: time.Now(),
-					State:          kube.FailureState,
-					PodName:        "boop-41",
-				},
-			},
-			expectedState:    kube.FailureState,
-			expectedNumPods:  0,
-			expectedComplete: true,
-		},
 		{
 			name: "start new pod",
 			pj: kube.ProwJob{
@@ -613,6 +596,7 @@ func TestSyncNonPendingJobs(t *testing.T) {
 		c := Controller{
 			kc:          fc,
 			pkc:         fpc,
+			log:         logrus.NewEntry(logrus.StandardLogger()),
 			ca:          newFakeConfigAgent(t, tc.maxConcurrency),
 			totURL:      totServ.URL,
 			pendingJobs: make(map[string]int),
@@ -622,7 +606,7 @@ func TestSyncNonPendingJobs(t *testing.T) {
 		}
 
 		reports := make(chan kube.ProwJob, 100)
-		if err := c.syncNonPendingJob(tc.pj, pm, reports); (err != nil) != tc.expectError {
+		if err := c.syncTriggeredJob(tc.pj, pm, reports); (err != nil) != tc.expectError {
 			if tc.expectError {
 				t.Errorf("for case %q expected an error, but got none", tc.name)
 			} else {
@@ -916,6 +900,7 @@ func TestSyncPendingJob(t *testing.T) {
 		c := Controller{
 			kc:          fc,
 			pkc:         fpc,
+			log:         logrus.NewEntry(logrus.StandardLogger()),
 			ca:          newFakeConfigAgent(t, 0),
 			totURL:      totServ.URL,
 			pendingJobs: make(map[string]int),
@@ -982,6 +967,7 @@ func TestPeriodic(t *testing.T) {
 	c := Controller{
 		kc:          fc,
 		pkc:         fc,
+		log:         logrus.NewEntry(logrus.StandardLogger()),
 		ca:          newFakeConfigAgent(t, 0),
 		totURL:      totServ.URL,
 		pendingJobs: make(map[string]int),
@@ -1124,7 +1110,9 @@ func TestRunAfterSuccessCanRun(t *testing.T) {
 			err:     test.err,
 		}
 
-		got := RunAfterSuccessCanRun(test.parent, test.child, newFakeConfigAgent(t, 0), fakeGH)
+		c := Controller{log: logrus.NewEntry(logrus.StandardLogger())}
+
+		got := c.RunAfterSuccessCanRun(test.parent, test.child, newFakeConfigAgent(t, 0), fakeGH)
 		if got != test.expected {
 			t.Errorf("expected to run: %t, got: %t", test.expected, got)
 		}
@@ -1239,6 +1227,7 @@ func TestMaxConcurrencyWithNewlyTriggeredJobs(t *testing.T) {
 		c := Controller{
 			kc:          fc,
 			pkc:         fpc,
+			log:         logrus.NewEntry(logrus.StandardLogger()),
 			ca:          newFakeConfigAgent(t, 0),
 			node:        n,
 			pendingJobs: test.pendingJobs,
@@ -1248,7 +1237,7 @@ func TestMaxConcurrencyWithNewlyTriggeredJobs(t *testing.T) {
 		errors := make(chan error, len(test.pjs))
 		pm := make(map[string]kube.Pod)
 
-		syncProwJobs(c.syncNonPendingJob, jobs, reports, errors, pm)
+		syncProwJobs(c.log, c.syncTriggeredJob, 20, jobs, reports, errors, pm)
 		if len(fpc.pods) != test.expectedPods {
 			t.Errorf("expected pods: %d, got: %d", test.expectedPods, len(fpc.pods))
 		}

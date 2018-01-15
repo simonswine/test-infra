@@ -9,8 +9,8 @@ load(
 go_test(
     name = "go_default_test",
     srcs = ["updateconfig_test.go"],
+    embed = [":go_default_library"],
     importpath = "k8s.io/test-infra/prow/plugins/updateconfig",
-    library = ":go_default_library",
     deps = [
         "//prow/github:go_default_library",
         "//prow/github/fakegithub:go_default_library",
@@ -26,6 +26,7 @@ go_library(
     deps = [
         "//prow/github:go_default_library",
         "//prow/kube:go_default_library",
+        "//prow/pluginhelp:go_default_library",
         "//prow/plugins:go_default_library",
         "//vendor/github.com/sirupsen/logrus:go_default_library",
     ],

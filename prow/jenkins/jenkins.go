@@ -23,7 +23,7 @@ import (
 	"io/ioutil"
 	"net/http"
 	"net/url"
-	"strings"
+	"sync"
 	"time"
 
 	"github.com/sirupsen/logrus"
@@ -36,6 +36,7 @@ const (
 	maxRetries = 5
 	retryDelay = 100 * time.Millisecond
 	buildID    = "buildId"
+	newBuildID = "BUILD_ID"
 )
 
 const (
@@ -57,11 +58,6 @@ func (e NotFoundError) Error() string {
 // NewNotFoundError creates a new NotFoundError.
 func NewNotFoundError(e error) NotFoundError {
 	return NotFoundError{e: e}
-}
-
-type Logger interface {
-	Debugf(s string, v ...interface{})
-	Warnf(s string, v ...interface{})
 }
 
 type Action struct {
@@ -110,10 +106,13 @@ func (jb *JenkinsBuild) IsEnqueued() bool {
 func (jb *JenkinsBuild) BuildID() string {
 	for _, action := range jb.Actions {
 		for _, p := range action.Parameters {
-			if p.Name == buildID {
-				// This is not safe as far as Go is concerned. Consider
-				// stop using Jenkins if this ever breaks.
-				return p.Value.(string)
+			if p.Name == buildID || p.Name == newBuildID {
+				value, ok := p.Value.(string)
+				if !ok {
+					logrus.Errorf("Cannot determine %s value for %#v", p.Name, jb)
+					continue
+				}
+				return value
 			}
 		}
 	}
@@ -122,7 +121,7 @@ func (jb *JenkinsBuild) BuildID() string {
 
 type Client struct {
 	// If logger is non-nil, log all method calls with it.
-	logger Logger
+	logger *logrus.Entry
 
 	client     *http.Client
 	baseURL    string
@@ -147,25 +146,19 @@ type BearerTokenAuthConfig struct {
 	Token string
 }
 
-func NewClient(url string, authConfig *AuthConfig, metrics *ClientMetrics) *Client {
+func NewClient(url string, authConfig *AuthConfig, logger *logrus.Entry, metrics *ClientMetrics) *Client {
+	if logger == nil {
+		logger = logrus.NewEntry(logrus.StandardLogger())
+	}
 	return &Client{
-		logger:     logrus.WithField("client", "jenkins"),
+		logger:     logger.WithField("client", "jenkins"),
 		baseURL:    url,
 		authConfig: authConfig,
-		client:     &http.Client{},
-		metrics:    metrics,
+		client: &http.Client{
+			Timeout: 30 * time.Second,
+		},
+		metrics: metrics,
 	}
-}
-
-func (c *Client) log(methodName string, args ...interface{}) {
-	if c.logger == nil {
-		return
-	}
-	var as []string
-	for _, arg := range args {
-		as = append(as, fmt.Sprintf("%v", arg))
-	}
-	c.logger.Debugf("%s(%s)", methodName, strings.Join(as, ", "))
 }
 
 // measure records metrics about the provided method, path, and code.
@@ -179,7 +172,7 @@ func (c *Client) measure(method, path string, code int, start time.Time) {
 }
 
 // GetSkipMetrics fetches the data found in the provided path. It returns the
-// content of the response or any errors that occured during the request or
+// content of the response or any errors that occurred during the request or
 // http errors. Metrics will not be gathered for this request.
 func (c *Client) GetSkipMetrics(path string) ([]byte, error) {
 	resp, err := c.request(http.MethodGet, path, nil, false)
@@ -190,7 +183,7 @@ func (c *Client) GetSkipMetrics(path string) ([]byte, error) {
 }
 
 // Get fetches the data found in the provided path. It returns the
-// content of the response or any errors that occured during the
+// content of the response or any errors that occurred during the
 // request or http errors.
 func (c *Client) Get(path string) ([]byte, error) {
 	resp, err := c.request(http.MethodGet, path, nil, true)
@@ -275,13 +268,13 @@ func (c *Client) doRequest(method, path string) (*http.Response, error) {
 // the ProwJob is going to be used as the buildId parameter that will help
 // us track the build before it's scheduled by Jenkins.
 func (c *Client) Build(pj *kube.ProwJob) error {
+	c.logger.WithFields(pjutil.ProwJobFields(pj)).Info("Build")
 	return c.BuildFromSpec(&pj.Spec, pj.Metadata.Name)
 }
 
 // BuildFromSpec triggers a Jenkins build for the provided ProwJobSpec.
 // buildId helps us track the build before it's scheduled by Jenkins.
 func (c *Client) BuildFromSpec(spec *kube.ProwJobSpec, buildId string) error {
-	c.log("Build", "type="+spec.Type, "job="+spec.Job, "buildId="+buildId)
 	env, err := pjutil.EnvForSpec(pjutil.NewJobSpec(*spec, buildId))
 	if err != nil {
 		return err
@@ -311,12 +304,37 @@ func (c *Client) ListBuilds(jobs []string) (map[string]JenkinsBuild, error) {
 		return nil, err
 	}
 
+	buildChan := make(chan map[string]JenkinsBuild, len(jobs))
+	errChan := make(chan error, len(jobs))
+	wg := &sync.WaitGroup{}
+	wg.Add(len(jobs))
+
 	// Get all running builds for all provided jobs.
 	for _, job := range jobs {
-		builds, err := c.GetBuilds(job)
+		// Start a goroutine per list
+		go func(job string) {
+			defer wg.Done()
+
+			builds, err := c.GetBuilds(job)
+			if err != nil {
+				errChan <- err
+			} else {
+				buildChan <- builds
+			}
+		}(job)
+	}
+	wg.Wait()
+
+	close(buildChan)
+	close(errChan)
+
+	for err := range errChan {
 		if err != nil {
 			return nil, err
 		}
+	}
+
+	for builds := range buildChan {
 		for id, build := range builds {
 			jenkinsBuilds[id] = build
 		}
@@ -327,7 +345,7 @@ func (c *Client) ListBuilds(jobs []string) (map[string]JenkinsBuild, error) {
 
 // GetEnqueuedBuilds lists all enqueued builds for the provided jobs.
 func (c *Client) GetEnqueuedBuilds(jobs []string) (map[string]JenkinsBuild, error) {
-	c.log("GetEnqueuedBuilds")
+	c.logger.Debug("GetEnqueuedBuilds")
 
 	data, err := c.Get("/queue/api/json?tree=items[task[name],actions[parameters[name,value]]]")
 	if err != nil {
@@ -367,13 +385,13 @@ func (c *Client) GetEnqueuedBuilds(jobs []string) (map[string]JenkinsBuild, erro
 // In newer Jenkins versions, this also includes enqueued
 // builds (tested in 2.73.2).
 func (c *Client) GetBuilds(job string) (map[string]JenkinsBuild, error) {
-	c.log("GetBuilds", job)
+	c.logger.Debugf("GetBuilds(%v)", job)
 
 	data, err := c.Get(fmt.Sprintf("/job/%s/api/json?tree=builds[number,result,actions[parameters[name,value]]]", job))
 	if err != nil {
 		// Ignore 404s so we will not block processing the rest of the jobs.
 		if _, isNotFound := err.(NotFoundError); isNotFound {
-			c.logger.Warnf("cannot list builds for job %q: %v", job, err)
+			c.logger.WithError(err).Warnf("Cannot list builds for job %q", job)
 			return nil, nil
 		}
 		return nil, fmt.Errorf("cannot list builds for job %q: %v", job, err)
@@ -396,14 +414,10 @@ func (c *Client) GetBuilds(job string) (map[string]JenkinsBuild, error) {
 	return jenkinsBuilds, nil
 }
 
-// Abort aborts the provided Jenkins build for job. Only running
-// builds are aborted.
+// Abort aborts the provided Jenkins build for job.
 func (c *Client) Abort(job string, build *JenkinsBuild) error {
-	if build.IsEnqueued() {
-		return fmt.Errorf("aborting enqueued builds is not supported (tried to abort a build for %s)", job)
-	}
+	c.logger.Debugf("Abort(%v %v)", job, build.Number)
 
-	c.log("Abort", job, build.Number)
 	resp, err := c.request(http.MethodPost, fmt.Sprintf("/job/%s/%d/stop", job, build.Number), nil, false)
 	if err != nil {
 		return err

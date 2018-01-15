@@ -22,6 +22,7 @@ import (
 	"crypto/x509"
 	"encoding/base64"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"io"
 	"io/ioutil"
@@ -31,6 +32,7 @@ import (
 
 	"github.com/ghodss/yaml"
 	"github.com/sirupsen/logrus"
+	"k8s.io/apimachinery/pkg/util/sets"
 )
 
 const (
@@ -52,10 +54,20 @@ type Client struct {
 	logger Logger
 
 	baseURL   string
+	deckURL   string
 	client    *http.Client
 	token     string
 	namespace string
 	fake      bool
+
+	hiddenReposProvider func() []string
+}
+
+// SetHiddenRepoProvider takes a continuation that fetches a list of orgs and repos for
+// which PJs should not be returned.
+// NOTE: This function is not thread safe and should be called before the client is in use.
+func (c *Client) SetHiddenReposProvider(p func() []string) {
+	c.hiddenReposProvider = p
 }
 
 // Namespace returns a copy of the client pointing at the specified namespace.
@@ -103,6 +115,7 @@ func NewUnprocessableEntityError(e error) UnprocessableEntityError {
 type request struct {
 	method      string
 	path        string
+	deckPath    string
 	query       map[string]string
 	requestBody interface{}
 }
@@ -125,7 +138,7 @@ func (c *Client) retry(r *request) (*http.Response, error) {
 	var err error
 	backoff := retryDelay
 	for retries := 0; retries < maxRetries; retries++ {
-		resp, err = c.doRequest(r.method, r.path, r.query, r.requestBody)
+		resp, err = c.doRequest(r.method, r.deckPath, r.path, r.query, r.requestBody)
 		if err == nil {
 			if resp.StatusCode < 500 {
 				break
@@ -141,7 +154,7 @@ func (c *Client) retry(r *request) (*http.Response, error) {
 
 // Retry on transport failures. Does not retry on 500s.
 func (c *Client) requestRetryStream(r *request) (io.ReadCloser, error) {
-	if c.fake {
+	if c.fake && r.deckPath == "" {
 		return nil, nil
 	}
 	resp, err := c.retry(r)
@@ -158,7 +171,7 @@ func (c *Client) requestRetryStream(r *request) (io.ReadCloser, error) {
 
 // Retry on transport failures. Does not retry on 500s.
 func (c *Client) requestRetry(r *request) ([]byte, error) {
-	if c.fake {
+	if c.fake && r.deckPath == "" {
 		return []byte("{}"), nil
 	}
 	resp, err := c.retry(r)
@@ -181,8 +194,11 @@ func (c *Client) requestRetry(r *request) ([]byte, error) {
 	return rb, nil
 }
 
-func (c *Client) doRequest(method, urlPath string, query map[string]string, body interface{}) (*http.Response, error) {
+func (c *Client) doRequest(method, deckPath, urlPath string, query map[string]string, body interface{}) (*http.Response, error) {
 	url := c.baseURL + urlPath
+	if c.deckURL != "" && deckPath != "" {
+		url = c.deckURL + deckPath
+	}
 	var buf io.Reader
 	if body != nil {
 		b, err := json.Marshal(body)
@@ -213,10 +229,13 @@ func (c *Client) doRequest(method, urlPath string, query map[string]string, body
 	return c.client.Do(req)
 }
 
-// NewFakeClient creates a client that doesn't do anything.
-func NewFakeClient() *Client {
+// NewFakeClient creates a client that doesn't do anything. If you provide a
+// deck URL then the client will hit that for the supported calls.
+func NewFakeClient(deckURL string) *Client {
 	return &Client{
 		namespace: "default",
+		deckURL:   deckURL,
+		client:    &http.Client{},
 		fake:      true,
 	}
 }
@@ -324,8 +343,7 @@ func (c *Client) GetPod(name string) (Pod, error) {
 	c.log("GetPod", name)
 	var retPod Pod
 	err := c.request(&request{
-		method: http.MethodGet,
-		path:   fmt.Sprintf("/api/v1/namespaces/%s/pods/%s", c.namespace, name),
+		path: fmt.Sprintf("/api/v1/namespaces/%s/pods/%s", c.namespace, name),
 	}, &retPod)
 	return retPod, err
 }
@@ -336,9 +354,8 @@ func (c *Client) ListPods(selector string) ([]Pod, error) {
 		Items []Pod `json:"items"`
 	}
 	err := c.request(&request{
-		method: http.MethodGet,
-		path:   fmt.Sprintf("/api/v1/namespaces/%s/pods", c.namespace),
-		query:  map[string]string{"labelSelector": selector},
+		path:  fmt.Sprintf("/api/v1/namespaces/%s/pods", c.namespace),
+		query: map[string]string{"labelSelector": selector},
 	}, &pl)
 	return pl.Items, err
 }
@@ -362,13 +379,30 @@ func (c *Client) CreateProwJob(j ProwJob) (ProwJob, error) {
 	return retJob, err
 }
 
+func (c *Client) getHiddenRepos() sets.String {
+	if c.hiddenReposProvider == nil {
+		return nil
+	}
+	return sets.NewString(c.hiddenReposProvider()...)
+}
+
+func shouldHide(pj *ProwJob, hiddenRepos sets.String) bool {
+	return hiddenRepos.HasAny(fmt.Sprintf("%s/%s", pj.Spec.Refs.Org, pj.Spec.Refs.Repo), pj.Spec.Refs.Org)
+}
+
 func (c *Client) GetProwJob(name string) (ProwJob, error) {
 	c.log("GetProwJob", name)
 	var pj ProwJob
 	err := c.request(&request{
-		method: http.MethodGet,
-		path:   fmt.Sprintf("/apis/prow.k8s.io/v1/namespaces/%s/prowjobs/%s", c.namespace, name),
+		path: fmt.Sprintf("/apis/prow.k8s.io/v1/namespaces/%s/prowjobs/%s", c.namespace, name),
 	}, &pj)
+	if err == nil && shouldHide(&pj, c.getHiddenRepos()) {
+		pj = ProwJob{}
+		// Revealing the existence of this prow job is ok because the the pj name cannot be used to
+		// retrieve the pj itself. Furthermore, a timing attack could differentiate true 404s from
+		// 404s returned when a hidden pj is queried so returning a 404 wouldn't hide the pj's existence.
+		err = errors.New("403 ProwJob is hidden")
+	}
 	return pj, err
 }
 
@@ -378,10 +412,20 @@ func (c *Client) ListProwJobs(selector string) ([]ProwJob, error) {
 		Items []ProwJob `json:"items"`
 	}
 	err := c.request(&request{
-		method: http.MethodGet,
-		path:   fmt.Sprintf("/apis/prow.k8s.io/v1/namespaces/%s/prowjobs", c.namespace),
-		query:  map[string]string{"labelSelector": selector},
+		path:     fmt.Sprintf("/apis/prow.k8s.io/v1/namespaces/%s/prowjobs", c.namespace),
+		deckPath: "/prowjobs.js",
+		query:    map[string]string{"labelSelector": selector},
 	}, &jl)
+	if err == nil {
+		hidden := c.getHiddenRepos()
+		var pjs []ProwJob
+		for _, pj := range jl.Items {
+			if !shouldHide(&pj, hidden) {
+				pjs = append(pjs, pj)
+			}
+		}
+		jl.Items = pjs
+	}
 	return jl.Items, err
 }
 
@@ -418,17 +462,15 @@ func (c *Client) CreatePod(p Pod) (Pod, error) {
 func (c *Client) GetLog(pod string) ([]byte, error) {
 	c.log("GetLog", pod)
 	return c.requestRetry(&request{
-		method: http.MethodGet,
-		path:   fmt.Sprintf("/api/v1/namespaces/%s/pods/%s/log", c.namespace, pod),
+		path: fmt.Sprintf("/api/v1/namespaces/%s/pods/%s/log", c.namespace, pod),
 	})
 }
 
 func (c *Client) GetLogStream(pod string, options map[string]string) (io.ReadCloser, error) {
 	c.log("GetLogStream", pod)
 	return c.requestRetryStream(&request{
-		method: http.MethodGet,
-		path:   fmt.Sprintf("/api/v1/namespaces/%s/pods/%s/log", c.namespace, pod),
-		query:  options,
+		path:  fmt.Sprintf("/api/v1/namespaces/%s/pods/%s/log", c.namespace, pod),
+		query: options,
 	})
 }
 

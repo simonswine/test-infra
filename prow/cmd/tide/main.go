@@ -39,11 +39,11 @@ var (
 
 	dryRun  = flag.Bool("dry-run", true, "Whether to mutate any real-world state.")
 	runOnce = flag.Bool("run-once", false, "If true, run only once then quit.")
+	deckURL = flag.String("deck-url", "", "Deck URL for read-only access to the cluster.")
 
 	configPath = flag.String("config-path", "/etc/config/config", "Path to config.yaml.")
 	cluster    = flag.String("cluster", "", "Path to kube.Cluster YAML file. If empty, uses the local cluster.")
 
-	_               = flag.String("github-bot-name", "", "Deprecated.")
 	githubEndpoint  = flag.String("github-endpoint", "https://api.github.com", "GitHub's API endpoint.")
 	githubTokenFile = flag.String("github-token-file", "/etc/github/oauth", "Path to the file containing the GitHub OAuth token.")
 )
@@ -69,20 +69,26 @@ func main() {
 		logger.WithError(err).Fatalf("Must specify a valid --github-endpoint URL.")
 	}
 
-	ghc := github.NewClient(oauthSecret, *githubEndpoint)
-
+	var ghc *github.Client
 	var kc *kube.Client
-	if *cluster == "" {
-		kc, err = kube.NewClientInCluster(configAgent.Config().ProwJobNamespace)
-		if err != nil {
-			logger.WithError(err).Fatal("Error getting kube client.")
-		}
+	if *dryRun {
+		ghc = github.NewDryRunClient(oauthSecret, *githubEndpoint)
+		kc = kube.NewFakeClient(*deckURL)
 	} else {
-		kc, err = kube.NewClientFromFile(*cluster, configAgent.Config().ProwJobNamespace)
-		if err != nil {
-			logger.WithError(err).Fatal("Error getting kube client.")
+		ghc = github.NewClient(oauthSecret, *githubEndpoint)
+		if *cluster == "" {
+			kc, err = kube.NewClientInCluster(configAgent.Config().ProwJobNamespace)
+			if err != nil {
+				logger.WithError(err).Fatal("Error getting kube client.")
+			}
+		} else {
+			kc, err = kube.NewClientFromFile(*cluster, configAgent.Config().ProwJobNamespace)
+			if err != nil {
+				logger.WithError(err).Fatal("Error getting kube client.")
+			}
 		}
 	}
+	ghc.Throttle(1000, 1000)
 
 	gc, err := git.NewClient()
 	if err != nil {
@@ -90,14 +96,17 @@ func main() {
 	}
 	defer gc.Clean()
 
-	c := tide.NewController(ghc, kc, configAgent, gc, *dryRun, logger)
+	c := tide.NewController(ghc, kc, configAgent, gc, logger)
 
+	start := time.Now()
 	sync(c)
 	if *runOnce {
 		return
 	}
 	go func() {
-		for range time.Tick(time.Minute) {
+		for {
+			time.Sleep(time.Until(start.Add(configAgent.Config().Tide.SyncPeriod)))
+			start = time.Now()
 			sync(c)
 		}
 	}()

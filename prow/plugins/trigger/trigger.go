@@ -17,11 +17,15 @@ limitations under the License.
 package trigger
 
 import (
+	"fmt"
+	"strings"
+
 	"github.com/sirupsen/logrus"
 
 	"k8s.io/test-infra/prow/config"
 	"k8s.io/test-infra/prow/github"
 	"k8s.io/test-infra/prow/kube"
+	"k8s.io/test-infra/prow/pluginhelp"
 	"k8s.io/test-infra/prow/plugins"
 )
 
@@ -31,9 +35,31 @@ const (
 )
 
 func init() {
-	plugins.RegisterIssueCommentHandler(pluginName, handleIssueComment)
-	plugins.RegisterPullRequestHandler(pluginName, handlePullRequest)
-	plugins.RegisterPushEventHandler(pluginName, handlePush)
+	plugins.RegisterIssueCommentHandler(pluginName, handleIssueComment, helpProvider)
+	plugins.RegisterPullRequestHandler(pluginName, handlePullRequest, helpProvider)
+	plugins.RegisterPushEventHandler(pluginName, handlePush, helpProvider)
+}
+
+func helpProvider(config *plugins.Configuration, enabledRepos []string) (*pluginhelp.PluginHelp, error) {
+	configInfo := map[string]string{}
+	for _, repo := range enabledRepos {
+		parts := strings.Split(repo, "/")
+		if len(parts) != 2 {
+			return nil, fmt.Errorf("invalid repo in enabledRepos: %q", repo)
+		}
+		trusted, _ := trustedOrgForRepo(config, parts[0], parts[1])
+		configInfo[repo] = fmt.Sprintf("The trusted Github organization for this repository is %q.", trusted)
+	}
+	return &pluginhelp.PluginHelp{
+			Description: `The trigger plugin starts tests in reaction to commands and pull request events. It is responsible for ensuring that test jobs are only run on trusted PRs. A PR is considered trusted if the author is a member of the 'trusted organization' for the repository or if such a member has left an '/ok-to-test' command on the PR.
+<br>Trigger starts jobs automatically when a new trusted PR is created or when an untrusted PR becomes trusted, but it can also be used to start jobs manually via the '/test' command.
+<br>The '/retest' command can be used to rerun jobs that have reported failure.`,
+			WhoCanUse: "Anyone can use the '/test' and '/retest' commands on a trusted PR.<br>Members of the trusted organization for the repo can use the '/ok-to-test' command to mark an untrusted PR as trusted.",
+			Usage:     "/ok-to-test\n/test (<job name>|all)\n/retest",
+			Examples:  []string{"/ok-to-test", "/test all", "/test pull-bazel-test", "/retest"},
+			Config:    configInfo,
+		},
+		nil
 }
 
 type githubClient interface {
@@ -72,29 +98,40 @@ func getClient(pc plugins.PluginClient) client {
 }
 
 func handlePullRequest(pc plugins.PluginClient, pr github.PullRequestEvent) error {
-	org, repo := pr.PullRequest.Base.Repo.Owner.Login, pr.PullRequest.Base.Repo.Name
-	config := pc.PluginConfig.TriggerFor(org, repo)
-	var trustedOrg string
-	if config == nil || config.TrustedOrg == "" {
-		trustedOrg = org
-	} else {
-		trustedOrg = config.TrustedOrg
-	}
-	return handlePR(getClient(pc), trustedOrg, pr)
+	trustedOrg, joinOrgURL := trustedOrgForRepo(pc.PluginConfig, pr.Repo.Owner.Login, pr.Repo.Name)
+	return handlePR(getClient(pc), trustedOrg, joinOrgURL, pr)
 }
 
 func handleIssueComment(pc plugins.PluginClient, ic github.IssueCommentEvent) error {
-	org, repo := ic.Repo.Owner.Login, ic.Repo.Name
-	config := pc.PluginConfig.TriggerFor(org, repo)
-	var trustedOrg string
-	if config == nil || config.TrustedOrg == "" {
-		trustedOrg = org
-	} else {
-		trustedOrg = config.TrustedOrg
-	}
+	trustedOrg, _ := trustedOrgForRepo(pc.PluginConfig, ic.Repo.Owner.Login, ic.Repo.Name)
 	return handleIC(getClient(pc), trustedOrg, ic)
 }
 
 func handlePush(pc plugins.PluginClient, pe github.PushEvent) error {
 	return handlePE(getClient(pc), pe)
+}
+
+// trustedOrgForRepo returns the configured trusted organization and a URL for it
+// for the provided org and repo combination.
+func trustedOrgForRepo(config *plugins.Configuration, org, repo string) (string, string) {
+	if trigger := config.TriggerFor(org, repo); trigger != nil && trigger.TrustedOrg != "" {
+		return trigger.TrustedOrg, trigger.JoinOrgURL
+	}
+	return org, fmt.Sprintf("https://github.com/orgs/%s/people", org)
+}
+
+func isUserTrusted(ghc githubClient, user, trustedOrg, org string) (bool, error) {
+	orgMember, err := ghc.IsMember(trustedOrg, user)
+	if err != nil {
+		return false, err
+	} else if orgMember {
+		return true, nil
+	}
+	if org != trustedOrg {
+		orgMember, err = ghc.IsMember(org, user)
+		if err != nil {
+			return false, err
+		}
+	}
+	return orgMember, nil
 }

@@ -49,6 +49,8 @@ var (
 		"(kubernetes-anywhere only) If specified, the ci version for the kubelt to use. Overrides kubernetes-anywhere-kubelet-version.")
 	kubernetesAnywhereCluster = flag.String("kubernetes-anywhere-cluster", "",
 		"(kubernetes-anywhere only) Cluster name. Must be set for kubernetes-anywhere.")
+	kubernetesAnywhereProxyMode = flag.String("kubernetes-anywhere-proxy-mode", "",
+		"(kubernetes-anywhere only) Chose kube-proxy mode.")
 	kubernetesAnywhereUpTimeout = flag.Duration("kubernetes-anywhere-up-timeout", 20*time.Minute,
 		"(kubernetes-anywhere only) Time limit between starting a cluster and making a successful call to the Kubernetes API.")
 	kubernetesAnywhereNumNodes = flag.Int("kubernetes-anywhere-num-nodes", 4,
@@ -59,6 +61,10 @@ var (
 		"(kubernetes-anywhere only) The name of the CNI plugin used for the cluster's SDN.")
 	kubernetesAnywhereDumpClusterLogs = flag.Bool("kubernetes-anywhere-dump-cluster-logs", false,
 		"(kubernetes-anywhere only) Whether to dump cluster logs.")
+	kubernetesAnywhereOSImage = flag.String("kubernetes-anywhere-os-image", "ubuntu-1604-xenial-v20171212",
+		"(kubernetes-anywhere only) The name of the os_image to use for nodes")
+	kubernetesAnywhereKubeadmFeatureGates = flag.String("kubernetes-anywhere-kubeadm-feature-gates", "",
+		"(kubernetes-anywhere only) A set of key=value pairs that describes feature gates for kubeadm features. If specified, this flag will pass on to kubeadm.")
 )
 
 const kubernetesAnywhereConfigTemplate = `
@@ -67,7 +73,7 @@ const kubernetesAnywhereConfigTemplate = `
 .phase1.ssh_user=""
 .phase1.cloud_provider="gce"
 
-.phase1.gce.os_image="ubuntu-1604-xenial-v20160420c"
+.phase1.gce.os_image="{{.OSImage}}"
 .phase1.gce.instance_type="n1-standard-1"
 .phase1.gce.project="{{.Project}}"
 .phase1.gce.region="{{.Region}}"
@@ -81,7 +87,9 @@ const kubernetesAnywhereConfigTemplate = `
 .phase2.kubelet_version="{{.KubeletVersion}}"
 .phase2.kubeadm.version="{{.KubeadmVersion}}"
 .phase2.kube_context_name="{{.KubeContext}}"
+.phase2.proxy_mode="{{.KubeproxyMode}}"
 .phase2.kubeadm.master_upgrade.method="{{.UpgradeMethod}}"
+.phase2.kubeadm.feature_gates="{{.KubeadmFeatureGates}}"
 
 .phase3.run_addons=y
 .phase3.kube_proxy=n
@@ -99,18 +107,21 @@ const kubernetesAnywhereMultiClusterConfigTemplate = kubernetesAnywhereConfigTem
 type kubernetesAnywhere struct {
 	path string
 	// These are exported only because their use in the config template requires it.
-	Phase2Provider    string
-	KubeadmVersion    string
-	KubeletVersion    string
-	UpgradeMethod     string
-	KubernetesVersion string
-	NumNodes          int
-	Project           string
-	Cluster           string
-	Zone              string
-	Region            string
-	KubeContext       string
-	CNI               string
+	Phase2Provider      string
+	KubeadmVersion      string
+	KubeletVersion      string
+	UpgradeMethod       string
+	KubernetesVersion   string
+	NumNodes            int
+	Project             string
+	Cluster             string
+	Zone                string
+	Region              string
+	KubeContext         string
+	CNI                 string
+	KubeproxyMode       string
+	OSImage             string
+	KubeadmFeatureGates string
 }
 
 func initializeKubernetesAnywhere(project, zone string) (*kubernetesAnywhere, error) {
@@ -145,18 +156,21 @@ func initializeKubernetesAnywhere(project, zone string) (*kubernetesAnywhere, er
 	}
 
 	k := &kubernetesAnywhere{
-		path:              *kubernetesAnywherePath,
-		Phase2Provider:    *kubernetesAnywherePhase2Provider,
-		KubeadmVersion:    *kubernetesAnywhereKubeadmVersion,
-		KubeletVersion:    kubeletVersion,
-		UpgradeMethod:     *kubernetesAnywhereUpgradeMethod,
-		KubernetesVersion: *kubernetesAnywhereKubernetesVersion,
-		NumNodes:          *kubernetesAnywhereNumNodes,
-		Project:           project,
-		Cluster:           *kubernetesAnywhereCluster,
-		Zone:              zone,
-		Region:            regexp.MustCompile(`-[^-]+$`).ReplaceAllString(zone, ""),
-		CNI:               *kubernetesAnywhereCNI,
+		path:                *kubernetesAnywherePath,
+		Phase2Provider:      *kubernetesAnywherePhase2Provider,
+		KubeadmVersion:      *kubernetesAnywhereKubeadmVersion,
+		KubeletVersion:      kubeletVersion,
+		UpgradeMethod:       *kubernetesAnywhereUpgradeMethod,
+		KubernetesVersion:   *kubernetesAnywhereKubernetesVersion,
+		NumNodes:            *kubernetesAnywhereNumNodes,
+		Project:             project,
+		Cluster:             *kubernetesAnywhereCluster,
+		Zone:                zone,
+		Region:              regexp.MustCompile(`-[^-]+$`).ReplaceAllString(zone, ""),
+		CNI:                 *kubernetesAnywhereCNI,
+		KubeproxyMode:       *kubernetesAnywhereProxyMode,
+		OSImage:             *kubernetesAnywhereOSImage,
+		KubeadmFeatureGates: *kubernetesAnywhereKubeadmFeatureGates,
 	}
 
 	return k, nil
@@ -242,6 +256,10 @@ func (k *kubernetesAnywhere) writeConfig(configTemplate string) error {
 func (k *kubernetesAnywhere) Up() error {
 	cmd := exec.Command("make", "-C", k.path, "WAIT_FOR_KUBECONFIG=y", "deploy")
 	if err := finishRunning(cmd); err != nil {
+		return err
+	}
+
+	if err := k.TestSetup(); err != nil {
 		return err
 	}
 

@@ -147,41 +147,68 @@ func (ps Presubmit) RunsAgainstChanges(changes []string) bool {
 	return false
 }
 
-func matching(j Presubmit, body string, testAll bool) (out []Presubmit) {
-	if j.re.MatchString(body) || (testAll && j.AlwaysRun) {
-		out = append(out, j)
-	}
+type ChangedFilesProvider func() ([]string, error)
 
-	for _, child := range j.RunAfterSuccess {
-		out = append(out, matching(child, body, testAll)...)
-	}
-
-	return
-}
-
-func (c *Config) MatchingPresubmits(fullRepoName, body string, testAll *regexp.Regexp) []Presubmit {
+func matching(j Presubmit, body string, testAll bool, changes ChangedFilesProvider) ([]Presubmit, error) {
 	var result []Presubmit
-	ott := testAll.MatchString(body)
-	if jobs, ok := c.Presubmits[fullRepoName]; ok {
-		for _, job := range jobs {
-			result = append(result, matching(job, body, ott)...)
+	if (testAll && j.AlwaysRun) || j.re.MatchString(body) {
+		result = append(result, j)
+	} else if testAll && j.RunIfChanged != "" {
+		files, err := changes()
+		if err != nil {
+			return nil, err
+		}
+		if j.RunsAgainstChanges(files) {
+			result = append(result, j)
 		}
 	}
-	return result
+	for _, child := range j.RunAfterSuccess {
+		if subRes, err := matching(child, body, testAll, changes); err != nil {
+			return nil, err
+		} else {
+			result = append(result, subRes...)
+		}
+	}
+	return result, nil
+}
+
+func (c *Config) MatchingPresubmits(fullRepoName, body string, testAll bool, changes ChangedFilesProvider) ([]Presubmit, error) {
+	var result []Presubmit
+	if jobs, ok := c.Presubmits[fullRepoName]; ok {
+		for _, job := range jobs {
+			if subRes, err := matching(job, body, testAll, changes); err != nil {
+				return nil, err
+			} else {
+				result = append(result, subRes...)
+			}
+		}
+	}
+	return result, nil
 }
 
 // RetestPresubmits returns all presubmits that should be run given a /retest command.
 // This is the set of all presubmits intersected with ((alwaysRun + runContexts) - skipContexts)
-func (c *Config) RetestPresubmits(fullRepoName string, skipContexts, runContexts map[string]bool) []Presubmit {
+func (c *Config) RetestPresubmits(fullRepoName string, skipContexts, runContexts map[string]bool, changes ChangedFilesProvider) ([]Presubmit, error) {
 	var result []Presubmit
 	if jobs, ok := c.Presubmits[fullRepoName]; ok {
 		for _, job := range jobs {
-			if (job.AlwaysRun || runContexts[job.Context]) && !skipContexts[job.Context] {
+			if skipContexts[job.Context] {
+				continue
+			}
+			if job.AlwaysRun || runContexts[job.Context] {
 				result = append(result, job)
+			} else if job.RunIfChanged != "" {
+				files, err := changes()
+				if err != nil {
+					return nil, err
+				}
+				if job.RunsAgainstChanges(files) {
+					result = append(result, job)
+				}
 			}
 		}
 	}
-	return result
+	return result, nil
 }
 
 // GetPresubmit returns the presubmit job for the provided repo and job name.
@@ -207,6 +234,15 @@ func (c *Config) SetPresubmits(jobs map[string][]Presubmit) error {
 				return err
 			}
 			nj[k][i].re = re
+			if v[i].RunIfChanged == "" {
+				continue
+			}
+			re, err = regexp.Compile(v[i].RunIfChanged)
+			if err != nil {
+				return err
+			}
+			nj[k][i].reChanges = re
+
 		}
 	}
 	c.Presubmits = nj

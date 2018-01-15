@@ -5,7 +5,7 @@ project: kubernetes
 pr-mungers: submit-queue
 state: open
 token-file: /etc/secret-volume/token
-period: 20s
+period: 1m
 github-key-file: /etc/hook-secret-volume/secret
 
 # status context options.
@@ -15,6 +15,7 @@ github-key-file: /etc/hook-secret-volume/secret
 required-retest-contexts: "\
   pull-kubernetes-bazel-build,\
   pull-kubernetes-bazel-test,\
+  pull-kubernetes-cross,\
   pull-kubernetes-e2e-gce,\
   pull-kubernetes-e2e-kops-aws,\
   pull-kubernetes-kubemark-e2e-gce,\
@@ -91,6 +92,7 @@ nonblocking-jobs: "\
   ci-kubernetes-test-go,\
   ci-kubernetes-verify-master"
 do-not-merge-milestones: ""
+additional-required-labels: ""
 admin-port: 9999
 chart-url: https://storage.googleapis.com/kubernetes-test-history/k8s-queue-health.svg
 history-url: https://storage.googleapis.com/kubernetes-test-history/static/index.html

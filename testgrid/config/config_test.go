@@ -33,9 +33,12 @@ type SQConfig struct {
 var (
 	companies = []string{
 		"canonical",
+		"cri-o",
+		"istio",
 		"google",
 		"kopeio",
 		"tectonic",
+		"redhat",
 	}
 	orgs = []string{
 		"presubmits",

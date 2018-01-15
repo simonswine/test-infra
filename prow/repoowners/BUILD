@@ -10,20 +10,20 @@ go_library(
         "//prow/github:go_default_library",
         "//vendor/github.com/ghodss/yaml:go_default_library",
         "//vendor/github.com/sirupsen/logrus:go_default_library",
-        "//vendor/k8s.io/kubernetes/pkg/util/sets:go_default_library",
+        "//vendor/k8s.io/apimachinery/pkg/util/sets:go_default_library",
     ],
 )
 
 go_test(
     name = "go_default_test",
     srcs = ["repoowners_test.go"],
+    embed = [":go_default_library"],
     importpath = "k8s.io/test-infra/prow/repoowners",
-    library = ":go_default_library",
     deps = [
         "//prow/git/localgit:go_default_library",
         "//prow/github/fakegithub:go_default_library",
         "//vendor/github.com/sirupsen/logrus:go_default_library",
-        "//vendor/k8s.io/kubernetes/pkg/util/sets:go_default_library",
+        "//vendor/k8s.io/apimachinery/pkg/util/sets:go_default_library",
     ],
 )
 

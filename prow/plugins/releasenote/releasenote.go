@@ -24,8 +24,9 @@ import (
 
 	"github.com/sirupsen/logrus"
 
-	"k8s.io/kubernetes/pkg/util/sets"
+	"k8s.io/apimachinery/pkg/util/sets"
 	"k8s.io/test-infra/prow/github"
+	"k8s.io/test-infra/prow/pluginhelp"
 	"k8s.io/test-infra/prow/plugins"
 )
 
@@ -44,7 +45,7 @@ const (
 
 	releaseNoteFormat       = `Adding %s because the release note process has not been followed.`
 	releaseNoteSuffixFormat = `One of the following labels is required %q, %q, or %q.
-Please see: https://github.com/kubernetes/community/blob/master/contributors/devel/pull-requests.md#write-release-notes-if-needed.`
+Please see: https://git.k8s.io/community/contributors/devel/pull-requests.md#write-release-notes-if-needed.`
 	parentReleaseNoteFormat = `All 'parent' PRs of a cherry-pick PR must have one of the %q or %q labels, or this PR must follow the standard/parent release note labeling requirement.`
 
 	actionRequiredNote = "action required"
@@ -74,8 +75,21 @@ var (
 )
 
 func init() {
-	plugins.RegisterIssueCommentHandler(pluginName, handleIssueComment)
-	plugins.RegisterPullRequestHandler(pluginName, handlePullRequest)
+	plugins.RegisterIssueCommentHandler(pluginName, handleIssueComment, helpProvider)
+	plugins.RegisterPullRequestHandler(pluginName, handlePullRequest, helpProvider)
+}
+
+func helpProvider(config *plugins.Configuration, enabledRepos []string) (*pluginhelp.PluginHelp, error) {
+	return &pluginhelp.PluginHelp{
+			Description: `The releasenote plugin implements a release note process that uses a markdown 'releasenote' code block to associate a release note with a pull request. Until the 'releasenote' block in the pull request body is populated the PR will be assigned the '` + releaseNoteLabelNeeded + `' label.
+<br>There are three valid types of release notes that can replace this label:
+<ol><li>PRs with a normal release note in the 'releasenote' block are given the label '` + releaseNote + `'.</li>
+<li>PRs that have a release note of 'none' in the block are given the label '` + releaseNoteNone + `' to indicate that the PR does not warrant a release note.</li>
+<li>PRs that contain 'action required' in their 'releasenote' block are given the label '` + releaseNoteActionRequired + `' to indicate that the PR introduces potentially breaking changes that necessitate user action before upgrading to the release.</li></ol>
+To support old behavior, this plugin also provides a '/release-note-none' command that can be used by organization members to specify that no release note is needed for the PR as an alternative to setting the 'releasenote' block contents to 'none'.`,
+			Usage: "In the pull request body text:\n\n```releasenote\n<release note content>\n```",
+		},
+		nil
 }
 
 type githubClient interface {

@@ -20,23 +20,25 @@ ALPINE_VERSION           ?= 0.1
 # GIT_VERSION is the version of the alpine+git image
 GIT_VERSION              ?= 0.1
 # HOOK_VERSION is the version of the hook image
-HOOK_VERSION             ?= 0.181
+HOOK_VERSION             ?= 0.193
 # SINKER_VERSION is the version of the sinker image
-SINKER_VERSION           ?= 0.23
+SINKER_VERSION           ?= 0.26
 # DECK_VERSION is the version of the deck image
-DECK_VERSION             ?= 0.62
+DECK_VERSION             ?= 0.78
 # SPLICE_VERSION is the version of the splice image
-SPLICE_VERSION           ?= 0.32
+SPLICE_VERSION           ?= 0.34
 # TOT_VERSION is the version of the tot image
-TOT_VERSION              ?= 0.5
+TOT_VERSION              ?= 0.6
 # HOROLOGIUM_VERSION is the version of the horologium image
-HOROLOGIUM_VERSION       ?= 0.15
+HOROLOGIUM_VERSION       ?= 0.20
 # PLANK_VERSION is the version of the plank image
-PLANK_VERSION            ?= 0.60
+PLANK_VERSION            ?= 0.64
 # JENKINS-OPERATOR_VERSION is the version of the jenkins-operator image
-JENKINS-OPERATOR_VERSION ?= 0.57
+JENKINS-OPERATOR_VERSION ?= 0.61
 # TIDE_VERSION is the version of the tide image
-TIDE_VERSION             ?= 0.12
+TIDE_VERSION             ?= 0.18
+# CLONEREFS_VERSION is the version of the clonerefs image
+CLONEREFS_VERSION        ?=0.1
 
 # These are the usual GKE variables.
 PROJECT       ?= jetstack-build-infra
@@ -79,7 +81,7 @@ git-image: alpine-image
 	$(PUSH) "$(REGISTRY)/$(PROJECT)/git:$(GIT_VERSION)"
 
 hook-image: git-image
-	CGO_ENABLED=0 go build -o cmd/hook/hook k8s.io/test-infra/prow/cmd/hook
+	CGO_ENABLED=0 GOOS=linux GOARCH=amd64 go build -o cmd/hook/hook k8s.io/test-infra/prow/cmd/hook
 	docker build -t "$(REGISTRY)/$(PROJECT)/hook:$(HOOK_VERSION)" $(DOCKER_LABELS) cmd/hook
 	$(PUSH) "$(REGISTRY)/$(PROJECT)/hook:$(HOOK_VERSION)"
 
@@ -90,7 +92,7 @@ hook-service: get-cluster-credentials
 	kubectl apply -f cluster/hook_service.yaml
 
 sinker-image: alpine-image
-	CGO_ENABLED=0 go build -o cmd/sinker/sinker k8s.io/test-infra/prow/cmd/sinker
+	CGO_ENABLED=0 GOOS=linux GOARCH=amd64 go build -o cmd/sinker/sinker k8s.io/test-infra/prow/cmd/sinker
 	docker build -t "$(REGISTRY)/$(PROJECT)/sinker:$(SINKER_VERSION)" $(DOCKER_LABELS) cmd/sinker
 	$(PUSH) "$(REGISTRY)/$(PROJECT)/sinker:$(SINKER_VERSION)"
 
@@ -98,7 +100,7 @@ sinker-deployment: get-cluster-credentials
 	kubectl apply -f cluster/sinker_deployment.yaml
 
 deck-image: alpine-image
-	CGO_ENABLED=0 go build -o cmd/deck/deck k8s.io/test-infra/prow/cmd/deck
+	CGO_ENABLED=0 GOOS=linux GOARCH=amd64 go build -o cmd/deck/deck k8s.io/test-infra/prow/cmd/deck
 	docker build -t "$(REGISTRY)/$(PROJECT)/deck:$(DECK_VERSION)" $(DOCKER_LABELS) cmd/deck
 	$(PUSH) "$(REGISTRY)/$(PROJECT)/deck:$(DECK_VERSION)"
 
@@ -109,7 +111,7 @@ deck-service: get-cluster-credentials
 	kubectl apply -f cluster/deck_service.yaml
 
 splice-image: git-image
-	CGO_ENABLED=0 go build -o cmd/splice/splice k8s.io/test-infra/prow/cmd/splice
+	CGO_ENABLED=0 GOOS=linux GOARCH=amd64 go build -o cmd/splice/splice k8s.io/test-infra/prow/cmd/splice
 	docker build -t "$(REGISTRY)/$(PROJECT)/splice:$(SPLICE_VERSION)" $(DOCKER_LABELS) cmd/splice
 	$(PUSH) "$(REGISTRY)/$(PROJECT)/splice:$(SPLICE_VERSION)"
 
@@ -117,7 +119,7 @@ splice-deployment: get-cluster-credentials
 	kubectl apply -f cluster/splice_deployment.yaml
 
 tot-image: alpine-image
-	CGO_ENABLED=0 go build -o cmd/tot/tot k8s.io/test-infra/prow/cmd/tot
+	CGO_ENABLED=0 GOOS=linux GOARCH=amd64 go build -o cmd/tot/tot k8s.io/test-infra/prow/cmd/tot
 	docker build -t "$(REGISTRY)/$(PROJECT)/tot:$(TOT_VERSION)" $(DOCKER_LABELS) cmd/tot
 	$(PUSH) "$(REGISTRY)/$(PROJECT)/tot:$(TOT_VERSION)"
 
@@ -128,7 +130,7 @@ tot-service: get-cluster-credentials
 	kubectl apply -f cluster/tot_service.yaml
 
 horologium-image: alpine-image
-	CGO_ENABLED=0 go build -o cmd/horologium/horologium k8s.io/test-infra/prow/cmd/horologium
+	CGO_ENABLED=0 GOOS=linux GOARCH=amd64 go build -o cmd/horologium/horologium k8s.io/test-infra/prow/cmd/horologium
 	docker build -t "$(REGISTRY)/$(PROJECT)/horologium:$(HOROLOGIUM_VERSION)" $(DOCKER_LABELS) cmd/horologium
 	$(PUSH) "$(REGISTRY)/$(PROJECT)/horologium:$(HOROLOGIUM_VERSION)"
 
@@ -136,7 +138,7 @@ horologium-deployment: get-cluster-credentials
 	kubectl apply -f cluster/horologium_deployment.yaml
 
 plank-image: alpine-image
-	CGO_ENABLED=0 go build -o cmd/plank/plank k8s.io/test-infra/prow/cmd/plank
+	CGO_ENABLED=0 GOOS=linux GOARCH=amd64 go build -o cmd/plank/plank k8s.io/test-infra/prow/cmd/plank
 	docker build -t "$(REGISTRY)/$(PROJECT)/plank:$(PLANK_VERSION)" $(DOCKER_LABELS) cmd/plank
 	$(PUSH) "$(REGISTRY)/$(PROJECT)/plank:$(PLANK_VERSION)"
 
@@ -144,7 +146,7 @@ plank-deployment: get-cluster-credentials
 	kubectl apply -f cluster/plank_deployment.yaml
 
 jenkins-operator-image: alpine-image
-	CGO_ENABLED=0 go build -o cmd/jenkins-operator/jenkins-operator k8s.io/test-infra/prow/cmd/jenkins-operator
+	CGO_ENABLED=0 GOOS=linux GOARCH=amd64 go build -o cmd/jenkins-operator/jenkins-operator k8s.io/test-infra/prow/cmd/jenkins-operator
 	docker build -t "$(REGISTRY)/$(PROJECT)/jenkins-operator:$(JENKINS-OPERATOR_VERSION)" $(DOCKER_LABELS) cmd/jenkins-operator
 	$(PUSH) "$(REGISTRY)/$(PROJECT)/jenkins-operator:$(JENKINS-OPERATOR_VERSION)"
 
@@ -155,7 +157,7 @@ push-gateway-deploy: get-cluster-credentials
 	kubectl apply -f cluster/push_gateway.yaml
 
 tide-image: git-image
-	CGO_ENABLED=0 go build -o cmd/tide/tide k8s.io/test-infra/prow/cmd/tide
+	CGO_ENABLED=0 GOOS=linux GOARCH=amd64 go build -o cmd/tide/tide k8s.io/test-infra/prow/cmd/tide
 	docker build -t "$(REGISTRY)/$(PROJECT)/tide:$(TIDE_VERSION)" $(DOCKER_LABELS) cmd/tide
 	$(PUSH) "$(REGISTRY)/$(PROJECT)/tide:$(TIDE_VERSION)"
 
@@ -165,4 +167,9 @@ tide-deployment: get-cluster-credentials
 mem-range-deployment: get-build-cluster-credentials
 	kubectl apply -f cluster/mem_limit_range.yaml
 
-.PHONY: hook-image hook-deployment hook-service sinker-image sinker-deployment deck-image deck-deployment deck-service splice-image splice-deployment tot-image tot-service tot-deployment horologium-image horologium-deployment plank-image plank-deployment jenkins-operator-image jenkins-operator-deployment tide-image tide-deployment mem-range-deployment
+clonerefs-image: git-image
+	CGO_ENABLED=0 go build -o cmd/clonerefs/clonerefs k8s.io/test-infra/prow/cmd/clonerefs
+	docker build -t "$(REGISTRY)/$(PROJECT)/clonerefs:$(CLONEREFS_VERSION)" $(DOCKER_LABELS) cmd/clonerefs
+	$(PUSH) "$(REGISTRY)/$(PROJECT)/clonerefs:$(CLONEREFS_VERSION)"
+
+.PHONY: hook-image hook-deployment hook-service sinker-image sinker-deployment deck-image deck-deployment deck-service splice-image splice-deployment tot-image tot-service tot-deployment horologium-image horologium-deployment plank-image plank-deployment jenkins-operator-image jenkins-operator-deployment tide-image tide-deployment mem-range-deployment clonerefs-image

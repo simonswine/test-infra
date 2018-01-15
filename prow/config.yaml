@@ -22,7 +22,45 @@ log_level: info
 
 # tide:
 #   queries:
-#   - "type:pr state:open repo:kubernetes/test-infra label:lgtm label:approved -label:needs-ok-to-test -label:do-not-merge/work-in-progress -label:do-not-merge/hold label:\"cncf-cla: yes\""
+#   - repos:
+#     - kubernetes/charts
+#     - kubernetes/cluster-registry
+#     - kubernetes/community
+#     - kubernetes/contrib
+#     - kubernetes/dashboard
+#     - kubernetes/features
+#     - kubernetes/federation
+#     - kubernetes/ingress-nginx
+#     - kubernetes/kops
+#     - kubernetes/kubernetes-template-project
+#     - kubernetes/minikube
+#     - kubernetes/sig-release
+#     - kubernetes/steering
+#     - kubernetes/test-infra
+#     labels:
+#     - lgtm
+#     - approved
+#     - "cncf-cla: yes"
+#     missingLabels:
+#     - do-not-merge
+#     - do-not-merge/blocked-paths
+#     - do-not-merge/cherry-pick-not-approved
+#     - do-not-merge/hold
+#     - do-not-merge/release-note-label-needed
+#     - do-not-merge/work-in-progress
+#     - needs-ok-to-test
+#     - needs-rebase
+#   - repos:
+#     - kubernetes/kubectl
+#     labels:
+#     - "cncf-cla: yes"
+#     missingLabels:
+#     - do-not-merge/hold
+#     - do-not-merge/work-in-progress
+#     reviewApprovedRequired: true
+#   merge_method:
+#     kubernetes/charts: squash
+#   target_url: https://prow.k8s.io/tide.html
 
 tide:
   queries:

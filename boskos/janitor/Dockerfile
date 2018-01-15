@@ -12,11 +12,10 @@
 # See the License for the specific language governing permissions and
 # limitations under the License.
 
-FROM gcr.io/k8s-testimages/gcloud-in-go:0.1
+FROM gcr.io/k8s-testimages/gcloud-in-go:v20171113-192bec25
 LABEL maintainer="senlu@google.com"
 
 ADD ["janitor", \
      "janitor.py", \
-     "/"]
-RUN ["chmod", "+x", "/janitor.py"]
-ENTRYPOINT ["/janitor"]
+     "/bin/"]
+ENTRYPOINT ["/bin/sh", "-c", "/bin/echo started && /bin/janitor \"$@\"", "--"]

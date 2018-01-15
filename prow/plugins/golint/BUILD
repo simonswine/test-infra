@@ -9,8 +9,8 @@ load(
 go_test(
     name = "go_default_test",
     srcs = ["golint_test.go"],
+    embed = [":go_default_library"],
     importpath = "k8s.io/test-infra/prow/plugins/golint",
-    library = ":go_default_library",
     deps = [
         "//prow/git/localgit:go_default_library",
         "//prow/github:go_default_library",
@@ -26,6 +26,7 @@ go_library(
         "//prow/genfiles:go_default_library",
         "//prow/git:go_default_library",
         "//prow/github:go_default_library",
+        "//prow/pluginhelp:go_default_library",
         "//prow/plugins:go_default_library",
         "//vendor/github.com/golang/lint:go_default_library",
         "//vendor/github.com/sirupsen/logrus:go_default_library",

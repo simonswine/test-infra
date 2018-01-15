@@ -27,6 +27,7 @@ import (
 	"github.com/sirupsen/logrus"
 
 	"k8s.io/test-infra/prow/github"
+	"k8s.io/test-infra/prow/pluginhelp"
 	"k8s.io/test-infra/prow/plugins"
 	"k8s.io/test-infra/prow/plugins/approve/approvers"
 )
@@ -39,16 +40,16 @@ const (
 	lgtmCommand     = "LGTM"
 	cancelArgument  = "cancel"
 	noIssueArgument = "no-issue"
-
-	// deprecatedBotName is the name of the bot that previously handled approvals.
-	// It can be removed once every PR approved by the old bot has been merged or unapproved.
-	deprecatedBotName = "k8s-merge-robot"
 )
 
 var (
 	associatedIssueRegex = regexp.MustCompile(`(?:kubernetes/[^/]+/issues/|#)(\d+)`)
 	commandRegex         = regexp.MustCompile(`(?m)^/([^\s]+)[\t ]*([^\n\r]*)`)
 	notificationRegex    = regexp.MustCompile(`(?is)^\[` + approvers.ApprovalNotificationName + `\] *?([^\n]*)(?:\n\n(.*))?`)
+
+	// deprecatedBotNames are the names of the bots that previously handled approvals.
+	// Each can be removed once every PR approved by the old bot has been merged or unapproved.
+	deprecatedBotNames = []string{"k8s-merge-robot", "openshift-merge-robot"}
 )
 
 type githubClient interface {
@@ -79,8 +80,38 @@ type state struct {
 }
 
 func init() {
-	plugins.RegisterGenericCommentHandler(pluginName, handleGenericCommentEvent)
-	plugins.RegisterPullRequestHandler(pluginName, handlePullRequestEvent)
+	plugins.RegisterGenericCommentHandler(pluginName, handleGenericCommentEvent, helpProvider)
+	plugins.RegisterPullRequestHandler(pluginName, handlePullRequestEvent, helpProvider)
+}
+
+func helpProvider(config *plugins.Configuration, enabledRepos []string) (*pluginhelp.PluginHelp, error) {
+	doNot := func(b bool) string {
+		if b {
+			return ""
+		}
+		return "do not "
+	}
+
+	approveConfig := map[string]string{}
+	for _, repo := range enabledRepos {
+		parts := strings.Split(repo, "/")
+		if len(parts) != 2 {
+			return nil, fmt.Errorf("invalid repo in enabledRepos: %q", repo)
+		}
+		opts := optionsForRepo(config, parts[0], parts[1])
+		approveConfig[repo] = fmt.Sprintf("Pull requests %srequire an associated issue.<br>Pull request authors %simplicitly approve their own PRs.", doNot(opts.IssueRequired), doNot(opts.ImplicitSelfApprove))
+	}
+	return &pluginhelp.PluginHelp{
+			Description: `The approve plugin implements a pull request approval process that manages the '` + approvedLabel + `' label and an approval notification comment. Approval is achieved when the set of users that have approved the PR is capable of approving every file changed by the PR. A user is able to approve a file if their username or an alias they belong to is listed in the 'approvers' section of an OWNERS file in the directory of the file or higher in the directory tree.
+<br>
+<br>Per-repo configuration may be used to require that PRs link to an associated issue before approval is granted. It may also be used to specify that the PR authors implicitly approve their own PRs.
+<br>For more information see <a href="https://git.k8s.io/test-infra/prow/plugins/approve/approvers/README.md">here</a>.`,
+			WhoCanUse: "Users listed as 'approvers' in appropriate OWNERS files.",
+			Usage:     "/(approve|lgtm) [no-issue|cancel]",
+			Examples:  []string{"/approve", "/approve no-issue", "/lgtm", "/lgtm cancel"},
+			Config:    approveConfig,
+		},
+		nil
 }
 
 func handleGenericCommentEvent(pc plugins.PluginClient, ce github.GenericCommentEvent) error {
@@ -307,7 +338,7 @@ func humanAddedApproved(ghc githubClient, log *logrus.Entry, org, repo string, n
 			lastAdded = event
 		}
 
-		if lastAdded.Actor.Login == "" || lastAdded.Actor.Login == botName || lastAdded.Actor.Login == deprecatedBotName {
+		if lastAdded.Actor.Login == "" || lastAdded.Actor.Login == botName || isDeprecatedBot(lastAdded.Actor.Login) {
 			return false
 		}
 		return true
@@ -325,7 +356,7 @@ func humanAddedApproved(ghc githubClient, log *logrus.Entry, org, repo string, n
 
 func approvalCommandMatcher(botName string) func(*comment) bool {
 	return func(c *comment) bool {
-		if c.Author == botName || c.Author == deprecatedBotName {
+		if c.Author == botName || isDeprecatedBot(c.Author) {
 			return false
 		}
 		for _, match := range commandRegex.FindAllStringSubmatch(c.Body, -1) {
@@ -340,7 +371,7 @@ func approvalCommandMatcher(botName string) func(*comment) bool {
 
 func notificationMatcher(botName string) func(*comment) bool {
 	return func(c *comment) bool {
-		if c.Author != botName && c.Author != deprecatedBotName {
+		if c.Author != botName && !isDeprecatedBot(c.Author) {
 			return false
 		}
 		match := notificationRegex.FindStringSubmatch(c.Body)
@@ -371,7 +402,7 @@ func addApprovers(approversHandler *approvers.Approvers, approveComments []*comm
 				continue
 			}
 			args := strings.ToLower(strings.TrimSpace(match[2]))
-			if args == cancelArgument {
+			if strings.Contains(args, cancelArgument) {
 				approversHandler.RemoveApprover(c.Author)
 				continue
 			}
@@ -510,4 +541,13 @@ func getLast(cs []*comment) *comment {
 		return nil
 	}
 	return cs[len(cs)-1]
+}
+
+func isDeprecatedBot(login string) bool {
+	for _, deprecated := range deprecatedBotNames {
+		if deprecated == login {
+			return true
+		}
+	}
+	return false
 }

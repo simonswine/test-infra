@@ -9,14 +9,15 @@ load(
 go_test(
     name = "go_default_test",
     srcs = ["controller_test.go"],
+    embed = [":go_default_library"],
     importpath = "k8s.io/test-infra/prow/plank",
-    library = ":go_default_library",
     deps = [
         "//prow/config:go_default_library",
         "//prow/github:go_default_library",
         "//prow/kube:go_default_library",
         "//prow/pjutil:go_default_library",
         "//vendor/github.com/bwmarrin/snowflake:go_default_library",
+        "//vendor/github.com/sirupsen/logrus:go_default_library",
     ],
 )
 
