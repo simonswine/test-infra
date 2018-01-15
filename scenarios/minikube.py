@@ -32,7 +32,7 @@ hostname = socket.gethostname()
 minikube_start_cmd = [
     "minikube",
     "start",
-    "--vm-driver=kvm2",
+    "--vm-driver=kvm",
     "--kubernetes-version=%s" % os.environ["KUBERNETES_VERSION"],
     "--bootstrapper=kubeadm",
     "--memory=4096",
