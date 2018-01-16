@@ -89,7 +89,7 @@ tide:
       hostPath:
         path: /var/lib/libvirt/caches/bundle
         type: Directory
-  trigger: "(?m)^/(re)?test( all| verify| quick verify),?(\\s+|$)"
+  trigger: "(?m)^/test( all| verify| quick verify),?(\\s+|$)"
   rerun_command: "/test verify"
 
 # puppet module acceptance tests using ruby tooling, elevated privileges due
@@ -149,7 +149,7 @@ tide:
       hostPath:
         path: /var/run/libvirt/libvirt-sock
         type: Socket
-  trigger: "(?m)^/(re)?test( all| acceptance),?(\\s+|$)"
+  trigger: "(?m)^/test( all| acceptance),?(\\s+|$)"
   rerun_command: "/test acceptance"
 
 # kubernetes golang project image with minikube and go installed
@@ -332,13 +332,13 @@ presubmits:
       - name: service
         secret:
           secretName: service-account
-    trigger: "(?m)^/(re)?test( all| verify| quick verify),?(\\s+|$)"
+    trigger: "(?m)^/test( all| verify| quick verify),?(\\s+|$)"
     rerun_command: "/test verify"
   - <<: *minikube_in_go_1_7
     name: navigator-e2e-v1-7
     context: navigator-e2e-v1-7
     always_run: false
-    trigger: "(?m)^/(re)?test( all| e2e( v?1.7)?|)( \\[.+\\])?$"
+    trigger: "(?m)^/test( all| e2e( v?1.7)?|)( \\[.+\\])?$"
     rerun_command: "/test e2e v1.7"
     skip_report: false
     max_concurrency: 2
@@ -346,7 +346,7 @@ presubmits:
     name: navigator-e2e-v1-8
     context: navigator-e2e-v1-8
     always_run: false
-    trigger: "(?m)^/(re)?test( all| e2e( v?1.8)?|)( \\[.+\\])?$"
+    trigger: "(?m)^/test( all| e2e( v?1.8)?|)( \\[.+\\])?$"
     rerun_command: "/test e2e v1.8"
     skip_report: false
     max_concurrency: 2
@@ -354,7 +354,7 @@ presubmits:
     name: navigator-e2e-v1-9
     context: navigator-e2e-v1-9
     always_run: false
-    trigger: "(?m)^/(re)?test( all| e2e( v?1.9)?|)( \\[.+\\])?$"
+    trigger: "(?m)^/test( all| e2e( v?1.9)?|)( \\[.+\\])?$"
     rerun_command: "/test e2e v1.9"
     skip_report: false
     max_concurrency: 2
@@ -389,13 +389,13 @@ presubmits:
       - name: service
         secret:
           secretName: service-account
-    trigger: "(?m)^/(re)?test( all| verify| quick verify),?(\\s+|$)"
+    trigger: "(?m)^/test( all| verify| quick verify),?(\\s+|$)"
     rerun_command: "/test verify"
   - <<: *minikube_in_go_1_7
     name: cert-manager-e2e-v1-7
     context: cert-manager-e2e-v1-7
     always_run: true
-    trigger: "(?m)^/(re)?test( all| e2e( v?1.7)?|)( \\[.+\\])?$"
+    trigger: "(?m)^/test( all| e2e( v?1.7)?|)( \\[.+\\])?$"
     rerun_command: "/test e2e v1.7"
     skip_report: false
     max_concurrency: 2
@@ -403,7 +403,7 @@ presubmits:
     name: cert-manager-e2e-v1-8
     context: cert-manager-e2e-v1-8
     always_run: true
-    trigger: "(?m)^/(re)?test( all| e2e( v?1.8)?|)( \\[.+\\])?$"
+    trigger: "(?m)^/test( all| e2e( v?1.8)?|)( \\[.+\\])?$"
     rerun_command: "/test e2e v1.8"
     skip_report: false
     max_concurrency: 2
@@ -411,7 +411,7 @@ presubmits:
     name: cert-manager-e2e-v1-9
     context: cert-manager-e2e-v1-9
     always_run: true
-    trigger: "(?m)^/(re)?test( all| e2e( v?1.9)?|)( \\[.+\\])?$"
+    trigger: "(?m)^/test( all| e2e( v?1.9)?|)( \\[.+\\])?$"
     rerun_command: "/test e2e v1.9"
     skip_report: false
     max_concurrency: 2
@@ -466,30 +466,30 @@ presubmits:
     name: puppet-module-tarmak-acceptance-1-8-centos
     context: puppet-module-tarmak-acceptance-1-8-centos
     always_run: false
-    trigger: "(?m)^/(re)?test( all| acceptance-centos( v?1.8)?|)( \\[.+\\])?$"
+    trigger: "(?m)^/test( all| acceptance-centos( v?1.8)?|)( \\[.+\\])?$"
     rerun_command: "/test acceptance-centos v1.8"
   - <<: *puppet_module_acceptance
     name: puppet-module-tarmak-acceptance-1-7-centos
     context: puppet-module-tarmak-acceptance-1-7-centos
-    trigger: "(?m)^/(re)?test( all| acceptance-centos( v?1.7)?|)( \\[.+\\])?$"
+    trigger: "(?m)^/test( all| acceptance-centos( v?1.7)?|)( \\[.+\\])?$"
     rerun_command: "/test acceptance-centos v1.7"
   - <<: *puppet_module_acceptance
     name: puppet-module-tarmak-acceptance-1-6-centos
     context: puppet-module-tarmak-acceptance-1-6-centos
     always_run: false
-    trigger: "(?m)^/(re)?test( all| acceptance-centos( v?1.6)?|)( \\[.+\\])?$"
+    trigger: "(?m)^/test( all| acceptance-centos( v?1.6)?|)( \\[.+\\])?$"
     rerun_command: "/test acceptance-centos v1.6"
   - <<: *puppet_module_acceptance
     name: puppet-module-tarmak-acceptance-1-5-centos
     context: puppet-module-tarmak-acceptance-1-5-centos
     always_run: false
-    trigger: "(?m)^/(re)?test( all| acceptance-centos( v?1.5)?|)( \\[.+\\])?$"
+    trigger: "(?m)^/test( all| acceptance-centos( v?1.5)?|)( \\[.+\\])?$"
     rerun_command: "/test acceptance-centos v1.5"
   - <<: *puppet_module_acceptance
     name: puppet-module-tarmak-acceptance-1-7-ubuntu
     context: puppet-module-tarmak-acceptance-1-7-ubuntu
     always_run: false
-    trigger: "(?m)^/(re)?test( all| acceptance-ubuntu( v?1.7)?|)( \\[.+\\])?$"
+    trigger: "(?m)^/test( all| acceptance-ubuntu( v?1.7)?|)( \\[.+\\])?$"
     rerun_command: "/test acceptance-ubuntu v1.7"
 
   jetstack/puppet-module-vault_client:
@@ -499,13 +499,13 @@ presubmits:
   - <<: *puppet_module_acceptance
     name: puppet-module-vault_client-acceptance-centos
     context: puppet-module-vault_client-acceptance-centos
-    trigger: "(?m)^/(re)?test( all| acceptance(-centos)?|)( \\[.+\\])?$"
+    trigger: "(?m)^/test( all| acceptance(-centos)?|)( \\[.+\\])?$"
     rerun_command: "/test acceptance-centos"
     always_run: true
   - <<: *puppet_module_acceptance
     name: puppet-module-vault_client-acceptance-ubuntu
     context: puppet-module-vault_client-acceptance-ubuntu
-    trigger: "(?m)^/(re)?test( all| acceptance(-ubuntu)?|)( \\[.+\\])?$"
+    trigger: "(?m)^/test( all| acceptance(-ubuntu)?|)( \\[.+\\])?$"
     rerun_command: "/test acceptance-ubuntu"
     always_run: true
 
@@ -539,7 +539,7 @@ presubmits:
       - name: service
         secret:
           secretName: service-account
-    trigger: "(?m)^/(re)?test( all| verify( quick)?|)( \\[.+\\])?$"
+    trigger: "(?m)^/test( all| verify( quick)?|)( \\[.+\\])?$"
     rerun_command: "/test verify quick"
   - name: tarmak-docs-verify
     always_run: true
@@ -570,7 +570,7 @@ presubmits:
       - name: service
         secret:
           secretName: service-account
-    trigger: "(?m)^/(re)?test( all| verify( docs)?|)( \\[.+\\])?$"
+    trigger: "(?m)^/test( all| verify( docs)?|)( \\[.+\\])?$"
     rerun_command: "/test verify docs"
 
 periodics:
