@@ -5,6 +5,7 @@
 triggers:
 - repos:
   - jetstack/cert-manager
+  - jetstack/kube-lego
   - jetstack/test-infra
   - jetstack/navigator
   - jetstack/tarmak
@@ -56,7 +57,7 @@ plugins:
   - assign
   - hold
   - label
-  
+
 
   jetstack/cert-manager:
   - docs-no-retest
@@ -71,6 +72,21 @@ plugins:
   - label
   - lgtm
   - milestonestatus
+  - size
+  - yuks
+  - wip
+  - shrug
+
+  jetstack/kube-lego:
+  - docs-no-retest
+  - trigger
+  - assign
+  - close
+  - reopen
+  - heart
+  - hold
+  - label
+  - lgtm
   - size
   - yuks
   - wip
