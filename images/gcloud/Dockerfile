@@ -39,6 +39,7 @@ ENV PATH "/google-cloud-sdk/bin:${PATH}"
 RUN curl -L https://github.com/golang/dep/releases/download/v0.3.2/dep-linux-amd64 >/tmp/dep \
     && chmod +x /tmp/dep \
     && mv /tmp/dep /usr/local/bin/dep
+RUN go get -v golang.org/x/tools/cmd/goimports
 
 WORKDIR /workspace
 ADD runner /
