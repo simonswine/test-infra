@@ -19,6 +19,11 @@ triggers:
   - jetstack/puppet-module-tarmak
   trusted_org: jetstack
 
+
+external_plugins:
+  jetstack/kube-lego:
+  - name: needs-rebase
+
 # heart:
 #   adorees:
 #   - k8s-merge-robot

@@ -39,6 +39,8 @@ JENKINS-OPERATOR_VERSION ?= 0.61
 TIDE_VERSION             ?= 0.20
 # CLONEREFS_VERSION is the version of the clonerefs image
 CLONEREFS_VERSION        ?=0.1
+# NEEDS_REBASE_VERSION is the version of the needs-rebase image
+NEEDS_REBASE_VERSION     ?=0.1
 
 # These are the usual GKE variables.
 PROJECT       ?= jetstack-build-infra
@@ -172,4 +174,15 @@ clonerefs-image: git-image
 	docker build -t "$(REGISTRY)/$(PROJECT)/clonerefs:$(CLONEREFS_VERSION)" $(DOCKER_LABELS) cmd/clonerefs
 	$(PUSH) "$(REGISTRY)/$(PROJECT)/clonerefs:$(CLONEREFS_VERSION)"
 
-.PHONY: hook-image hook-deployment hook-service sinker-image sinker-deployment deck-image deck-deployment deck-service splice-image splice-deployment tot-image tot-service tot-deployment horologium-image horologium-deployment plank-image plank-deployment jenkins-operator-image jenkins-operator-deployment tide-image tide-deployment mem-range-deployment clonerefs-image
+needs-rebase-image: alpine-image
+	CGO_ENABLED=0 GOOS=linux GOARCH=amd64 go build -o ../experiment/needs-rebase/needs-rebase k8s.io/test-infra/experiment/needs-rebase
+	docker build -t "$(REGISTRY)/$(PROJECT)/needs-rebase:$(NEEDS_REBASE_VERSION)" $(DOCKER_LABELS) ../experiment/needs-rebase
+	$(PUSH) "$(REGISTRY)/$(PROJECT)/needs-rebase:$(NEEDS_REBASE_VERSION)"
+
+needs-rebase-deployment: get-cluster-credentials
+	kubectl apply -f cluster/needs_rebase_deployment.yaml
+
+needs-rebase-service: get-cluster-credentials
+	kubectl apply -f cluster/needs_rebase_service.yaml
+
+.PHONY: hook-image hook-deployment hook-service sinker-image sinker-deployment deck-image deck-deployment deck-service splice-image splice-deployment tot-image tot-service tot-deployment horologium-image horologium-deployment plank-image plank-deployment jenkins-operator-image jenkins-operator-deployment tide-image tide-deployment mem-range-deployment clonerefs-image needs-rebase-image needs-rebase-deployment needs-rebase-service
