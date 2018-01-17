@@ -69,6 +69,10 @@ RUN curl -Lo helm.tar.gz https://storage.googleapis.com/kubernetes-helm/helm-v2.
     && curl -Lo minikube https://storage.googleapis.com/minikube/releases/v0.23.0/minikube-linux-amd64 && chmod +x minikube && mv minikube /usr/local/bin/
 ENV PATH "/usr/local/bin:${PATH}"
 
+RUN curl -L https://github.com/golang/dep/releases/download/v0.3.2/dep-linux-amd64 >/tmp/dep \
+    && chmod +x /tmp/dep \
+    && mv /tmp/dep /usr/local/bin/dep
+
 # Install docker
 # Note: 1.11+ changes the tarball format
 RUN curl -L "https://get.docker.com/builds/Linux/x86_64/docker-1.9.1.tgz" \
