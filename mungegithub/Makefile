@@ -9,7 +9,7 @@ GIT := $(shell git rev-parse --short HEAD)
 
 TAG ?= $(DATE)-$(GIT)
 
-DEFAULTREPO := gcr.io/jetstack-build-infra
+DEFAULTREPO := gcr.io/k8s-testimages
 REPO ?= $(DEFAULTREPO)
 APP ?= submit-queue
 CONTAINER := $(REPO)/$(APP):$(TAG)
