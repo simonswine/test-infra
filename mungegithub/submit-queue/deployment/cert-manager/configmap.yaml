@@ -4,7 +4,7 @@ organization: jetstack
 project: cert-manager
 # Make sure approval-handler and blunderbuss run before submit-queue.
 # Otherwise it's going to take an extra-cycle to detect the label change.
-pr-mungers: approval-handler,blunderbuss,lgtm-after-commit,submit-queue,needs-rebase
+pr-mungers: lgtm-after-commit,submit-queue,needs-rebase
 state: open
 token-file: /etc/secret-volume/token
 period: 20s
@@ -12,8 +12,8 @@ repo-dir: /gitrepos
 github-key-file: /etc/hook-secret-volume/secret
 
 # status contexts options.
-required-contexts: "continuous-integration/travis-ci/pr"
-required-retest-contexts: ""
+required-contexts: "cert-manager-quick-verify,cert-manager-e2e-v1-7,cert-manager-e2e-v1-8,cert-manager-e2e-v1-9"
+required-retest-contexts: "cert-manager-quick-verify,cert-manager-e2e-v1-7,cert-manager-e2e-v1-8,cert-manager-e2e-v1-9"
 # protected-branches-extra-contexts: "cla/linuxfoundation"
 
 # submit-queue options.

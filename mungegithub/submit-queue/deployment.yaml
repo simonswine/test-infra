@@ -17,7 +17,7 @@ spec:
         - --dry-run=false
         - --stderrthreshold=INFO
         - --config-path=/etc/munge-config/configmap.yaml
-        image: gcr.io/k8s-testimages/submit-queue:2017-05-02-90fe8836
+        image: gcr.io/k8s-testimages/submit-queue:2018-01-10-7371ba76a
         ports:
         - name: status
           containerPort: 8080
