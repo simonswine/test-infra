@@ -55,6 +55,7 @@ plugins:
   - blunderbuss
   - shrug
   - lgtm
+  - approve
   - size
   - wip
   - close
@@ -68,6 +69,7 @@ plugins:
   - docs-no-retest
   - trigger
   - release-note
+  - blunderbuss
   - assign
   - close
   - reopen
@@ -76,6 +78,7 @@ plugins:
   - hold
   - label
   - lgtm
+  - approve
   - milestonestatus
   - size
   - yuks
@@ -101,6 +104,7 @@ plugins:
   - docs-no-retest
   - trigger
   - release-note
+  - blunderbuss
   - assign
   - close
   - reopen
@@ -108,6 +112,7 @@ plugins:
   - heart
   - hold
   - label
+  - approve
   - lgtm
   - milestonestatus
   - size
@@ -120,6 +125,7 @@ plugins:
   - trigger
   - release-note
   - assign
+  - blunderbuss
   - close
   - reopen
   - golint
@@ -127,6 +133,7 @@ plugins:
   - hold
   - label
   - lgtm
+  - approve
   - milestonestatus
   - size
   - yuks
