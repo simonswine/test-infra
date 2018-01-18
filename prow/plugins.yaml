@@ -52,7 +52,6 @@ plugins:
   jetstack/test-infra:
   - trigger
   - config-updater
-  - blunderbuss
   - shrug
   - lgtm
   - approve
