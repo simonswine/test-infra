@@ -165,7 +165,7 @@ tide:
       key: dedicated
       operator: Equal
     containers:
-    - image: gcr.io/jetstack-build-infra/minikube-in-go-v1.7.10:0.8
+    - image: gcr.io/jetstack-build-infra/minikube-in-go-v1.7.10:0.9
       args:
       - "--repo=github.com/$(REPO_OWNER)/$(REPO_NAME)=$(PULL_REFS)"
       - "--root=/go/src"
@@ -214,7 +214,7 @@ tide:
       key: dedicated
       operator: Equal
     containers:
-    - image: gcr.io/jetstack-build-infra/minikube-in-go-v1.8.3:0.8
+    - image: gcr.io/jetstack-build-infra/minikube-in-go-v1.8.3:0.9
       args:
       - "--repo=github.com/$(REPO_OWNER)/$(REPO_NAME)=$(PULL_REFS)"
       - "--root=/go/src"
@@ -263,7 +263,7 @@ tide:
       key: dedicated
       operator: Equal
     containers:
-    - image: gcr.io/jetstack-build-infra/minikube-in-go-v1.9.1:0.8
+    - image: gcr.io/jetstack-build-infra/minikube-in-go-v1.9.1:0.9
       args:
       - "--repo=github.com/$(REPO_OWNER)/$(REPO_NAME)=$(PULL_REFS)"
       - "--root=/go/src"
@@ -311,7 +311,7 @@ presubmits:
     agent: kubernetes
     spec:
       containers:
-      - image: gcr.io/jetstack-build-infra/gcloud-in-go:0.7
+      - image: gcr.io/jetstack-build-infra/gcloud-in-go:0.8
         args:
         - "--repo=github.com/$(REPO_OWNER)/$(REPO_NAME)=$(PULL_REFS)"
         - "--root=/go/src"
@@ -368,7 +368,7 @@ presubmits:
     agent: kubernetes
     spec:
       containers:
-      - image: gcr.io/jetstack-build-infra/gcloud-in-go:0.7
+      - image: gcr.io/jetstack-build-infra/gcloud-in-go:0.8
         args:
         - "--repo=github.com/$(REPO_OWNER)/$(REPO_NAME)=$(PULL_REFS)"
         - "--root=/go/src"
