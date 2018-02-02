@@ -152,155 +152,6 @@ tide:
   trigger: "(?m)^/test( all| acceptance),?(\\s+|$)"
   rerun_command: "/test acceptance"
 
-# kubernetes golang project image with minikube and go installed
-# with support for libvirt
-.minikube_in_go_1_7: &minikube_in_go_1_7
-  agent: kubernetes
-  spec:
-    nodeSelector:
-      node-role.kubernetes.io/libvirt: ""
-    # Note: this is not supported yet by prow PodSpec, taint temporary removed
-    tolerations:
-    - effect: NoSchedule
-      key: dedicated
-      operator: Equal
-    containers:
-    - image: gcr.io/jetstack-build-infra/minikube-in-go-v1.7.10:0.8
-      args:
-      - "--repo=github.com/$(REPO_OWNER)/$(REPO_NAME)=$(PULL_REFS)"
-      - "--root=/go/src"
-      - "--upload=gs://jetstack-logs/pr-logs"
-      - "--clean"
-      env:
-      - name: GOOGLE_APPLICATION_CREDENTIALS
-        value: /etc/service-account/service-account.json
-      - name: MINIKUBE_HOME
-        value: /var/lib/libvirt/caches/minikube
-      resources:
-        requests:
-          cpu: 1800m
-          memory: 4Gi
-      securityContext:
-        privileged: true
-      volumeMounts:
-      - name: service
-        mountPath: /etc/service-account
-        readOnly: true
-      - name: var-lib-libvirt
-        mountPath: /var/lib/libvirt
-      - name: var-run-libvirt-libvirt-sock
-        mountPath: /var/run/libvirt/libvirt-sock
-    volumes:
-    - name: service
-      secret:
-        secretName: service-account
-    - name: var-lib-libvirt
-      hostPath:
-        path: /var/lib/libvirt
-        type: Directory
-    - name: var-run-libvirt-libvirt-sock
-      hostPath:
-        path: /var/run/libvirt/libvirt-sock
-        type: Socket
-
-.minikube_in_go_1_8: &minikube_in_go_1_8
-  agent: kubernetes
-  spec:
-    nodeSelector:
-      node-role.kubernetes.io/libvirt: ""
-    # Note: this is not supported yet by prow PodSpec, taint temporary removed
-    tolerations:
-    - effect: NoSchedule
-      key: dedicated
-      operator: Equal
-    containers:
-    - image: gcr.io/jetstack-build-infra/minikube-in-go-v1.8.3:0.8
-      args:
-      - "--repo=github.com/$(REPO_OWNER)/$(REPO_NAME)=$(PULL_REFS)"
-      - "--root=/go/src"
-      - "--upload=gs://jetstack-logs/pr-logs"
-      - "--clean"
-      env:
-      - name: GOOGLE_APPLICATION_CREDENTIALS
-        value: /etc/service-account/service-account.json
-      - name: MINIKUBE_HOME
-        value: /var/lib/libvirt/caches/minikube
-      resources:
-        requests:
-          cpu: 1800m
-          memory: 4Gi
-      securityContext:
-        privileged: true
-      volumeMounts:
-      - name: service
-        mountPath: /etc/service-account
-        readOnly: true
-      - name: var-lib-libvirt
-        mountPath: /var/lib/libvirt
-      - name: var-run-libvirt-libvirt-sock
-        mountPath: /var/run/libvirt/libvirt-sock
-    volumes:
-    - name: service
-      secret:
-        secretName: service-account
-    - name: var-lib-libvirt
-      hostPath:
-        path: /var/lib/libvirt
-        type: Directory
-    - name: var-run-libvirt-libvirt-sock
-      hostPath:
-        path: /var/run/libvirt/libvirt-sock
-        type: Socket
-
-.minikube_in_go_1_9: &minikube_in_go_1_9
-  agent: kubernetes
-  spec:
-    nodeSelector:
-      node-role.kubernetes.io/libvirt: ""
-    # Note: this is not supported yet by prow PodSpec, taint temporary removed
-    tolerations:
-    - effect: NoSchedule
-      key: dedicated
-      operator: Equal
-    containers:
-    - image: gcr.io/jetstack-build-infra/minikube-in-go-v1.9.1:0.8
-      args:
-      - "--repo=github.com/$(REPO_OWNER)/$(REPO_NAME)=$(PULL_REFS)"
-      - "--root=/go/src"
-      - "--upload=gs://jetstack-logs/pr-logs"
-      - "--clean"
-      env:
-      - name: GOOGLE_APPLICATION_CREDENTIALS
-        value: /etc/service-account/service-account.json
-      - name: MINIKUBE_HOME
-        value: /var/lib/libvirt/caches/minikube
-      resources:
-        requests:
-          cpu: 1800m
-          memory: 4Gi
-      securityContext:
-        privileged: true
-      volumeMounts:
-      - name: service
-        mountPath: /etc/service-account
-        readOnly: true
-      - name: var-lib-libvirt
-        mountPath: /var/lib/libvirt
-      - name: var-run-libvirt-libvirt-sock
-        mountPath: /var/run/libvirt/libvirt-sock
-    volumes:
-    - name: service
-      secret:
-        secretName: service-account
-    - name: var-lib-libvirt
-      hostPath:
-        path: /var/lib/libvirt
-        type: Directory
-    - name: var-run-libvirt-libvirt-sock
-      hostPath:
-        path: /var/run/libvirt/libvirt-sock
-        type: Socket
-
 presubmits:
   jetstack/navigator:
   - name: navigator-quick-verify
@@ -334,30 +185,184 @@ presubmits:
           secretName: service-account
     trigger: "(?m)^/test( all| verify| quick verify),?(\\s+|$)"
     rerun_command: "/test verify"
-  - <<: *minikube_in_go_1_7
-    name: navigator-e2e-v1-7
+
+  - name: navigator-e2e-v1-7
     context: navigator-e2e-v1-7
     always_run: true
     trigger: "(?m)^/test( all| e2e( v?1.7)?|)( \\[.+\\])?$"
     rerun_command: "/test e2e v1.7"
     skip_report: false
     max_concurrency: 2
-  - <<: *minikube_in_go_1_8
-    name: navigator-e2e-v1-8
+    agent: kubernetes
+    spec:
+      nodeSelector:
+        node-role.kubernetes.io/libvirt: ""
+      # Note: this is not supported yet by prow PodSpec, taint temporary removed
+      tolerations:
+      - effect: NoSchedule
+        key: dedicated
+        operator: Equal
+      containers:
+      - image: gcr.io/jetstack-build-infra/minikube-in-go-v1.7.10:0.8
+        args:
+        - "--repo=github.com/$(REPO_OWNER)/$(REPO_NAME)=$(PULL_REFS)"
+        - "--root=/go/src"
+        - "--upload=gs://jetstack-logs/pr-logs"
+        - "--clean"
+        env:
+        - name: GOOGLE_APPLICATION_CREDENTIALS
+          value: /etc/service-account/service-account.json
+        - name: MINIKUBE_HOME
+          value: /var/lib/libvirt/caches/minikube
+        - name: MINIKUBE_CPUS
+          value: "3"
+        - name: MINIKUBE_MEMORY
+          value: "7168"
+        resources:
+          requests:
+            cpu: "3"
+            memory: 7Gi
+        securityContext:
+          privileged: true
+        volumeMounts:
+        - name: service
+          mountPath: /etc/service-account
+          readOnly: true
+        - name: var-lib-libvirt
+          mountPath: /var/lib/libvirt
+        - name: var-run-libvirt-libvirt-sock
+          mountPath: /var/run/libvirt/libvirt-sock
+      volumes:
+      - name: service
+        secret:
+          secretName: service-account
+      - name: var-lib-libvirt
+        hostPath:
+          path: /var/lib/libvirt
+          type: Directory
+      - name: var-run-libvirt-libvirt-sock
+        hostPath:
+          path: /var/run/libvirt/libvirt-sock
+          type: Socket
+
+  - name: navigator-e2e-v1-8
     context: navigator-e2e-v1-8
     always_run: true
     trigger: "(?m)^/test( all| e2e( v?1.8)?|)( \\[.+\\])?$"
     rerun_command: "/test e2e v1.8"
     skip_report: false
     max_concurrency: 2
-  - <<: *minikube_in_go_1_9
-    name: navigator-e2e-v1-9
+    agent: kubernetes
+    spec:
+      nodeSelector:
+        node-role.kubernetes.io/libvirt: ""
+      # Note: this is not supported yet by prow PodSpec, taint temporary removed
+      tolerations:
+      - effect: NoSchedule
+        key: dedicated
+        operator: Equal
+      containers:
+      - image: gcr.io/jetstack-build-infra/minikube-in-go-v1.8.3:0.8
+        args:
+        - "--repo=github.com/$(REPO_OWNER)/$(REPO_NAME)=$(PULL_REFS)"
+        - "--root=/go/src"
+        - "--upload=gs://jetstack-logs/pr-logs"
+        - "--clean"
+        env:
+        - name: GOOGLE_APPLICATION_CREDENTIALS
+          value: /etc/service-account/service-account.json
+        - name: MINIKUBE_HOME
+          value: /var/lib/libvirt/caches/minikube
+        - name: MINIKUBE_CPUS
+          value: "3"
+        - name: MINIKUBE_MEMORY
+          value: "7168"
+        resources:
+          requests:
+            cpu: "3"
+            memory: 7Gi
+        securityContext:
+          privileged: true
+        volumeMounts:
+        - name: service
+          mountPath: /etc/service-account
+          readOnly: true
+        - name: var-lib-libvirt
+          mountPath: /var/lib/libvirt
+        - name: var-run-libvirt-libvirt-sock
+          mountPath: /var/run/libvirt/libvirt-sock
+      volumes:
+      - name: service
+        secret:
+          secretName: service-account
+      - name: var-lib-libvirt
+        hostPath:
+          path: /var/lib/libvirt
+          type: Directory
+      - name: var-run-libvirt-libvirt-sock
+        hostPath:
+          path: /var/run/libvirt/libvirt-sock
+          type: Socket
+
+  - name: navigator-e2e-v1-9
     context: navigator-e2e-v1-9
     always_run: true
     trigger: "(?m)^/test( all| e2e( v?1.9)?|)( \\[.+\\])?$"
     rerun_command: "/test e2e v1.9"
     skip_report: false
     max_concurrency: 2
+    agent: kubernetes
+    spec:
+      nodeSelector:
+        node-role.kubernetes.io/libvirt: ""
+      # Note: this is not supported yet by prow PodSpec, taint temporary removed
+      tolerations:
+      - effect: NoSchedule
+        key: dedicated
+        operator: Equal
+      containers:
+      - image: gcr.io/jetstack-build-infra/minikube-in-go-v1.9.1:0.8
+        args:
+        - "--repo=github.com/$(REPO_OWNER)/$(REPO_NAME)=$(PULL_REFS)"
+        - "--root=/go/src"
+        - "--upload=gs://jetstack-logs/pr-logs"
+        - "--clean"
+        env:
+        - name: GOOGLE_APPLICATION_CREDENTIALS
+          value: /etc/service-account/service-account.json
+        - name: MINIKUBE_HOME
+          value: /var/lib/libvirt/caches/minikube
+        - name: MINIKUBE_CPUS
+          value: "3"
+        - name: MINIKUBE_MEMORY
+          value: "7168"
+        resources:
+          requests:
+            cpu: "3"
+            memory: 7Gi
+        securityContext:
+          privileged: true
+        volumeMounts:
+        - name: service
+          mountPath: /etc/service-account
+          readOnly: true
+        - name: var-lib-libvirt
+          mountPath: /var/lib/libvirt
+        - name: var-run-libvirt-libvirt-sock
+          mountPath: /var/run/libvirt/libvirt-sock
+      volumes:
+      - name: service
+        secret:
+          secretName: service-account
+      - name: var-lib-libvirt
+        hostPath:
+          path: /var/lib/libvirt
+          type: Directory
+      - name: var-run-libvirt-libvirt-sock
+        hostPath:
+          path: /var/run/libvirt/libvirt-sock
+          type: Socket
+
 
   jetstack/cert-manager:
   - name: cert-manager-quick-verify
@@ -391,30 +396,184 @@ presubmits:
           secretName: service-account
     trigger: "(?m)^/test( all| verify| quick verify),?(\\s+|$)"
     rerun_command: "/test verify"
-  - <<: *minikube_in_go_1_7
-    name: cert-manager-e2e-v1-7
+
+  - name: cert-manager-e2e-v1-7
     context: cert-manager-e2e-v1-7
     always_run: true
     trigger: "(?m)^/test( all| e2e( v?1.7)?|)( \\[.+\\])?$"
     rerun_command: "/test e2e v1.7"
     skip_report: false
     max_concurrency: 2
-  - <<: *minikube_in_go_1_8
-    name: cert-manager-e2e-v1-8
+    agent: kubernetes
+    spec:
+      nodeSelector:
+        node-role.kubernetes.io/libvirt: ""
+      # Note: this is not supported yet by prow PodSpec, taint temporary removed
+      tolerations:
+      - effect: NoSchedule
+        key: dedicated
+        operator: Equal
+      containers:
+      - image: gcr.io/jetstack-build-infra/minikube-in-go-v1.7.10:0.8
+        args:
+        - "--repo=github.com/$(REPO_OWNER)/$(REPO_NAME)=$(PULL_REFS)"
+        - "--root=/go/src"
+        - "--upload=gs://jetstack-logs/pr-logs"
+        - "--clean"
+        env:
+        - name: GOOGLE_APPLICATION_CREDENTIALS
+          value: /etc/service-account/service-account.json
+        - name: MINIKUBE_HOME
+          value: /var/lib/libvirt/caches/minikube
+        - name: MINIKUBE_CPUS
+          value: "2"
+        - name: MINIKUBE_MEMORY
+          value: "4096"
+        resources:
+          requests:
+            cpu: 1800m
+            memory: 4Gi
+        securityContext:
+          privileged: true
+        volumeMounts:
+        - name: service
+          mountPath: /etc/service-account
+          readOnly: true
+        - name: var-lib-libvirt
+          mountPath: /var/lib/libvirt
+        - name: var-run-libvirt-libvirt-sock
+          mountPath: /var/run/libvirt/libvirt-sock
+      volumes:
+      - name: service
+        secret:
+          secretName: service-account
+      - name: var-lib-libvirt
+        hostPath:
+          path: /var/lib/libvirt
+          type: Directory
+      - name: var-run-libvirt-libvirt-sock
+        hostPath:
+          path: /var/run/libvirt/libvirt-sock
+          type: Socket
+
+  - name: cert-manager-e2e-v1-8
     context: cert-manager-e2e-v1-8
     always_run: true
     trigger: "(?m)^/test( all| e2e( v?1.8)?|)( \\[.+\\])?$"
     rerun_command: "/test e2e v1.8"
     skip_report: false
     max_concurrency: 2
-  - <<: *minikube_in_go_1_9
-    name: cert-manager-e2e-v1-9
+    agent: kubernetes
+    spec:
+      nodeSelector:
+        node-role.kubernetes.io/libvirt: ""
+      # Note: this is not supported yet by prow PodSpec, taint temporary removed
+      tolerations:
+      - effect: NoSchedule
+        key: dedicated
+        operator: Equal
+      containers:
+      - image: gcr.io/jetstack-build-infra/minikube-in-go-v1.8.3:0.8
+        args:
+        - "--repo=github.com/$(REPO_OWNER)/$(REPO_NAME)=$(PULL_REFS)"
+        - "--root=/go/src"
+        - "--upload=gs://jetstack-logs/pr-logs"
+        - "--clean"
+        env:
+        - name: GOOGLE_APPLICATION_CREDENTIALS
+          value: /etc/service-account/service-account.json
+        - name: MINIKUBE_HOME
+          value: /var/lib/libvirt/caches/minikube
+        - name: MINIKUBE_CPUS
+          value: "2"
+        - name: MINIKUBE_MEMORY
+          value: "4096"
+        resources:
+          requests:
+            cpu: 1800m
+            memory: 4Gi
+        securityContext:
+          privileged: true
+        volumeMounts:
+        - name: service
+          mountPath: /etc/service-account
+          readOnly: true
+        - name: var-lib-libvirt
+          mountPath: /var/lib/libvirt
+        - name: var-run-libvirt-libvirt-sock
+          mountPath: /var/run/libvirt/libvirt-sock
+      volumes:
+      - name: service
+        secret:
+          secretName: service-account
+      - name: var-lib-libvirt
+        hostPath:
+          path: /var/lib/libvirt
+          type: Directory
+      - name: var-run-libvirt-libvirt-sock
+        hostPath:
+          path: /var/run/libvirt/libvirt-sock
+          type: Socket
+
+  - name: cert-manager-e2e-v1-9
     context: cert-manager-e2e-v1-9
     always_run: true
     trigger: "(?m)^/test( all| e2e( v?1.9)?|)( \\[.+\\])?$"
     rerun_command: "/test e2e v1.9"
     skip_report: false
     max_concurrency: 2
+    agent: kubernetes
+    spec:
+      nodeSelector:
+        node-role.kubernetes.io/libvirt: ""
+      # Note: this is not supported yet by prow PodSpec, taint temporary removed
+      tolerations:
+      - effect: NoSchedule
+        key: dedicated
+        operator: Equal
+      containers:
+      - image: gcr.io/jetstack-build-infra/minikube-in-go-v1.9.1:0.8
+        args:
+        - "--repo=github.com/$(REPO_OWNER)/$(REPO_NAME)=$(PULL_REFS)"
+        - "--root=/go/src"
+        - "--upload=gs://jetstack-logs/pr-logs"
+        - "--clean"
+        env:
+        - name: GOOGLE_APPLICATION_CREDENTIALS
+          value: /etc/service-account/service-account.json
+        - name: MINIKUBE_HOME
+          value: /var/lib/libvirt/caches/minikube
+        - name: MINIKUBE_CPUS
+          value: "2"
+        - name: MINIKUBE_MEMORY
+          value: "4096"
+        resources:
+          requests:
+            cpu: 1800m
+            memory: 4Gi
+        securityContext:
+          privileged: true
+        volumeMounts:
+        - name: service
+          mountPath: /etc/service-account
+          readOnly: true
+        - name: var-lib-libvirt
+          mountPath: /var/lib/libvirt
+        - name: var-run-libvirt-libvirt-sock
+          mountPath: /var/run/libvirt/libvirt-sock
+      volumes:
+      - name: service
+        secret:
+          secretName: service-account
+      - name: var-lib-libvirt
+        hostPath:
+          path: /var/lib/libvirt
+          type: Directory
+      - name: var-run-libvirt-libvirt-sock
+        hostPath:
+          path: /var/run/libvirt/libvirt-sock
+          type: Socket
+
 
   jetstack/puppet-module-aws_ebs:
   - <<: *puppet_module_verify
