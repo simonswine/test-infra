@@ -215,13 +215,13 @@ presubmits:
         - name: MINIKUBE_HOME
           value: /var/lib/libvirt/caches/minikube
         - name: MINIKUBE_CPUS
-          value: "3"
+          value: "4"
         - name: MINIKUBE_MEMORY
-          value: "7168"
+          value: "12288"
         resources:
           requests:
-            cpu: "3"
-            memory: 7Gi
+            cpu: "3800m"
+            memory: 12Gi
         securityContext:
           privileged: true
         volumeMounts:
@@ -274,13 +274,13 @@ presubmits:
         - name: MINIKUBE_HOME
           value: /var/lib/libvirt/caches/minikube
         - name: MINIKUBE_CPUS
-          value: "3"
+          value: "4"
         - name: MINIKUBE_MEMORY
-          value: "7168"
+          value: "12288"
         resources:
           requests:
-            cpu: "3"
-            memory: 7Gi
+            cpu: "3800m"
+            memory: 12Gi
         securityContext:
           privileged: true
         volumeMounts:
@@ -333,13 +333,13 @@ presubmits:
         - name: MINIKUBE_HOME
           value: /var/lib/libvirt/caches/minikube
         - name: MINIKUBE_CPUS
-          value: "3"
+          value: "4"
         - name: MINIKUBE_MEMORY
-          value: "7168"
+          value: "12288"
         resources:
           requests:
-            cpu: "3"
-            memory: 7Gi
+            cpu: "3800m"
+            memory: 12Gi
         securityContext:
           privileged: true
         volumeMounts:
