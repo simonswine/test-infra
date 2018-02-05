@@ -230,6 +230,8 @@ presubmits:
           readOnly: true
         - name: minikube-cache
           mountPath: /var/lib/libvirt/caches/minikube/.minikube/cache
+        - name: minikube-machines
+          mountPath: /var/lib/libvirt/caches/minikube/.minikube/machines
         - name: var-run-libvirt-libvirt-sock
           mountPath: /var/run/libvirt/libvirt-sock
       volumes:
@@ -239,6 +241,10 @@ presubmits:
       - name: minikube-cache
         hostPath:
           path: /var/lib/libvirt/caches/minikube/.minikube/cache
+          type: Directory
+      - name: minikube-machines
+        hostPath:
+          path: /var/lib/libvirt/caches/minikube/.minikube/machines
           type: Directory
       - name: var-run-libvirt-libvirt-sock
         hostPath:
@@ -289,6 +295,8 @@ presubmits:
           readOnly: true
         - name: minikube-cache
           mountPath: /var/lib/libvirt/caches/minikube/.minikube/cache
+        - name: minikube-machines
+          mountPath: /var/lib/libvirt/caches/minikube/.minikube/machines
         - name: var-run-libvirt-libvirt-sock
           mountPath: /var/run/libvirt/libvirt-sock
       volumes:
@@ -298,6 +306,10 @@ presubmits:
       - name: minikube-cache
         hostPath:
           path: /var/lib/libvirt/caches/minikube/.minikube/cache
+          type: Directory
+      - name: minikube-machines
+        hostPath:
+          path: /var/lib/libvirt/caches/minikube/.minikube/machines
           type: Directory
       - name: var-run-libvirt-libvirt-sock
         hostPath:
@@ -348,6 +360,8 @@ presubmits:
           readOnly: true
         - name: minikube-cache
           mountPath: /var/lib/libvirt/caches/minikube/.minikube/cache
+        - name: minikube-machines
+          mountPath: /var/lib/libvirt/caches/minikube/.minikube/machines
         - name: var-run-libvirt-libvirt-sock
           mountPath: /var/run/libvirt/libvirt-sock
       volumes:
@@ -358,11 +372,14 @@ presubmits:
         hostPath:
           path: /var/lib/libvirt/caches/minikube/.minikube/cache
           type: Directory
+      - name: minikube-machines
+        hostPath:
+          path: /var/lib/libvirt/caches/minikube/.minikube/machines
+          type: Directory
       - name: var-run-libvirt-libvirt-sock
         hostPath:
           path: /var/run/libvirt/libvirt-sock
           type: Socket
-
 
   jetstack/cert-manager:
   - name: cert-manager-quick-verify
@@ -441,6 +458,8 @@ presubmits:
           readOnly: true
         - name: minikube-cache
           mountPath: /var/lib/libvirt/caches/minikube/.minikube/cache
+        - name: minikube-machines
+          mountPath: /var/lib/libvirt/caches/minikube/.minikube/machines
         - name: var-run-libvirt-libvirt-sock
           mountPath: /var/run/libvirt/libvirt-sock
       volumes:
@@ -450,6 +469,10 @@ presubmits:
       - name: minikube-cache
         hostPath:
           path: /var/lib/libvirt/caches/minikube/.minikube/cache
+          type: Directory
+      - name: minikube-machines
+        hostPath:
+          path: /var/lib/libvirt/caches/minikube/.minikube/machines
           type: Directory
       - name: var-run-libvirt-libvirt-sock
         hostPath:
@@ -500,6 +523,8 @@ presubmits:
           readOnly: true
         - name: minikube-cache
           mountPath: /var/lib/libvirt/caches/minikube/.minikube/cache
+        - name: minikube-machines
+          mountPath: /var/lib/libvirt/caches/minikube/.minikube/machines
         - name: var-run-libvirt-libvirt-sock
           mountPath: /var/run/libvirt/libvirt-sock
       volumes:
@@ -509,6 +534,10 @@ presubmits:
       - name: minikube-cache
         hostPath:
           path: /var/lib/libvirt/caches/minikube/.minikube/cache
+          type: Directory
+      - name: minikube-machines
+        hostPath:
+          path: /var/lib/libvirt/caches/minikube/.minikube/machines
           type: Directory
       - name: var-run-libvirt-libvirt-sock
         hostPath:
@@ -559,6 +588,8 @@ presubmits:
           readOnly: true
         - name: minikube-cache
           mountPath: /var/lib/libvirt/caches/minikube/.minikube/cache
+        - name: minikube-machines
+          mountPath: /var/lib/libvirt/caches/minikube/.minikube/machines
         - name: var-run-libvirt-libvirt-sock
           mountPath: /var/run/libvirt/libvirt-sock
       volumes:
@@ -568,6 +599,10 @@ presubmits:
       - name: minikube-cache
         hostPath:
           path: /var/lib/libvirt/caches/minikube/.minikube/cache
+          type: Directory
+      - name: minikube-machines
+        hostPath:
+          path: /var/lib/libvirt/caches/minikube/.minikube/machines
           type: Directory
       - name: var-run-libvirt-libvirt-sock
         hostPath:
