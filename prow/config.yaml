@@ -228,24 +228,22 @@ presubmits:
         - name: service
           mountPath: /etc/service-account
           readOnly: true
-        - name: minikube-cache
-          mountPath: /var/lib/libvirt/caches/minikube/.minikube/cache
-        - name: minikube-machines
-          mountPath: /var/lib/libvirt/caches/minikube/.minikube/machines
+        - name: var-lib-libvirt
+          mountPath: /var/lib/libvirt
+        - name: minikube-certs
+          mountPath: /var/lib/libvirt/caches/minikube/.minikube/certs
         - name: var-run-libvirt-libvirt-sock
           mountPath: /var/run/libvirt/libvirt-sock
       volumes:
       - name: service
         secret:
           secretName: service-account
-      - name: minikube-cache
+      - name: var-lib-libvirt
         hostPath:
-          path: /var/lib/libvirt/caches/minikube/.minikube/cache
+          path: /var/lib/libvirt
           type: Directory
-      - name: minikube-machines
-        hostPath:
-          path: /var/lib/libvirt/caches/minikube/.minikube/machines
-          type: Directory
+      - name: minikube-certs
+        emptyDir: {}
       - name: var-run-libvirt-libvirt-sock
         hostPath:
           path: /var/run/libvirt/libvirt-sock
@@ -293,24 +291,22 @@ presubmits:
         - name: service
           mountPath: /etc/service-account
           readOnly: true
-        - name: minikube-cache
-          mountPath: /var/lib/libvirt/caches/minikube/.minikube/cache
-        - name: minikube-machines
-          mountPath: /var/lib/libvirt/caches/minikube/.minikube/machines
+        - name: var-lib-libvirt
+          mountPath: /var/lib/libvirt
+        - name: minikube-certs
+          mountPath: /var/lib/libvirt/caches/minikube/.minikube/certs
         - name: var-run-libvirt-libvirt-sock
           mountPath: /var/run/libvirt/libvirt-sock
       volumes:
       - name: service
         secret:
           secretName: service-account
-      - name: minikube-cache
+      - name: var-lib-libvirt
         hostPath:
-          path: /var/lib/libvirt/caches/minikube/.minikube/cache
+          path: /var/lib/libvirt
           type: Directory
-      - name: minikube-machines
-        hostPath:
-          path: /var/lib/libvirt/caches/minikube/.minikube/machines
-          type: Directory
+      - name: minikube-certs
+        emptyDir: {}
       - name: var-run-libvirt-libvirt-sock
         hostPath:
           path: /var/run/libvirt/libvirt-sock
@@ -358,28 +354,27 @@ presubmits:
         - name: service
           mountPath: /etc/service-account
           readOnly: true
-        - name: minikube-cache
-          mountPath: /var/lib/libvirt/caches/minikube/.minikube/cache
-        - name: minikube-machines
-          mountPath: /var/lib/libvirt/caches/minikube/.minikube/machines
+        - name: var-lib-libvirt
+          mountPath: /var/lib/libvirt
+        - name: minikube-certs
+          mountPath: /var/lib/libvirt/caches/minikube/.minikube/certs
         - name: var-run-libvirt-libvirt-sock
           mountPath: /var/run/libvirt/libvirt-sock
       volumes:
       - name: service
         secret:
           secretName: service-account
-      - name: minikube-cache
+      - name: var-lib-libvirt
         hostPath:
-          path: /var/lib/libvirt/caches/minikube/.minikube/cache
+          path: /var/lib/libvirt
           type: Directory
-      - name: minikube-machines
-        hostPath:
-          path: /var/lib/libvirt/caches/minikube/.minikube/machines
-          type: Directory
+      - name: minikube-certs
+        emptyDir: {}
       - name: var-run-libvirt-libvirt-sock
         hostPath:
           path: /var/run/libvirt/libvirt-sock
           type: Socket
+
 
   jetstack/cert-manager:
   - name: cert-manager-quick-verify
@@ -456,24 +451,22 @@ presubmits:
         - name: service
           mountPath: /etc/service-account
           readOnly: true
-        - name: minikube-cache
-          mountPath: /var/lib/libvirt/caches/minikube/.minikube/cache
-        - name: minikube-machines
-          mountPath: /var/lib/libvirt/caches/minikube/.minikube/machines
+        - name: var-lib-libvirt
+          mountPath: /var/lib/libvirt
+        - name: minikube-certs
+          mountPath: /var/lib/libvirt/caches/minikube/.minikube/certs
         - name: var-run-libvirt-libvirt-sock
           mountPath: /var/run/libvirt/libvirt-sock
       volumes:
       - name: service
         secret:
           secretName: service-account
-      - name: minikube-cache
+      - name: var-lib-libvirt
         hostPath:
-          path: /var/lib/libvirt/caches/minikube/.minikube/cache
+          path: /var/lib/libvirt
           type: Directory
-      - name: minikube-machines
-        hostPath:
-          path: /var/lib/libvirt/caches/minikube/.minikube/machines
-          type: Directory
+      - name: minikube-certs
+        emptyDir: {}
       - name: var-run-libvirt-libvirt-sock
         hostPath:
           path: /var/run/libvirt/libvirt-sock
@@ -521,24 +514,22 @@ presubmits:
         - name: service
           mountPath: /etc/service-account
           readOnly: true
-        - name: minikube-cache
-          mountPath: /var/lib/libvirt/caches/minikube/.minikube/cache
-        - name: minikube-machines
-          mountPath: /var/lib/libvirt/caches/minikube/.minikube/machines
+        - name: var-lib-libvirt
+          mountPath: /var/lib/libvirt
+        - name: minikube-certs
+          mountPath: /var/lib/libvirt/caches/minikube/.minikube/certs
         - name: var-run-libvirt-libvirt-sock
           mountPath: /var/run/libvirt/libvirt-sock
       volumes:
       - name: service
         secret:
           secretName: service-account
-      - name: minikube-cache
+      - name: var-lib-libvirt
         hostPath:
-          path: /var/lib/libvirt/caches/minikube/.minikube/cache
+          path: /var/lib/libvirt
           type: Directory
-      - name: minikube-machines
-        hostPath:
-          path: /var/lib/libvirt/caches/minikube/.minikube/machines
-          type: Directory
+      - name: minikube-certs
+        emptyDir: {}
       - name: var-run-libvirt-libvirt-sock
         hostPath:
           path: /var/run/libvirt/libvirt-sock
@@ -586,24 +577,22 @@ presubmits:
         - name: service
           mountPath: /etc/service-account
           readOnly: true
-        - name: minikube-cache
-          mountPath: /var/lib/libvirt/caches/minikube/.minikube/cache
-        - name: minikube-machines
-          mountPath: /var/lib/libvirt/caches/minikube/.minikube/machines
+        - name: var-lib-libvirt
+          mountPath: /var/lib/libvirt
+        - name: minikube-certs
+          mountPath: /var/lib/libvirt/caches/minikube/.minikube/certs
         - name: var-run-libvirt-libvirt-sock
           mountPath: /var/run/libvirt/libvirt-sock
       volumes:
       - name: service
         secret:
           secretName: service-account
-      - name: minikube-cache
+      - name: var-lib-libvirt
         hostPath:
-          path: /var/lib/libvirt/caches/minikube/.minikube/cache
+          path: /var/lib/libvirt
           type: Directory
-      - name: minikube-machines
-        hostPath:
-          path: /var/lib/libvirt/caches/minikube/.minikube/machines
-          type: Directory
+      - name: minikube-certs
+        emptyDir: {}
       - name: var-run-libvirt-libvirt-sock
         hostPath:
           path: /var/run/libvirt/libvirt-sock
@@ -791,10 +780,14 @@ periodics:
         value: /etc/service-account/service-account.json
       - name: MINIKUBE_HOME
         value: /var/lib/libvirt/caches/minikube
+      - name: MINIKUBE_CPUS
+        value: "4"
+      - name: MINIKUBE_MEMORY
+        value: "12288"
       resources:
         requests:
-          cpu: 1800m
-          memory: 4Gi
+          cpu: "3800m"
+          memory: 12Gi
       securityContext:
         privileged: true
       volumeMounts:
@@ -803,6 +796,8 @@ periodics:
         readOnly: true
       - name: var-lib-libvirt
         mountPath: /var/lib/libvirt
+      - name: minikube-certs
+        mountPath: /var/lib/libvirt/caches/minikube/.minikube/certs
       - name: var-run-libvirt-libvirt-sock
         mountPath: /var/run/libvirt/libvirt-sock
     volumes:
@@ -813,10 +808,13 @@ periodics:
       hostPath:
         path: /var/lib/libvirt
         type: Directory
+    - name: minikube-certs
+      emptyDir: {}
     - name: var-run-libvirt-libvirt-sock
       hostPath:
         path: /var/run/libvirt/libvirt-sock
         type: Socket
+
 - name: navigator-e2e-v1-8
   interval: 12h
   agent: kubernetes
@@ -840,10 +838,14 @@ periodics:
         value: /etc/service-account/service-account.json
       - name: MINIKUBE_HOME
         value: /var/lib/libvirt/caches/minikube
+      - name: MINIKUBE_CPUS
+        value: "4"
+      - name: MINIKUBE_MEMORY
+        value: "12288"
       resources:
         requests:
-          cpu: 1800m
-          memory: 4Gi
+          cpu: "3800m"
+          memory: 12Gi
       securityContext:
         privileged: true
       volumeMounts:
@@ -852,6 +854,8 @@ periodics:
         readOnly: true
       - name: var-lib-libvirt
         mountPath: /var/lib/libvirt
+      - name: minikube-certs
+        mountPath: /var/lib/libvirt/caches/minikube/.minikube/certs
       - name: var-run-libvirt-libvirt-sock
         mountPath: /var/run/libvirt/libvirt-sock
     volumes:
@@ -862,10 +866,13 @@ periodics:
       hostPath:
         path: /var/lib/libvirt
         type: Directory
+    - name: minikube-certs
+      emptyDir: {}
     - name: var-run-libvirt-libvirt-sock
       hostPath:
         path: /var/run/libvirt/libvirt-sock
         type: Socket
+
 - name: navigator-e2e-v1-9
   interval: 12h
   agent: kubernetes
@@ -889,10 +896,14 @@ periodics:
         value: /etc/service-account/service-account.json
       - name: MINIKUBE_HOME
         value: /var/lib/libvirt/caches/minikube
+      - name: MINIKUBE_CPUS
+        value: "4"
+      - name: MINIKUBE_MEMORY
+        value: "12288"
       resources:
         requests:
-          cpu: 1800m
-          memory: 4Gi
+          cpu: "3800m"
+          memory: 12Gi
       securityContext:
         privileged: true
       volumeMounts:
@@ -901,6 +912,8 @@ periodics:
         readOnly: true
       - name: var-lib-libvirt
         mountPath: /var/lib/libvirt
+      - name: minikube-certs
+        mountPath: /var/lib/libvirt/caches/minikube/.minikube/certs
       - name: var-run-libvirt-libvirt-sock
         mountPath: /var/run/libvirt/libvirt-sock
     volumes:
@@ -911,6 +924,8 @@ periodics:
       hostPath:
         path: /var/lib/libvirt
         type: Directory
+    - name: minikube-certs
+      emptyDir: {}
     - name: var-run-libvirt-libvirt-sock
       hostPath:
         path: /var/run/libvirt/libvirt-sock
