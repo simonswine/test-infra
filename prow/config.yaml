@@ -192,7 +192,7 @@ presubmits:
     trigger: "(?m)^/test( all| e2e( v?1.7)?|)( \\[.+\\])?$"
     rerun_command: "/test e2e v1.7"
     skip_report: false
-    max_concurrency: 2
+    max_concurrency: 4
     agent: kubernetes
     spec:
       nodeSelector:
@@ -255,7 +255,7 @@ presubmits:
     trigger: "(?m)^/test( all| e2e( v?1.8)?|)( \\[.+\\])?$"
     rerun_command: "/test e2e v1.8"
     skip_report: false
-    max_concurrency: 2
+    max_concurrency: 4
     agent: kubernetes
     spec:
       nodeSelector:
@@ -318,7 +318,7 @@ presubmits:
     trigger: "(?m)^/test( all| e2e( v?1.9)?|)( \\[.+\\])?$"
     rerun_command: "/test e2e v1.9"
     skip_report: false
-    max_concurrency: 2
+    max_concurrency: 4
     agent: kubernetes
     spec:
       nodeSelector:
@@ -415,7 +415,7 @@ presubmits:
     trigger: "(?m)^/test( all| e2e( v?1.7)?|)( \\[.+\\])?$"
     rerun_command: "/test e2e v1.7"
     skip_report: false
-    max_concurrency: 2
+    max_concurrency: 4
     agent: kubernetes
     spec:
       nodeSelector:
@@ -478,7 +478,7 @@ presubmits:
     trigger: "(?m)^/test( all| e2e( v?1.8)?|)( \\[.+\\])?$"
     rerun_command: "/test e2e v1.8"
     skip_report: false
-    max_concurrency: 2
+    max_concurrency: 4
     agent: kubernetes
     spec:
       nodeSelector:
@@ -541,7 +541,7 @@ presubmits:
     trigger: "(?m)^/test( all| e2e( v?1.9)?|)( \\[.+\\])?$"
     rerun_command: "/test e2e v1.9"
     skip_report: false
-    max_concurrency: 2
+    max_concurrency: 4
     agent: kubernetes
     spec:
       nodeSelector:
