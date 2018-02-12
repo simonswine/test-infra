@@ -379,7 +379,7 @@ presubmits:
     agent: kubernetes
     context: pull-navigator-kubetest
     rerun_command: "/test kubetest-e2e"
-    trigger: "(?m)^/test pull-kubetest-e2e,?(\\s+|$)"
+    trigger: "(?m)^/test kubetest-e2e,?(\\s+|$)"
     always_run: false
     labels:
       preset-service-account: true
