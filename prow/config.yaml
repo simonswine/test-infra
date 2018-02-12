@@ -375,6 +375,57 @@ presubmits:
           path: /var/run/libvirt/libvirt-sock
           type: Socket
 
+  - name: navigator-kubetest-e2e
+    agent: kubernetes
+    context: pull-navigator-kubetest
+    rerun_command: "/test kubetest-e2e"
+    trigger: "(?m)^/test pull-kubetest-e2e,?(\\s+|$)"
+    always_run: false
+    labels:
+      preset-service-account: true
+    spec:
+      containers:
+      - image: gcr.io/k8s-testimages/bootstrap:v20180122-6fd3aef1a
+        args:
+        - "--repo=github.com/$(REPO_OWNER)/$(REPO_NAME)=$(PULL_REFS)"
+        - "--root=/go/src"
+        - "--clean"
+        - "--git-cache=/root/.cache/git"
+        - "--job=$(JOB_NAME)"
+        - "--service-account=/etc/service-account/service-account.json"
+        - "--upload=gs://jetstack-logs/pr-logs"
+        - "--timeout=90"
+        env:
+        - name: DOCKER_IN_DOCKER_ENABLED
+          value: true
+        # docker-in-docker needs privileged mode
+        securityContext:
+          privileged: true
+        volumeMounts:
+        - name: cache-ssd
+          mountPath: /root/.cache
+        - name: docker-graph
+          mountPath: /docker-graph
+        - name: var-lib-docker
+          mountPath: /var/lib/docker
+        # TODO: not sure if we can run parallel builds
+        # ports:
+        # - containerPort: 9999
+        #   hostPort: 9999
+        resources:
+          requests:
+            cpu: 3800m
+            memory: "12Gi"
+      volumes:
+      # TODO: re-enable cache volumes
+      # - name: cache-ssd
+      #   hostPath:
+      #     path: /mnt/disks/ssd0
+      # - name: docker-graph
+      #   hostPath:
+      #     path: /mnt/disks/ssd0/docker-graph
+      - name: var-lib-docker
+        emptyDir: {}
 
   jetstack/cert-manager:
   - name: cert-manager-quick-verify
