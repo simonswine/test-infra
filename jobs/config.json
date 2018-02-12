@@ -308,5 +308,15 @@
     "sigOwners": [
       "UNKNOWN"
     ]
+  },
+  "pull-navigator-kubetest": {
+    "args": [
+      "make",
+      "e2e-test"
+    ],
+    "scenario": "execute",
+    "sigOwners": [
+      "UNKNOWN"
+    ]
   }
 }
