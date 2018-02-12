@@ -20,6 +20,21 @@ prowjob_namespace: default
 pod_namespace: test-pods
 log_level: info
 
+presets:
+- labels:
+    preset-service-account: true
+  env:
+  - name: GOOGLE_APPLICATION_CREDENTIALS
+    value: /etc/service-account/service-account.json
+  volumes:
+  - name: service
+    secret:
+      secretName: service-account
+  volumeMounts:
+  - name: service
+    mountPath: /etc/service-account
+    readOnly: true
+
 tide:
   target_url: https://prow.build-infra.jetstack.net/tide.html
   queries:
