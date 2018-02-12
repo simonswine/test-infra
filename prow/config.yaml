@@ -402,10 +402,10 @@ presubmits:
         securityContext:
           privileged: true
         volumeMounts:
-        - name: cache-ssd
-          mountPath: /root/.cache
-        - name: docker-graph
-          mountPath: /docker-graph
+        # - name: cache-ssd
+        #   mountPath: /root/.cache
+        # - name: docker-graph
+        #   mountPath: /docker-graph
         - name: var-lib-docker
           mountPath: /var/lib/docker
         # TODO: not sure if we can run parallel builds
