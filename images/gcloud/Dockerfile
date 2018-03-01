@@ -31,14 +31,18 @@ RUN wget https://dl.google.com/dl/cloudsdk/channels/rapid/downloads/google-cloud
     tar xf google-cloud-sdk-$GCLOUD_VERSION-linux-x86_64.tar.gz -C / && \
     rm google-cloud-sdk-$GCLOUD_VERSION-linux-x86_64.tar.gz && \
     /google-cloud-sdk/install.sh && \
-    curl -Lo helm.tar.gz https://storage.googleapis.com/kubernetes-helm/helm-v2.8.0-linux-amd64.tar.gz && \
+    curl -Lo helm.tar.gz https://storage.googleapis.com/kubernetes-helm/helm-v2.8.1-linux-amd64.tar.gz && \
     tar xvf helm.tar.gz && \
     mv linux-amd64/helm /usr/local/bin
 ENV PATH "/google-cloud-sdk/bin:${PATH}"
 
 RUN curl -L https://github.com/golang/dep/releases/download/v0.3.2/dep-linux-amd64 >/tmp/dep \
+    && curl -L https://github.com/mikefarah/yaml/releases/download/1.13.1/yaml_linux_amd64 >/tmp/yaml \
+    && curl -L vert https://github.com/Masterminds/vert/releases/download/v0.1.0/vert-v0.1.0-linux-amd64 >/tmp/vert \
     && chmod +x /tmp/dep \
-    && mv /tmp/dep /usr/local/bin/dep
+    && chmod +x /tmp/yaml \
+    && chmod +x /tmp/vert \
+    && mv /tmp/dep /tmp/yaml /tmp/vert /usr/local/bin/
 RUN go get -v golang.org/x/tools/cmd/goimports
 
 WORKDIR /workspace
