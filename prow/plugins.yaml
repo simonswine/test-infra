@@ -79,6 +79,7 @@ plugins:
   - lgtm
   - approve
   - milestonestatus
+  - lifecycle
   - size
   - yuks
   - wip
