@@ -19,12 +19,15 @@ package jenkins
 import (
 	"errors"
 	"fmt"
+	"net/http"
+	"net/http/httptest"
+	"reflect"
 	"sync"
 	"testing"
 	"text/template"
-	"time"
 
 	"github.com/sirupsen/logrus"
+	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 
 	"k8s.io/test-infra/prow/config"
 	"k8s.io/test-infra/prow/github"
@@ -37,7 +40,7 @@ type fca struct {
 	c *config.Config
 }
 
-func newFakeConfigAgent(t *testing.T, maxConcurrency int) *fca {
+func newFakeConfigAgent(t *testing.T, maxConcurrency int, operators []config.JenkinsOperator) *fca {
 	presubmits := []config.Presubmit{
 		{
 			Name: "test-bazel-build",
@@ -67,19 +70,24 @@ func newFakeConfigAgent(t *testing.T, maxConcurrency int) *fca {
 		"kubernetes/kubernetes": presubmits,
 	}
 
-	return &fca{
+	ca := &fca{
 		c: &config.Config{
-			JenkinsOperator: config.JenkinsOperator{
-				Controller: config.Controller{
-					JobURLTemplate: template.Must(template.New("test").Parse("{{.Status.PodName}}/{{.Status.State}}")),
-					MaxConcurrency: maxConcurrency,
-					MaxGoroutines:  20,
+			JenkinsOperators: []config.JenkinsOperator{
+				{
+					Controller: config.Controller{
+						JobURLTemplate: template.Must(template.New("test").Parse("{{.Status.PodName}}/{{.Status.State}}")),
+						MaxConcurrency: maxConcurrency,
+						MaxGoroutines:  20,
+					},
 				},
 			},
 			Presubmits: presubmitMap,
 		},
 	}
-
+	if len(operators) > 0 {
+		ca.c.JenkinsOperators = operators
+	}
+	return ca
 }
 
 func (f *fca) Config() *config.Config {
@@ -110,7 +118,7 @@ func (f *fkc) ReplaceProwJob(name string, job kube.ProwJob) (kube.ProwJob, error
 	f.Lock()
 	defer f.Unlock()
 	for i := range f.prowjobs {
-		if f.prowjobs[i].Metadata.Name == name {
+		if f.prowjobs[i].ObjectMeta.Name == name {
 			f.prowjobs[i] = job
 			return job, nil
 		}
@@ -126,7 +134,7 @@ type fjc struct {
 	builds map[string]JenkinsBuild
 }
 
-func (f *fjc) Build(pj *kube.ProwJob) error {
+func (f *fjc) Build(pj *kube.ProwJob, buildId string) error {
 	f.Lock()
 	defer f.Unlock()
 	if f.err != nil {
@@ -284,6 +292,10 @@ func TestSyncTriggeredJobs(t *testing.T) {
 		},
 	}
 	for _, tc := range testcases {
+		totServ := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+			fmt.Fprint(w, "42")
+		}))
+		defer totServ.Close()
 		t.Logf("scenario %q", tc.name)
 		fjc := &fjc{
 			err: tc.err,
@@ -296,7 +308,8 @@ func TestSyncTriggeredJobs(t *testing.T) {
 			kc:          fkc,
 			jc:          fjc,
 			log:         logrus.NewEntry(logrus.StandardLogger()),
-			ca:          newFakeConfigAgent(t, tc.maxConcurrency),
+			ca:          newFakeConfigAgent(t, tc.maxConcurrency, nil),
+			totURL:      totServ.URL,
 			lock:        sync.RWMutex{},
 			pendingJobs: make(map[string]int),
 		}
@@ -362,7 +375,7 @@ func TestSyncPendingJobs(t *testing.T) {
 		{
 			name: "enqueued",
 			pj: kube.ProwJob{
-				Metadata: kube.ObjectMeta{
+				ObjectMeta: metav1.ObjectMeta{
 					Name: "foofoo",
 				},
 				Spec: kube.ProwJobSpec{
@@ -382,7 +395,7 @@ func TestSyncPendingJobs(t *testing.T) {
 		{
 			name: "finished queue",
 			pj: kube.ProwJob{
-				Metadata: kube.ObjectMeta{
+				ObjectMeta: metav1.ObjectMeta{
 					Name: "boing",
 				},
 				Spec: kube.ProwJobSpec{
@@ -396,7 +409,7 @@ func TestSyncPendingJobs(t *testing.T) {
 			builds: map[string]JenkinsBuild{
 				"boing": {enqueued: false, Number: 10},
 			},
-			expectedURL:      "test-job-10/pending",
+			expectedURL:      "boing/pending",
 			expectedState:    kube.PendingState,
 			expectedEnqueued: false,
 			expectedReport:   true,
@@ -404,7 +417,7 @@ func TestSyncPendingJobs(t *testing.T) {
 		{
 			name: "building",
 			pj: kube.ProwJob{
-				Metadata: kube.ObjectMeta{
+				ObjectMeta: metav1.ObjectMeta{
 					Name: "firstoutthetrenches",
 				},
 				Spec: kube.ProwJobSpec{
@@ -417,14 +430,14 @@ func TestSyncPendingJobs(t *testing.T) {
 			builds: map[string]JenkinsBuild{
 				"firstoutthetrenches": {enqueued: false, Number: 10},
 			},
-			expectedURL:    "test-job-10/pending",
+			expectedURL:    "firstoutthetrenches/pending",
 			expectedState:  kube.PendingState,
 			expectedReport: true,
 		},
 		{
 			name: "missing build",
 			pj: kube.ProwJob{
-				Metadata: kube.ObjectMeta{
+				ObjectMeta: metav1.ObjectMeta{
 					Name: "blabla",
 				},
 				Spec: kube.ProwJobSpec{
@@ -454,7 +467,7 @@ func TestSyncPendingJobs(t *testing.T) {
 		{
 			name: "finished, success",
 			pj: kube.ProwJob{
-				Metadata: kube.ObjectMeta{
+				ObjectMeta: metav1.ObjectMeta{
 					Name: "winwin",
 				},
 				Spec: kube.ProwJobSpec{
@@ -467,7 +480,7 @@ func TestSyncPendingJobs(t *testing.T) {
 			builds: map[string]JenkinsBuild{
 				"winwin": {Result: pState(Succeess), Number: 11},
 			},
-			expectedURL:      "test-job-11/success",
+			expectedURL:      "winwin/success",
 			expectedState:    kube.SuccessState,
 			expectedComplete: true,
 			expectedReport:   true,
@@ -475,7 +488,7 @@ func TestSyncPendingJobs(t *testing.T) {
 		{
 			name: "finished, failed",
 			pj: kube.ProwJob{
-				Metadata: kube.ObjectMeta{
+				ObjectMeta: metav1.ObjectMeta{
 					Name: "whatapity",
 				},
 				Spec: kube.ProwJobSpec{
@@ -488,7 +501,7 @@ func TestSyncPendingJobs(t *testing.T) {
 			builds: map[string]JenkinsBuild{
 				"whatapity": {Result: pState(Failure), Number: 12},
 			},
-			expectedURL:      "test-job-12/failure",
+			expectedURL:      "whatapity/failure",
 			expectedState:    kube.FailureState,
 			expectedComplete: true,
 			expectedReport:   true,
@@ -496,6 +509,10 @@ func TestSyncPendingJobs(t *testing.T) {
 	}
 	for _, tc := range testcases {
 		t.Logf("scenario %q", tc.name)
+		totServ := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+			fmt.Fprint(w, "42")
+		}))
+		defer totServ.Close()
 		fjc := &fjc{
 			err: tc.err,
 		}
@@ -507,7 +524,8 @@ func TestSyncPendingJobs(t *testing.T) {
 			kc:          fkc,
 			jc:          fjc,
 			log:         logrus.NewEntry(logrus.StandardLogger()),
-			ca:          newFakeConfigAgent(t, 0),
+			ca:          newFakeConfigAgent(t, 0, nil),
+			totURL:      totServ.URL,
 			lock:        sync.RWMutex{},
 			pendingJobs: make(map[string]int),
 		}
@@ -581,7 +599,7 @@ func TestBatch(t *testing.T) {
 			},
 		},
 	}), nil)
-	pj.Metadata.Name = "known_name"
+	pj.ObjectMeta.Name = "known_name"
 	fc := &fkc{
 		prowjobs: []kube.ProwJob{pj},
 	}
@@ -590,11 +608,16 @@ func TestBatch(t *testing.T) {
 			"known_name": { /* Running */ },
 		},
 	}
+	totServ := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		fmt.Fprint(w, "42")
+	}))
+	defer totServ.Close()
 	c := Controller{
 		kc:          fc,
 		jc:          jc,
 		log:         logrus.NewEntry(logrus.StandardLogger()),
-		ca:          newFakeConfigAgent(t, 0),
+		ca:          newFakeConfigAgent(t, 0, nil),
+		totURL:      totServ.URL,
 		pendingJobs: make(map[string]int),
 		lock:        sync.RWMutex{},
 	}
@@ -615,7 +638,7 @@ func TestBatch(t *testing.T) {
 	if fc.prowjobs[0].Status.Description != "Jenkins job running." {
 		t.Fatalf("Expected description %q, got %q.", "Jenkins job running.", fc.prowjobs[0].Status.Description)
 	}
-	if fc.prowjobs[0].Status.PodName != "pr-some-job-42" {
+	if fc.prowjobs[0].Status.PodName != "known_name" {
 		t.Fatalf("Wrong PodName: %s", fc.prowjobs[0].Status.PodName)
 	}
 	jc.builds["known_name"] = JenkinsBuild{Result: pState(Succeess)}
@@ -733,7 +756,7 @@ func TestRunAfterSuccessCanRun(t *testing.T) {
 
 		c := Controller{log: logrus.NewEntry(logrus.StandardLogger())}
 
-		got := c.RunAfterSuccessCanRun(test.parent, test.child, newFakeConfigAgent(t, 0), fakeGH)
+		got := c.RunAfterSuccessCanRun(test.parent, test.child, newFakeConfigAgent(t, 0, nil), fakeGH)
 		if got != test.expected {
 			t.Errorf("expected to run: %t, got: %t", test.expected, got)
 		}
@@ -831,6 +854,10 @@ func TestMaxConcurrencyWithNewlyTriggeredJobs(t *testing.T) {
 	}
 
 	for _, test := range tests {
+		totServ := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+			fmt.Fprint(w, "42")
+		}))
+		defer totServ.Close()
 		jobs := make(chan kube.ProwJob, len(test.pjs))
 		for _, pj := range test.pjs {
 			jobs <- pj
@@ -845,7 +872,8 @@ func TestMaxConcurrencyWithNewlyTriggeredJobs(t *testing.T) {
 			kc:          fc,
 			jc:          fjc,
 			log:         logrus.NewEntry(logrus.StandardLogger()),
-			ca:          newFakeConfigAgent(t, 0),
+			ca:          newFakeConfigAgent(t, 0, nil),
+			totURL:      totServ.URL,
 			pendingJobs: test.pendingJobs,
 		}
 
@@ -860,8 +888,8 @@ func TestMaxConcurrencyWithNewlyTriggeredJobs(t *testing.T) {
 }
 
 func TestGetJenkinsJobs(t *testing.T) {
-	now := func() *time.Time {
-		n := time.Now()
+	now := func() *metav1.Time {
+		n := metav1.Now()
 		return &n
 	}
 	tests := []struct {
@@ -949,6 +977,83 @@ func TestGetJenkinsJobs(t *testing.T) {
 			if !found {
 				t.Errorf("expected jobs: %v\ngot: %v", test.expected, got)
 			}
+		}
+	}
+}
+
+func TestOperatorConfig(t *testing.T) {
+	tests := []struct {
+		name string
+
+		operators     []config.JenkinsOperator
+		labelSelector string
+
+		expected config.Controller
+	}{
+		{
+			name: "single operator config",
+
+			operators:     nil, // defaults to a single operator
+			labelSelector: "",
+
+			expected: config.Controller{
+				JobURLTemplate: template.Must(template.New("test").Parse("{{.Status.PodName}}/{{.Status.State}}")),
+				MaxConcurrency: 10,
+				MaxGoroutines:  20,
+			},
+		},
+		{
+			name: "single operator config, --label-selector used",
+
+			operators:     nil, // defaults to a single operator
+			labelSelector: "master=ci.jenkins.org",
+
+			expected: config.Controller{
+				JobURLTemplate: template.Must(template.New("test").Parse("{{.Status.PodName}}/{{.Status.State}}")),
+				MaxConcurrency: 10,
+				MaxGoroutines:  20,
+			},
+		},
+		{
+			name: "multiple operator config",
+
+			operators: []config.JenkinsOperator{
+				{
+					Controller: config.Controller{
+						JobURLTemplate: template.Must(template.New("test").Parse("{{.Status.PodName}}/{{.Status.State}}")),
+						MaxConcurrency: 5,
+						MaxGoroutines:  10,
+					},
+					LabelSelectorString: "master=ci.openshift.org",
+				},
+				{
+					Controller: config.Controller{
+						MaxConcurrency: 100,
+						MaxGoroutines:  100,
+					},
+					LabelSelectorString: "master=ci.jenkins.org",
+				},
+			},
+			labelSelector: "master=ci.jenkins.org",
+
+			expected: config.Controller{
+				MaxConcurrency: 100,
+				MaxGoroutines:  100,
+			},
+		},
+	}
+
+	for _, test := range tests {
+		t.Logf("scenario %q", test.name)
+
+		c := Controller{
+			ca:       newFakeConfigAgent(t, 10, test.operators),
+			selector: test.labelSelector,
+		}
+
+		got := c.config()
+		if !reflect.DeepEqual(got, test.expected) {
+			t.Errorf("expected controller:\n%#v\ngot controller:\n%#v\n", test.expected, got)
 		}
 	}
 }

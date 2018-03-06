@@ -21,13 +21,12 @@ import (
 	"regexp"
 
 	"k8s.io/test-infra/prow/github"
-	"k8s.io/test-infra/prow/kube"
-	"k8s.io/test-infra/prow/pjutil"
 	"k8s.io/test-infra/prow/plugins"
 )
 
-var okToTest = regexp.MustCompile(`(?m)^/ok-to-test\s*$`)
-var retest = regexp.MustCompile(`(?m)^/retest\s*$`)
+var okToTestRe = regexp.MustCompile(`(?m)^/ok-to-test\s*$`)
+var testAllRe = regexp.MustCompile(`(?m)^/test all\s*$`)
+var retestRe = regexp.MustCompile(`(?m)^/retest\s*$`)
 
 func handleIC(c client, trustedOrg string, ic github.IssueCommentEvent) error {
 	org := ic.Repo.Owner.Login
@@ -54,33 +53,15 @@ func handleIC(c client, trustedOrg string, ic github.IssueCommentEvent) error {
 		return nil
 	}
 
-	var changedFiles []string
-	files := func() ([]string, error) {
-		if changedFiles != nil {
-			return changedFiles, nil
-		}
-		changes, err := c.GitHubClient.GetPullRequestChanges(org, repo, number)
-		if err != nil {
-			return nil, err
-		}
-		changedFiles = []string{}
-		for _, change := range changes {
-			changedFiles = append(changedFiles, change.Filename)
-		}
-		return changedFiles, nil
-	}
-
 	// Which jobs does the comment want us to run?
-	testAll := okToTest.MatchString(ic.Comment.Body)
-	shouldRetestFailed := retest.MatchString(ic.Comment.Body)
-	requestedJobs, err := c.Config.MatchingPresubmits(ic.Repo.FullName, ic.Comment.Body, testAll, files)
-	if err != nil {
-		return err
-	}
+	okToTest := okToTestRe.MatchString(ic.Comment.Body)
+	testAll := okToTest || testAllRe.MatchString(ic.Comment.Body)
+	shouldRetestFailed := retestRe.MatchString(ic.Comment.Body)
+	requestedJobs := c.Config.MatchingPresubmits(ic.Repo.FullName, ic.Comment.Body, testAll)
 	if !shouldRetestFailed && len(requestedJobs) == 0 {
 		// Check for the presence of the needs-ok-to-test label and remove it
 		// if a trusted member has commented "/ok-to-test".
-		if testAll && ic.Issue.HasLabel(needsOkToTest) {
+		if okToTest && ic.Issue.HasLabel(needsOkToTest) {
 			orgMember, err := isUserTrusted(c.GitHubClient, commentAuthor, trustedOrg, org)
 			if err != nil {
 				return err
@@ -97,25 +78,23 @@ func handleIC(c client, trustedOrg string, ic github.IssueCommentEvent) error {
 		return err
 	}
 
+	var forceRunContexts map[string]bool
 	if shouldRetestFailed {
 		combinedStatus, err := c.GitHubClient.GetCombinedStatus(org, repo, pr.Head.SHA)
 		if err != nil {
 			return err
 		}
-		skipContexts := make(map[string]bool) // these succeeded or are running
-		runContexts := make(map[string]bool)  // these failed and should be re-run
+		skipContexts := make(map[string]bool)    // these succeeded or are running
+		forceRunContexts = make(map[string]bool) // these failed and should be re-run
 		for _, status := range combinedStatus.Statuses {
 			state := status.State
 			if state == github.StatusSuccess || state == github.StatusPending {
 				skipContexts[status.Context] = true
 			} else if state == github.StatusError || state == github.StatusFailure {
-				runContexts[status.Context] = true
+				forceRunContexts[status.Context] = true
 			}
 		}
-		retests, err := c.Config.RetestPresubmits(ic.Repo.FullName, skipContexts, runContexts, files)
-		if err != nil {
-			return err
-		}
+		retests := c.Config.RetestPresubmits(ic.Repo.FullName, skipContexts, forceRunContexts)
 		requestedJobs = append(requestedJobs, retests...)
 	}
 
@@ -145,7 +124,7 @@ func handleIC(c client, trustedOrg string, ic github.IssueCommentEvent) error {
 		}
 	}
 
-	if testAll && ic.Issue.HasLabel(needsOkToTest) {
+	if okToTest && ic.Issue.HasLabel(needsOkToTest) {
 		if err := c.GitHubClient.RemoveLabel(ic.Repo.Owner.Login, ic.Repo.Name, ic.Issue.Number, needsOkToTest); err != nil {
 			c.Logger.WithError(err).Errorf("Failed at removing %s label", needsOkToTest)
 		}
@@ -155,61 +134,5 @@ func handleIC(c client, trustedOrg string, ic github.IssueCommentEvent) error {
 		}
 	}
 
-	ref, err := c.GitHubClient.GetRef(org, repo, "heads/"+pr.Base.Ref)
-	if err != nil {
-		return err
-	}
-
-	// Determine if any branch-shard of a given job runs against the base branch.
-	anyShardRunsAgainstBranch := map[string]bool{}
-	for _, job := range requestedJobs {
-		if job.RunsAgainstBranch(pr.Base.Ref) {
-			anyShardRunsAgainstBranch[job.Context] = true
-		}
-	}
-
-	var errors []error
-	for _, job := range requestedJobs {
-		if !job.RunsAgainstBranch(pr.Base.Ref) {
-			if !job.SkipReport && !anyShardRunsAgainstBranch[job.Context] {
-				if err := c.GitHubClient.CreateStatus(org, repo, pr.Head.SHA, github.Status{
-					State:       github.StatusSuccess,
-					Context:     job.Context,
-					Description: "Skipped",
-				}); err != nil {
-					return err
-				}
-			}
-			continue
-		}
-
-		c.Logger.Infof("Starting %s build.", job.Name)
-		kr := kube.Refs{
-			Org:     org,
-			Repo:    repo,
-			BaseRef: pr.Base.Ref,
-			BaseSHA: ref,
-			Pulls: []kube.Pull{
-				{
-					Number: number,
-					Author: pr.User.Login,
-					SHA:    pr.Head.SHA,
-				},
-			},
-		}
-		labels := make(map[string]string)
-		for k, v := range job.Labels {
-			labels[k] = v
-		}
-		labels[github.EventGUID] = ic.GUID
-		pj := pjutil.NewProwJob(pjutil.PresubmitSpec(job, kr), labels)
-		c.Logger.WithFields(pjutil.ProwJobFields(&pj)).Info("Creating a new prowjob.")
-		if _, err := c.KubeClient.CreateProwJob(pj); err != nil {
-			errors = append(errors, err)
-		}
-	}
-	if len(errors) > 0 {
-		return fmt.Errorf("errors starting jobs: %v", errors)
-	}
-	return nil
+	return runOrSkipRequested(c, pr, requestedJobs, forceRunContexts, ic.Comment.Body, ic.GUID)
 }

@@ -17,6 +17,7 @@ limitations under the License.
 package main
 
 import (
+	"errors"
 	"flag"
 	"fmt"
 	"io/ioutil"
@@ -36,13 +37,43 @@ type options struct {
 	endpoint string
 }
 
+func (o *options) Validate() error {
+	if o.config == "" {
+		return errors.New("empty --config")
+	}
+
+	if o.token == "" {
+		return errors.New("empty --github-token-path")
+	}
+
+	if _, err := url.Parse(o.endpoint); err != nil {
+		return fmt.Errorf("invalid --endpoint URL: %v", err)
+	}
+
+	return nil
+}
+
+func gatherOptions() options {
+	o := options{}
+	flag.StringVar(&o.config, "config-path", "", "Path to prow config.yaml")
+	flag.BoolVar(&o.confirm, "confirm", false, "Mutate github if set")
+	flag.StringVar(&o.endpoint, "github-endpoint", "https://api.github.com", "Github api endpoint, may differ for enterprise")
+	flag.StringVar(&o.token, "github-token-path", "", "Path to github token")
+	flag.Parse()
+	return o
+}
+
 func jobRequirements(jobs []config.Presubmit, after bool) []string {
 	var required []string
 	for _, j := range jobs {
-		if !after && (!j.AlwaysRun || j.SkipReport) {
-			continue
+		// Does this job require a context or have kids that might need one?
+		if !after && !j.AlwaysRun && j.RunIfChanged == "" {
+			continue // No
 		}
-		required = append(required, j.Context)
+		if !j.SkipReport { // This job needs a context
+			required = append(required, j.Context)
+		}
+		// Check which children require contexts
 		required = append(required, jobRequirements(j.RunAfterSuccess, true)...)
 	}
 	return required
@@ -54,16 +85,6 @@ func repoRequirements(org, repo string, cfg config.Config) []string {
 		return nil
 	}
 	return jobRequirements(p, false)
-}
-
-func flagOptions() options {
-	o := options{}
-	flag.StringVar(&o.config, "config-path", "", "Path to prow config.yaml")
-	flag.BoolVar(&o.confirm, "confirm", false, "Mutate github if set")
-	flag.StringVar(&o.endpoint, "github-endpoint", "https://api.github.com", "Github api endpoint, may differ for enterprise")
-	flag.StringVar(&o.token, "github-token-path", "", "Path to github token")
-	flag.Parse()
-	return o
 }
 
 type Requirements struct {
@@ -88,9 +109,9 @@ func (e *Errors) add(err error) {
 }
 
 func main() {
-	o := flagOptions()
-	if o.config == "" {
-		log.Fatal("empty --config")
+	o := gatherOptions()
+	if err := o.Validate(); err != nil {
+		log.Fatal(err)
 	}
 
 	cfg, err := config.Load(o.config)
@@ -98,16 +119,9 @@ func main() {
 		log.Fatalf("Failed to load --config=%s: %v", o.config, err)
 	}
 
-	if o.token == "" {
-		log.Fatal("empty --token")
-	}
 	b, err := ioutil.ReadFile(o.token)
 	if err != nil {
 		log.Fatalf("cannot read --token: %v", err)
-	}
-	_, err = url.Parse(o.endpoint)
-	if err != nil {
-		log.Fatalf("Must specify valid --endpoint URL: %v", err)
 	}
 
 	var c *github.Client
@@ -133,7 +147,7 @@ func main() {
 	close(p.updates)
 	errors := <-p.done
 	if len(errors) > 0 {
-		log.Fatalf("Encountered %d errrors protecting branches: %v", len(errors), errors)
+		log.Fatalf("Encountered %d errors protecting branches: %v", len(errors), errors)
 	}
 }
 
@@ -217,13 +231,25 @@ func (p *Protector) UpdateOrg(orgName string, org config.Org, protect *bool, con
 	op := append([]string(nil), pushers...)
 	op = append(op, org.Pushers...)
 
-	repos, err := p.client.GetRepos(orgName, false)
-	if err != nil {
-		return fmt.Errorf("GetRepos(%s) failed: %v", orgName, err)
+	var repos []string
+	if protect != nil {
+		// Strongly opinionated org, configure every repo in the org.
+		rs, err := p.client.GetRepos(orgName, false)
+		if err != nil {
+			return fmt.Errorf("GetRepos(%s) failed: %v", orgName, err)
+		}
+		for _, r := range rs {
+			repos = append(repos, r.Name)
+		}
+	} else {
+		// Unopinionated org, just set explicitly defined repos
+		for r := range org.Repos {
+			repos = append(repos, r)
+		}
 	}
-	for _, repo := range repos {
-		repoName := repo.Name
-		err := p.UpdateRepo(orgName, repoName, org.Repos[orgName+"/"+repoName], protect, oc, op)
+
+	for _, repoName := range repos {
+		err := p.UpdateRepo(orgName, repoName, org.Repos[repoName], protect, oc, op)
 		if err != nil {
 			return err
 		}
@@ -246,33 +272,49 @@ func (p *Protector) UpdateRepo(orgName string, repo string, repoDefaults config.
 
 	rc = append(rc, repoRequirements(orgName, repo, *p.cfg)...)
 
-	branches, err := p.client.GetBranches(orgName, repo)
-	if err != nil {
-		return fmt.Errorf("GetBranches(%s, %s) failed: %v", orgName, repo, err)
+	var branches []string
+	if protect != nil {
+		bs, err := p.client.GetBranches(orgName, repo)
+		if err != nil {
+			return fmt.Errorf("GetBranches(%s, %s) failed: %v", orgName, repo, err)
+		}
+		for _, branch := range bs {
+			branches = append(branches, branch.Name)
+		}
+	} else {
+		for b := range repoDefaults.Branches {
+			branches = append(branches, b)
+		}
 	}
-	for _, branch := range branches {
-		branchName := branch.Name
-		p.UpdateBranch(orgName, repo, branchName, repoDefaults.Branches[branchName], protect, rc, rp)
+
+	for _, branchName := range branches {
+		if err := p.UpdateBranch(orgName, repo, branchName, repoDefaults.Branches[branchName], protect, rc, rp); err != nil {
+			return fmt.Errorf("UpdateBranch(%s, %s, %s, ...) failed: %v", orgName, repo, branchName, err)
+		}
 	}
 	return nil
 }
 
 // Update the branch with the specified configuration
-func (p *Protector) UpdateBranch(orgName, repo string, branchName string, branchDefaults config.Branch, protect *bool, contexts, pushers []string) {
-	bc := append([]string(nil), contexts...)
-	bpush := append([]string(nil), pushers...)
+func (p *Protector) UpdateBranch(orgName, repo string, branchName string, branchDefaults config.Branch, protect *bool, contexts, pushers []string) error {
+	bc := append([]string{}, contexts...)
+	bpush := append([]string{}, pushers...)
 	if branchDefaults.Protect != nil {
 		protect = branchDefaults.Protect
 	}
 	bc = append(bc, branchDefaults.Contexts...)
 	bpush = append(bpush, branchDefaults.Pushers...)
 
-	var prot bool
-	if protect != nil {
-		prot = *protect
+	if protect == nil {
+		return errors.New("protect should not be nil")
 	}
-	if len(bc) != 0 || len(bpush) != 0 {
-		prot = true
+
+	prot := *protect
+
+	if len(bc) > 0 || len(bpush) > 0 {
+		if !prot {
+			return errors.New("setting pushers or contexts requires protection")
+		}
 	}
 
 	p.updates <- Requirements{
@@ -283,4 +325,5 @@ func (p *Protector) UpdateBranch(orgName, repo string, branchName string, branch
 		Contexts: bc,
 		Pushers:  bpush,
 	}
+	return nil
 }

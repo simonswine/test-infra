@@ -20,6 +20,9 @@ import (
 	"testing"
 	"time"
 
+	"k8s.io/api/core/v1"
+	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
+
 	"k8s.io/test-infra/prow/kube"
 )
 
@@ -30,7 +33,7 @@ func TestProwJobToPod(t *testing.T) {
 		labels  map[string]string
 		pjSpec  kube.ProwJobSpec
 
-		expected *kube.Pod
+		expected *v1.Pod
 	}{
 		{
 			podName: "pod",
@@ -51,11 +54,11 @@ func TestProwJobToPod(t *testing.T) {
 						SHA:    "pull-sha",
 					}},
 				},
-				PodSpec: kube.PodSpec{
-					Containers: []kube.Container{
+				PodSpec: v1.PodSpec{
+					Containers: []v1.Container{
 						{
 							Image: "tester",
-							Env: []kube.EnvVar{
+							Env: []v1.EnvVar{
 								{Name: "MY_ENV", Value: "rocks"},
 							},
 						},
@@ -63,8 +66,8 @@ func TestProwJobToPod(t *testing.T) {
 				},
 			},
 
-			expected: &kube.Pod{
-				Metadata: kube.ObjectMeta{
+			expected: &v1.Pod{
+				ObjectMeta: metav1.ObjectMeta{
 					Name: "pod",
 					Labels: map[string]string{
 						kube.CreatedByProw:    "true",
@@ -75,19 +78,20 @@ func TestProwJobToPod(t *testing.T) {
 						kube.ProwJobAnnotation: "job-name",
 					},
 				},
-				Spec: kube.PodSpec{
+				Spec: v1.PodSpec{
 					RestartPolicy: "Never",
-					Containers: []kube.Container{
+					Containers: []v1.Container{
 						{
 							Name:  "pod-0",
 							Image: "tester",
-							Env: []kube.EnvVar{
+							Env: []v1.EnvVar{
 								{Name: "MY_ENV", Value: "rocks"},
 								{Name: "BUILD_NUMBER", Value: "blabla"},
 								{Name: "JOB_NAME", Value: "job-name"},
 								{Name: "JOB_TYPE", Value: "presubmit"},
 								{Name: "BUILD_ID", Value: "blabla"},
-								{Name: "JOB_SPEC", Value: `{"type":"presubmit","job":"job-name","buildid":"blabla","refs":{"org":"org-name","repo":"repo-name","base_ref":"base-ref","base_sha":"base-sha","pulls":[{"number":1,"author":"author-name","sha":"pull-sha"}]}}`},
+								{Name: "PROW_JOB_ID", Value: "pod"},
+								{Name: "JOB_SPEC", Value: `{"type":"presubmit","job":"job-name","buildid":"blabla","prowjobid":"pod","refs":{"org":"org-name","repo":"repo-name","base_ref":"base-ref","base_sha":"base-sha","pulls":[{"number":1,"author":"author-name","sha":"pull-sha"}]}}`},
 								{Name: "PULL_BASE_REF", Value: "base-ref"},
 								{Name: "REPO_OWNER", Value: "org-name"},
 								{Name: "REPO_NAME", Value: "repo-name"},
@@ -105,7 +109,7 @@ func TestProwJobToPod(t *testing.T) {
 
 	for i, test := range tests {
 		t.Logf("test run #%d", i)
-		pj := kube.ProwJob{Metadata: kube.ObjectMeta{Name: test.podName, Labels: test.labels}, Spec: test.pjSpec}
+		pj := kube.ProwJob{ObjectMeta: metav1.ObjectMeta{Name: test.podName, Labels: test.labels}, Spec: test.pjSpec}
 		got, err := ProwJobToPod(pj, test.buildID)
 		if err != nil {
 			t.Errorf("unexpected error: %v", err)
@@ -117,7 +121,7 @@ func TestProwJobToPod(t *testing.T) {
 		//	 t.Errorf("got pod:\n%#v\n\nexpected pod:\n%#v\n", got, test.expected)
 		// }
 		var foundCreatedByLabel, foundTypeLabel, foundJobAnnotation bool
-		for key, value := range got.Metadata.Labels {
+		for key, value := range got.ObjectMeta.Labels {
 			if key == kube.CreatedByProw && value == "true" {
 				foundCreatedByLabel = true
 			}
@@ -125,29 +129,29 @@ func TestProwJobToPod(t *testing.T) {
 				foundTypeLabel = true
 			}
 			var match bool
-			for k, v := range test.expected.Metadata.Labels {
+			for k, v := range test.expected.ObjectMeta.Labels {
 				if k == key && v == value {
 					match = true
 					break
 				}
 			}
 			if !match {
-				t.Errorf("expected labels: %v, got: %v", test.expected.Metadata.Labels, got.Metadata.Labels)
+				t.Errorf("expected labels: %v, got: %v", test.expected.ObjectMeta.Labels, got.ObjectMeta.Labels)
 			}
 		}
-		for key, value := range got.Metadata.Annotations {
+		for key, value := range got.ObjectMeta.Annotations {
 			if key == kube.ProwJobAnnotation && value == pj.Spec.Job {
 				foundJobAnnotation = true
 			}
 		}
 		if !foundCreatedByLabel {
-			t.Errorf("expected a created-by-prow=true label in %v", got.Metadata.Labels)
+			t.Errorf("expected a created-by-prow=true label in %v", got.ObjectMeta.Labels)
 		}
 		if !foundTypeLabel {
-			t.Errorf("expected a %s=%s label in %v", kube.ProwJobTypeLabel, pj.Spec.Type, got.Metadata.Labels)
+			t.Errorf("expected a %s=%s label in %v", kube.ProwJobTypeLabel, pj.Spec.Type, got.ObjectMeta.Labels)
 		}
 		if !foundJobAnnotation {
-			t.Errorf("expected a %s=%s annotation in %v", kube.ProwJobAnnotation, pj.Spec.Job, got.Metadata.Annotations)
+			t.Errorf("expected a %s=%s annotation in %v", kube.ProwJobAnnotation, pj.Spec.Job, got.ObjectMeta.Annotations)
 		}
 
 		expectedContainer := test.expected.Spec.Containers[i]
@@ -189,7 +193,7 @@ func TestPartitionActive(t *testing.T) {
 		{
 			pjs: []kube.ProwJob{
 				{
-					Metadata: kube.ObjectMeta{
+					ObjectMeta: metav1.ObjectMeta{
 						Name: "foo",
 					},
 					Status: kube.ProwJobStatus{
@@ -197,7 +201,7 @@ func TestPartitionActive(t *testing.T) {
 					},
 				},
 				{
-					Metadata: kube.ObjectMeta{
+					ObjectMeta: metav1.ObjectMeta{
 						Name: "bar",
 					},
 					Status: kube.ProwJobStatus{
@@ -205,7 +209,7 @@ func TestPartitionActive(t *testing.T) {
 					},
 				},
 				{
-					Metadata: kube.ObjectMeta{
+					ObjectMeta: metav1.ObjectMeta{
 						Name: "baz",
 					},
 					Status: kube.ProwJobStatus{
@@ -213,7 +217,7 @@ func TestPartitionActive(t *testing.T) {
 					},
 				},
 				{
-					Metadata: kube.ObjectMeta{
+					ObjectMeta: metav1.ObjectMeta{
 						Name: "error",
 					},
 					Status: kube.ProwJobStatus{
@@ -221,7 +225,7 @@ func TestPartitionActive(t *testing.T) {
 					},
 				},
 				{
-					Metadata: kube.ObjectMeta{
+					ObjectMeta: metav1.ObjectMeta{
 						Name: "bak",
 					},
 					Status: kube.ProwJobStatus{
@@ -242,12 +246,12 @@ func TestPartitionActive(t *testing.T) {
 		t.Logf("test run #%d", i)
 		pendingCh, triggeredCh := PartitionActive(test.pjs)
 		for job := range pendingCh {
-			if _, ok := test.pending[job.Metadata.Name]; !ok {
+			if _, ok := test.pending[job.ObjectMeta.Name]; !ok {
 				t.Errorf("didn't find pending job %#v", job)
 			}
 		}
 		for job := range triggeredCh {
-			if _, ok := test.triggered[job.Metadata.Name]; !ok {
+			if _, ok := test.triggered[job.ObjectMeta.Name]; !ok {
 				t.Errorf("didn't find triggered job %#v", job)
 			}
 		}
@@ -266,7 +270,7 @@ func TestGetLatestProwJobs(t *testing.T) {
 		{
 			pjs: []kube.ProwJob{
 				{
-					Metadata: kube.ObjectMeta{
+					ObjectMeta: metav1.ObjectMeta{
 						Name: "831c7df0-baa4-11e7-a1a4-0a58ac10134a",
 					},
 					Spec: kube.ProwJobSpec{
@@ -291,7 +295,7 @@ func TestGetLatestProwJobs(t *testing.T) {
 						RerunCommand: "/test extended_networking_minimal",
 					},
 					Status: kube.ProwJobStatus{
-						StartTime:   time.Date(2017, time.October, 26, 23, 22, 19, 0, time.UTC),
+						StartTime:   metav1.Date(2017, time.October, 26, 23, 22, 19, 0, time.UTC),
 						State:       kube.FailureState,
 						Description: "Jenkins job failed.",
 						URL:         "https://openshift-gce-devel.appspot.com/build/origin-ci-test/pr-logs/pull/17061/test_pull_request_origin_extended_networking_minimal/9756/",
@@ -300,7 +304,7 @@ func TestGetLatestProwJobs(t *testing.T) {
 					},
 				},
 				{
-					Metadata: kube.ObjectMeta{
+					ObjectMeta: metav1.ObjectMeta{
 						Name: "0079d4d3-ba25-11e7-ae3f-0a58ac10123b",
 					},
 					Spec: kube.ProwJobSpec{
@@ -325,7 +329,7 @@ func TestGetLatestProwJobs(t *testing.T) {
 						RerunCommand: "/test extended_networking_minimal",
 					},
 					Status: kube.ProwJobStatus{
-						StartTime:   time.Date(2017, time.October, 26, 22, 22, 19, 0, time.UTC),
+						StartTime:   metav1.Date(2017, time.October, 26, 22, 22, 19, 0, time.UTC),
 						State:       kube.FailureState,
 						Description: "Jenkins job failed.",
 						URL:         "https://openshift-gce-devel.appspot.com/build/origin-ci-test/pr-logs/pull/17061/test_pull_request_origin_extended_networking_minimal/9755/",

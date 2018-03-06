@@ -18,13 +18,14 @@ TAG = $(shell date +v%Y%m%d)-$(shell git describe --tags --always --dirty)
 all: build
 
 build:
-	CGO_ENABLED=0 GOOS=linux GOARCH=amd64 go build -o ./barnacle/barnacle ./barnacle/
+	bazel build //images/bootstrap/barnacle:barnacle --platforms=@io_bazel_rules_go//go/toolchain:linux_amd64
+	cp ./../../bazel-bin/images/bootstrap/barnacle/linux_amd64_pure_stripped/barnacle ./barnacle/barnacle
 	docker build --build-arg IMAGE_ARG=$(IMG):$(TAG) -t $(IMG):$(TAG) .
 	rm ./barnacle/barnacle
 	docker tag $(IMG):$(TAG) $(IMG):latest
 	@echo Built $(IMG):$(TAG) and tagged with latest
 
 push: build
-	gcloud docker -- push $(IMG):$(TAG)
-	gcloud docker -- push $(IMG):latest
+	docker push $(IMG):$(TAG)
+	docker push $(IMG):latest
 	@echo Pushed $(IMG) with :latest and :$(TAG) tags

@@ -92,7 +92,7 @@ const (
 <summary>Help</summary>
 <ul>
  <li><a href="https://github.com/kubernetes/community/blob/master/contributors/devel/release/issues.md">Additional instructions</a></li>
- <li><a href="https://github.com/kubernetes/test-infra/blob/master/commands.md">Commands for setting labels</a></li>
+ <li><a href="https://go.k8s.io/bot-commands">Commands for setting labels</a></li>
 </ul>
 </details>
 `
@@ -160,7 +160,7 @@ var (
 
 	milestoneStateConfigs = map[milestoneState]milestoneStateConfig{
 		milestoneCurrent: {
-			title: "Milestone %s **Current**",
+			title: "Milestone %s: **Up-to-date for process**",
 		},
 		milestoneNeedsLabeling: {
 			title:          "Milestone %s Labels **Incomplete**",
@@ -289,13 +289,8 @@ func dayPhrase(days int) string {
 	return fmt.Sprintf("%d %s", days, dayString)
 }
 
-func durationToMinDays(duration time.Duration) string {
-	days := int(math.Floor(duration.Hours() / 24))
-	return dayPhrase(days)
-}
-
 func durationToMaxDays(duration time.Duration) string {
-	days := int(math.Floor(duration.Hours() / 24))
+	days := int(math.Ceil(duration.Hours() / 24))
 	return dayPhrase(days)
 }
 
@@ -657,6 +652,13 @@ func (m *MilestoneMaintainer) issueChangeConfig(obj *github.MungeObject) *issueC
 
 		if mode == milestoneModeDev {
 			// Status and updates are not required for dev mode
+			return icc
+		}
+
+		if obj.IsPR() {
+			// Status and updates are not required for PRs, and
+			// non-blocking PRs should not be removed from the
+			// milestone.
 			return icc
 		}
 

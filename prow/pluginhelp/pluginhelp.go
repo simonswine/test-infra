@@ -18,29 +18,38 @@ limitations under the License.
 // These structs are used by sub-packages 'hook' and 'externalplugins'.
 package pluginhelp
 
+// Command is a serializable representation of the command information for a single command.
+type Command struct {
+	// Usage is a usage string for the command.
+	Usage string
+	// Featured is a flag for featured/highlight plugins.
+	Featured bool
+	// Description is a short description about what does the command do.
+	Description string
+	// Examples is a list of usage example for the command.
+	Examples []string
+	// WhoCanUse is a description of the permissions/role/authorization required to use the command.
+	// This is usually specified as a github permissions, but it can also be a github team, an
+	// OWNERS file alias, etc.
+	// This field may include HTML.
+	WhoCanUse string
+}
+
 // PluginHelp is a serializable representation of the help information for a single plugin.
 // This includes repo specific configuration for every repo that the plugin is enabled for.
 type PluginHelp struct {
 	// Description is a description of what the plugin does and what purpose it achieves.
 	// This field may include HTML.
 	Description string
-	// WhoCanUse is a description of the permissions/role/authorization required to use the plugin.
-	// This is usually specified as a github permissions, but it can also be a github team, an
-	// OWNERS file alias, etc.
-	// This field may include HTML.
-	WhoCanUse string
-	// Usage is a usage string for the plugin. Leave empty if not applicable.
-	Usage string
-	// Examples is a list of usage examples for the plugin. Leave empty if not applicable.
-	Examples []string
 	// Config is a map from org/repo strings to a string describing the configuration for that repo.
 	// The key "" should map to a string describing configuration that applies to all repos if any.
 	// This configuration strings may include HTML.
 	Config map[string]string
-
 	// Events is a slice containing the events that are handled by the plugin.
 	// NOTE: Plugins do not need to populate this. Hook populates it on their behalf.
 	Events []string
+	// Commands is a list of available commands of the plugin.
+	Commands []Command
 }
 
 // Help is a serializable representation of all plugin help information.
@@ -56,4 +65,8 @@ type Help struct {
 	// PluginHelp is maps plugin names to their help info.
 	PluginHelp         map[string]PluginHelp
 	ExternalPluginHelp map[string]PluginHelp
+}
+
+func (pluginHelp *PluginHelp) AddCommand(command Command) {
+	pluginHelp.Commands = append(pluginHelp.Commands, command)
 }

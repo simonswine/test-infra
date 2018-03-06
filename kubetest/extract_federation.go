@@ -27,6 +27,8 @@ import (
 	"regexp"
 	"strings"
 	"time"
+
+	"k8s.io/test-infra/kubetest/util"
 )
 
 type extractFederationStrategy struct {
@@ -181,7 +183,7 @@ var getFederation = func(url, version string) error {
 	}
 	log.Printf("url=%s version=%s get-federation.sh", url, version)
 	for i := 0; i < 3; i++ {
-		err = finishRunning(exec.Command(k))
+		err = control.FinishRunning(exec.Command(k))
 		if err == nil {
 			break
 		}
@@ -198,14 +200,14 @@ var getFederation = func(url, version string) error {
 func setFederationReleaseFromGcs(ci bool, suffix string) error {
 	var prefix string
 	if ci {
-		prefix = "kubernetes-federation-release/ci"
+		prefix = "kubernetes-federation-dev/ci"
 	} else {
 		prefix = "kubernetes-federation-release/release"
 	}
 
 	url := fmt.Sprintf("https://storage.googleapis.com/%v", prefix)
 	cat := fmt.Sprintf("gs://%v/%v.txt", prefix, suffix)
-	release, err := output(exec.Command("gsutil", "cat", cat))
+	release, err := control.Output(exec.Command("gsutil", "cat", cat))
 	if err != nil {
 		return err
 	}
@@ -215,7 +217,7 @@ func setFederationReleaseFromGcs(ci bool, suffix string) error {
 func (e extractFederationStrategy) Extract(project, zone string) error {
 	switch e.mode {
 	case local:
-		url := k8s("federation", "_output", "gcs-stage")
+		url := util.K8s("federation", "_output", "gcs-stage")
 		files, err := ioutil.ReadDir(url)
 		if err != nil {
 			return err
@@ -240,7 +242,7 @@ func (e extractFederationStrategy) Extract(project, zone string) error {
 		var url string
 		release := e.option
 		if strings.Contains(release, "+") {
-			url = "https://storage.googleapis.com/kubernetes-federation-release/ci"
+			url = "https://storage.googleapis.com/kubernetes-federation-dev/ci"
 		} else {
 			url = "https://storage.googleapis.com/kubernetes-federation-release/release"
 		}

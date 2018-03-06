@@ -40,6 +40,65 @@ import (
 	"k8s.io/test-infra/prow/tide"
 )
 
+func TestOptions_Validate(t *testing.T) {
+	var testCases = []struct {
+		name        string
+		input       options
+		expectedErr bool
+	}{
+		{
+			name: "minimal set ok",
+			input: options{
+				configPath: "test",
+			},
+			expectedErr: false,
+		},
+		{
+			name:        "missing configpath",
+			input:       options{},
+			expectedErr: true,
+		},
+		{
+			name: "ok with oauth",
+			input: options{
+				configPath:            "test",
+				oauthUrl:              "website",
+				githubOAuthConfigFile: "something",
+				cookieSecretFile:      "yum",
+			},
+			expectedErr: false,
+		},
+		{
+			name: "missing github config with oauth",
+			input: options{
+				configPath:       "test",
+				oauthUrl:         "website",
+				cookieSecretFile: "yum",
+			},
+			expectedErr: true,
+		},
+		{
+			name: "missing cookie with oauth",
+			input: options{
+				configPath:            "test",
+				oauthUrl:              "website",
+				githubOAuthConfigFile: "something",
+			},
+			expectedErr: true,
+		},
+	}
+
+	for _, testCase := range testCases {
+		err := testCase.input.Validate()
+		if testCase.expectedErr && err == nil {
+			t.Errorf("%s: expected an error but got none", testCase.name)
+		}
+		if !testCase.expectedErr && err != nil {
+			t.Errorf("%s: expected no error but got one: %v", testCase.name, err)
+		}
+	}
+}
+
 type flc int
 
 func (f flc) GetJobLog(job, id string) ([]byte, error) {
@@ -299,7 +358,7 @@ func TestHelp(t *testing.T) {
 			t.Fatalf("Error unmarshaling: %v", err)
 		}
 		if !reflect.DeepEqual(help, res) {
-			t.Errorf("Invalid plugin help. Got %q, expected %q", res, help)
+			t.Errorf("Invalid plugin help. Got %v, expected %v", res, help)
 		}
 		if hitCount != 1 {
 			t.Errorf("Expected fake hook endpoint to be hit once, but endpoint was hit %d times.", hitCount)

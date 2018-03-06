@@ -40,12 +40,12 @@ def classify_issue(repo, number):
         last_event_timestamp: the timestamp of the most recent event.
     """
     ancestor = models.GithubResource.make_key(repo, number)
-    logging.debug('finding webhooks for %s %s', repo, number)
+    logging.info('finding webhooks for %s %s', repo, number)
     event_keys = list(models.GithubWebhookRaw.query(ancestor=ancestor)
         .order(models.GithubWebhookRaw.timestamp)
         .fetch(keys_only=True))
 
-    logging.debug('classifying %s %s (%d events)', repo, number, len(event_keys))
+    logging.info('classifying %s %s (%d events)', repo, number, len(event_keys))
     last_event_timestamp = [datetime.datetime(2000, 1, 1)]
 
     def events_iterator():
@@ -134,7 +134,7 @@ def get_skip_comments(events, skip_users=None):
         events: a list of (event_type str, event_body dict, timestamp).
     Returns:
         comment_ids: a set of comment ids that were deleted or made by
-            users that should be skiped.
+            users that should be skipped.
     """
     skip_users = skip_users or []
     skip_comments = set()
@@ -200,14 +200,13 @@ def classify_from_iterator(events_iterator, status_fetcher=None):
 
 
 def _classify_internal(merged, labels, comments, reviewers, distilled_events, status_fetcher):
-
     approvers = get_approvers(comments)
 
     is_pr = 'head' in merged or 'pull_request' in merged
     is_open = merged['state'] != 'closed'
     author = merged['user']['login']
     assignees = sorted({assignee['login'] for assignee in merged['assignees']} | reviewers)
-    involved = sorted(set([author] + assignees + approvers))
+    involved = sorted(u.lower() for u in set([author] + assignees + approvers))
 
     payload = {
         'author': author,
@@ -230,6 +229,9 @@ def _classify_internal(merged, labels, comments, reviewers, distilled_events, st
 
     if status_fetcher and 'head' in payload:
         payload['status'] = status_fetcher(payload['head'])
+
+    if merged.get('milestone'):
+        payload['milestone'] = merged['milestone']['title']
 
     payload['attn'] = calculate_attention(distilled_events, payload)
 

@@ -24,31 +24,30 @@ set -o nounset
 set -o errexit
 set -o pipefail
 
-# Output every go_library rule in the repo
-find-go-libraries() {
-  # Excluding generated //foo:go_default_library~library~
-  bazel query \
-    'kind("go_library rule", //...)' \
-    except 'attr("name", ".*~library~", //...)'
-}
+# This list is used for rules in vendor/ which may not have any explicit
+# dependencies outside of vendor, e.g. helper commands we have vendored.
+# It should probably match the list in Gopkg.toml.
+REQUIRED=(
+  //vendor/github.com/golang/dep/cmd/dep:dep
+  //vendor/github.com/client9/misspell/cmd/misspell:misspell
+)
 
-# Output the target if it has only one dependency (itself)
-is-unused() {
-  local n
-  n="$(bazel query "rdeps(//..., \"$1\", 1)" | wc -l)"
-  if [[ "$n" -gt "1" ]]; then  # Always counts itself
-    echo "LIVE: $1" >&2
-    return 0
-  fi
-  echo "DEAD: $1" >&2
-  echo "$1"
-}
+# darwin is great
+SED=sed
+if which gsed &>/dev/null; then
+  SED=gsed
+fi
+if ! ($SED --version 2>&1 | grep -q GNU); then
+  echo "!!! GNU sed is required.  If on OS X, use 'brew install gnu-sed'." >&2
+  exit 1
+fi
 
-# Filter down to unused targets
-filter-to-unused() {
-  for i in "$@"; do
-    is-unused "$i"
-  done
+unused-go-libraries() {
+  # Find all the go_library rules in vendor except those that something outside
+  # of vendor eventually depends on.
+  required_items=( "${REQUIRED[@]/#/+ }" )
+  echo "Looking for //vendor targets that no one outside of //vendor depends on..." >&2
+  bazel query "kind('go_library rule', //vendor/... -deps(//... -//vendor/... ${required_items[@]}))"
 }
 
 # Output this:source.go that:file.txt sources of //this //that targets
@@ -94,20 +93,19 @@ packages() {
   done) | sort -u
 }
 
-# Convert //foo //bar to foo/BUILD bar/BUILD
+# Convert //foo //bar to foo/BUILD bar/BUILD.bazel (whichever exist)
 builds() {
   for i in "${@}"; do
-    echo ${i:2}/BUILD
+    echo $(ls ${i:2}/{BUILD,BUILD.bazel} 2>/dev/null)
   done
 }
-
 
 # Remove lines with //something:all-srcs from files
 # Usage:
 #   remove-all-srcs <targets-to-remove> <remove-from-packages>
 remove-all-srcs() {
   for b in $1; do
-    sed -i -e "\|${b}:all-srcs|d" $(builds $2)
+    $SED -i -e "\|${b}:all-srcs|d" $(builds $2)
   done
 }
 
@@ -116,17 +114,18 @@ remove_unused_go_libraries_finished=
 # Remove every go_library() target from workspace with no one depending on it.
 remove-unused-go-libraries() {
   local libraries deps
-  libraries="$(find-go-libraries | sort -u)"
-  deps="$(filter-to-unused $libraries)"
+  deps="$(unused-go-libraries)"
   if [[ -z "$deps" ]]; then
     echo "All remaining go libraries are alive" >&2
     remove_unused_go_libraries_finished=true
     return 0
-  elif [[ "$1" == "--check" || "$1" != "--fix" ]]; then
-    echo "Found unused libraries:" >&2
-    for d in $deps; do
-      echo $d
-    done
+  fi
+  echo "Unused libraries:" >&2
+  for d in $deps; do
+    echo "  DEAD: $d" >&2
+  done
+  if [[ "$1" == "--check" || "$1" != "--fix" ]]; then
+    echo "Correct with $0 --fix" >&2
     exit 1
   else
     echo Cleaning up unused dependencies... >&2

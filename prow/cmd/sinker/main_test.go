@@ -23,10 +23,11 @@ import (
 	"time"
 
 	"github.com/sirupsen/logrus"
+	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
+	"k8s.io/apimachinery/pkg/labels"
 
 	"k8s.io/test-infra/prow/config"
 	"k8s.io/test-infra/prow/kube"
-	"k8s.io/test-infra/prow/kube/labels"
 )
 
 type fakeClient struct {
@@ -44,7 +45,7 @@ func (c *fakeClient) ListPods(selector string) ([]kube.Pod, error) {
 	}
 	pl := make([]kube.Pod, 0, len(c.Pods))
 	for _, p := range c.Pods {
-		if s.Matches(labels.Set(p.Metadata.Labels)) {
+		if s.Matches(labels.Set(p.ObjectMeta.Labels)) {
 			pl = append(pl, p)
 		}
 	}
@@ -58,7 +59,7 @@ func (c *fakeClient) ListProwJobs(selector string) ([]kube.ProwJob, error) {
 	}
 	jl := make([]kube.ProwJob, 0, len(c.ProwJobs))
 	for _, j := range c.ProwJobs {
-		if s.Matches(labels.Set(j.Metadata.Labels)) {
+		if s.Matches(labels.Set(j.ObjectMeta.Labels)) {
 			jl = append(jl, j)
 		}
 	}
@@ -67,7 +68,7 @@ func (c *fakeClient) ListProwJobs(selector string) ([]kube.ProwJob, error) {
 
 func (c *fakeClient) DeleteProwJob(name string) error {
 	for i, j := range c.ProwJobs {
-		if j.Metadata.Name == name {
+		if j.ObjectMeta.Name == name {
 			c.ProwJobs = append(c.ProwJobs[:i], c.ProwJobs[i+1:]...)
 			c.DeletedProwJobs = append(c.DeletedProwJobs, j)
 			return nil
@@ -78,7 +79,7 @@ func (c *fakeClient) DeleteProwJob(name string) error {
 
 func (c *fakeClient) DeletePod(name string) error {
 	for i, p := range c.Pods {
-		if p.Metadata.Name == name {
+		if p.ObjectMeta.Name == name {
 			c.Pods = append(c.Pods[:i], c.Pods[i+1:]...)
 			c.DeletedPods = append(c.DeletedPods, p)
 			return nil
@@ -115,10 +116,16 @@ func (f *fca) Config() *config.Config {
 	return f.c
 }
 
+func startTime(s time.Time) *metav1.Time {
+	start := metav1.NewTime(s)
+	return &start
+}
+
 func TestClean(t *testing.T) {
+
 	pods := []kube.Pod{
 		{
-			Metadata: kube.ObjectMeta{
+			ObjectMeta: metav1.ObjectMeta{
 				Name: "old-failed",
 				Labels: map[string]string{
 					kube.CreatedByProw: "true",
@@ -126,11 +133,11 @@ func TestClean(t *testing.T) {
 			},
 			Status: kube.PodStatus{
 				Phase:     kube.PodFailed,
-				StartTime: time.Now().Add(-maxPodAge).Add(-time.Second),
+				StartTime: startTime(time.Now().Add(-maxPodAge).Add(-time.Second)),
 			},
 		},
 		{
-			Metadata: kube.ObjectMeta{
+			ObjectMeta: metav1.ObjectMeta{
 				Name: "old-succeeded",
 				Labels: map[string]string{
 					kube.CreatedByProw: "true",
@@ -138,11 +145,11 @@ func TestClean(t *testing.T) {
 			},
 			Status: kube.PodStatus{
 				Phase:     kube.PodSucceeded,
-				StartTime: time.Now().Add(-maxPodAge).Add(-time.Second),
+				StartTime: startTime(time.Now().Add(-maxPodAge).Add(-time.Second)),
 			},
 		},
 		{
-			Metadata: kube.ObjectMeta{
+			ObjectMeta: metav1.ObjectMeta{
 				Name: "old-just-complete",
 				Labels: map[string]string{
 					kube.CreatedByProw: "true",
@@ -150,11 +157,35 @@ func TestClean(t *testing.T) {
 			},
 			Status: kube.PodStatus{
 				Phase:     kube.PodSucceeded,
-				StartTime: time.Now().Add(-maxPodAge).Add(-time.Second),
+				StartTime: startTime(time.Now().Add(-maxPodAge).Add(-time.Second)),
 			},
 		},
 		{
-			Metadata: kube.ObjectMeta{
+			ObjectMeta: metav1.ObjectMeta{
+				Name: "old-pending",
+				Labels: map[string]string{
+					kube.CreatedByProw: "true",
+				},
+			},
+			Status: kube.PodStatus{
+				Phase:     kube.PodPending,
+				StartTime: startTime(time.Now().Add(-maxPodAge).Add(-time.Second)),
+			},
+		},
+		{
+			ObjectMeta: metav1.ObjectMeta{
+				Name: "old-pending-abort",
+				Labels: map[string]string{
+					kube.CreatedByProw: "true",
+				},
+			},
+			Status: kube.PodStatus{
+				Phase:     kube.PodPending,
+				StartTime: startTime(time.Now().Add(-maxPodAge).Add(-time.Second)),
+			},
+		},
+		{
+			ObjectMeta: metav1.ObjectMeta{
 				Name: "new-failed",
 				Labels: map[string]string{
 					kube.CreatedByProw: "true",
@@ -162,11 +193,11 @@ func TestClean(t *testing.T) {
 			},
 			Status: kube.PodStatus{
 				Phase:     kube.PodFailed,
-				StartTime: time.Now().Add(-10 * time.Second),
+				StartTime: startTime(time.Now().Add(-10 * time.Second)),
 			},
 		},
 		{
-			Metadata: kube.ObjectMeta{
+			ObjectMeta: metav1.ObjectMeta{
 				Name: "old-running",
 				Labels: map[string]string{
 					kube.CreatedByProw: "true",
@@ -174,11 +205,11 @@ func TestClean(t *testing.T) {
 			},
 			Status: kube.PodStatus{
 				Phase:     kube.PodRunning,
-				StartTime: time.Now().Add(-maxPodAge).Add(-time.Second),
+				StartTime: startTime(time.Now().Add(-maxPodAge).Add(-time.Second)),
 			},
 		},
 		{
-			Metadata: kube.ObjectMeta{
+			ObjectMeta: metav1.ObjectMeta{
 				Name: "unrelated-failed",
 				Labels: map[string]string{
 					kube.CreatedByProw: "not really",
@@ -186,81 +217,99 @@ func TestClean(t *testing.T) {
 			},
 			Status: kube.PodStatus{
 				Phase:     kube.PodFailed,
-				StartTime: time.Now().Add(-maxPodAge).Add(-time.Second),
+				StartTime: startTime(time.Now().Add(-maxPodAge).Add(-time.Second)),
 			},
 		},
 		{
-			Metadata: kube.ObjectMeta{
+			ObjectMeta: metav1.ObjectMeta{
 				Name: "unrelated-complete",
 			},
 			Status: kube.PodStatus{
 				Phase:     kube.PodSucceeded,
-				StartTime: time.Now().Add(-maxPodAge).Add(-time.Second),
+				StartTime: startTime(time.Now().Add(-maxPodAge).Add(-time.Second)),
 			},
 		},
 	}
 	deletedPods := []string{
 		"old-failed",
 		"old-succeeded",
+		"old-pending-abort",
 	}
-	setComplete := func(d time.Duration) *time.Time {
-		completed := time.Now().Add(d)
+	setComplete := func(d time.Duration) *metav1.Time {
+		completed := metav1.NewTime(time.Now().Add(d))
 		return &completed
 	}
 	prowJobs := []kube.ProwJob{
 		{
-			Metadata: kube.ObjectMeta{
+			ObjectMeta: metav1.ObjectMeta{
 				Name: "old-failed",
 			},
 			Status: kube.ProwJobStatus{
-				StartTime:      time.Now().Add(-maxProwJobAge).Add(-time.Second),
+				StartTime:      metav1.NewTime(time.Now().Add(-maxProwJobAge).Add(-time.Second)),
 				CompletionTime: setComplete(-time.Second),
 			},
 		},
 		{
-			Metadata: kube.ObjectMeta{
+			ObjectMeta: metav1.ObjectMeta{
 				Name: "old-succeeded",
 			},
 			Status: kube.ProwJobStatus{
-				StartTime:      time.Now().Add(-maxProwJobAge).Add(-time.Second),
+				StartTime:      metav1.NewTime(time.Now().Add(-maxProwJobAge).Add(-time.Second)),
 				CompletionTime: setComplete(-time.Second),
 			},
 		},
 		{
-			Metadata: kube.ObjectMeta{
+			ObjectMeta: metav1.ObjectMeta{
 				Name: "old-just-complete",
 			},
 			Status: kube.ProwJobStatus{
-				StartTime: time.Now().Add(-maxProwJobAge).Add(-time.Second),
+				StartTime: metav1.NewTime(time.Now().Add(-maxProwJobAge).Add(-time.Second)),
 			},
 		},
 		{
-			Metadata: kube.ObjectMeta{
+			ObjectMeta: metav1.ObjectMeta{
 				Name: "old-complete",
 			},
 			Status: kube.ProwJobStatus{
-				StartTime:      time.Now().Add(-maxProwJobAge).Add(-time.Second),
+				StartTime:      metav1.NewTime(time.Now().Add(-maxProwJobAge).Add(-time.Second)),
 				CompletionTime: setComplete(-time.Second),
 			},
 		},
 		{
-			Metadata: kube.ObjectMeta{
+			ObjectMeta: metav1.ObjectMeta{
 				Name: "old-incomplete",
 			},
 			Status: kube.ProwJobStatus{
-				StartTime: time.Now().Add(-maxProwJobAge).Add(-time.Second),
+				StartTime: metav1.NewTime(time.Now().Add(-maxProwJobAge).Add(-time.Second)),
 			},
 		},
 		{
-			Metadata: kube.ObjectMeta{
+			ObjectMeta: metav1.ObjectMeta{
+				Name: "old-pending",
+			},
+			Status: kube.ProwJobStatus{
+				StartTime: metav1.NewTime(time.Now().Add(-maxProwJobAge).Add(-time.Second)),
+			},
+		},
+		{
+			ObjectMeta: metav1.ObjectMeta{
+				Name: "old-pending-abort",
+			},
+			Status: kube.ProwJobStatus{
+				StartTime:      metav1.NewTime(time.Now().Add(-maxProwJobAge).Add(-time.Second)),
+				CompletionTime: setComplete(-time.Second),
+			},
+		},
+		{
+			ObjectMeta: metav1.ObjectMeta{
 				Name: "new",
 			},
 			Status: kube.ProwJobStatus{
-				StartTime: time.Now().Add(-time.Second),
+				StartTime: metav1.NewTime(time.Now().Add(-time.Second)),
 			},
 		},
 		{
-			Metadata: kube.ObjectMeta{
+			ObjectMeta: metav1.ObjectMeta{
 				Name: "newer-periodic",
 			},
 			Spec: kube.ProwJobSpec{
@@ -268,12 +317,12 @@ func TestClean(t *testing.T) {
 				Job:  "retester",
 			},
 			Status: kube.ProwJobStatus{
-				StartTime:      time.Now().Add(-maxProwJobAge).Add(-time.Second),
+				StartTime:      metav1.NewTime(time.Now().Add(-maxProwJobAge).Add(-time.Second)),
 				CompletionTime: setComplete(-time.Second),
 			},
 		},
 		{
-			Metadata: kube.ObjectMeta{
+			ObjectMeta: metav1.ObjectMeta{
 				Name: "older-periodic",
 			},
 			Spec: kube.ProwJobSpec{
@@ -281,12 +330,12 @@ func TestClean(t *testing.T) {
 				Job:  "retester",
 			},
 			Status: kube.ProwJobStatus{
-				StartTime:      time.Now().Add(-maxProwJobAge).Add(-time.Minute),
+				StartTime:      metav1.NewTime(time.Now().Add(-maxProwJobAge).Add(-time.Minute)),
 				CompletionTime: setComplete(-time.Minute),
 			},
 		},
 		{
-			Metadata: kube.ObjectMeta{
+			ObjectMeta: metav1.ObjectMeta{
 				Name: "oldest-periodic",
 			},
 			Spec: kube.ProwJobSpec{
@@ -294,16 +343,16 @@ func TestClean(t *testing.T) {
 				Job:  "retester",
 			},
 			Status: kube.ProwJobStatus{
-				StartTime:      time.Now().Add(-maxProwJobAge).Add(-time.Hour),
+				StartTime:      metav1.NewTime(time.Now().Add(-maxProwJobAge).Add(-time.Hour)),
 				CompletionTime: setComplete(-time.Hour),
 			},
 		},
 		{
-			Metadata: kube.ObjectMeta{
+			ObjectMeta: metav1.ObjectMeta{
 				Name: "old-failed-trusted",
 			},
 			Status: kube.ProwJobStatus{
-				StartTime:      time.Now().Add(-maxProwJobAge).Add(-time.Second),
+				StartTime:      metav1.NewTime(time.Now().Add(-maxProwJobAge).Add(-time.Second)),
 				CompletionTime: setComplete(-time.Second),
 			},
 		},
@@ -312,13 +361,14 @@ func TestClean(t *testing.T) {
 		"old-failed",
 		"old-succeeded",
 		"old-complete",
+		"old-pending-abort",
 		"older-periodic",
 		"oldest-periodic",
 		"old-failed-trusted",
 	}
 	podsTrusted := []kube.Pod{
 		{
-			Metadata: kube.ObjectMeta{
+			ObjectMeta: metav1.ObjectMeta{
 				Name: "old-failed-trusted",
 				Labels: map[string]string{
 					kube.CreatedByProw: "true",
@@ -326,7 +376,7 @@ func TestClean(t *testing.T) {
 			},
 			Status: kube.PodStatus{
 				Phase:     kube.PodFailed,
-				StartTime: time.Now().Add(-maxPodAge).Add(-time.Second),
+				StartTime: startTime(time.Now().Add(-maxPodAge).Add(-time.Second)),
 			},
 		},
 	}
@@ -353,7 +403,7 @@ func TestClean(t *testing.T) {
 		if len(deletedPods) != len(kc.DeletedPods) {
 			var got []string
 			for _, pj := range kc.DeletedPods {
-				got = append(got, pj.Metadata.Name)
+				got = append(got, pj.ObjectMeta.Name)
 			}
 			t.Errorf("Deleted wrong number of pods: got %d (%v), expected %d (%v)",
 				len(got), strings.Join(got, ", "), len(deletedPods), strings.Join(deletedPods, ", "))
@@ -361,7 +411,7 @@ func TestClean(t *testing.T) {
 		for _, n := range deletedPods {
 			found := false
 			for _, p := range kc.DeletedPods {
-				if p.Metadata.Name == n {
+				if p.ObjectMeta.Name == n {
 					found = true
 				}
 			}
@@ -372,7 +422,7 @@ func TestClean(t *testing.T) {
 		if len(deletedProwJobs) != len(kc.DeletedProwJobs) {
 			var got []string
 			for _, pj := range kc.DeletedProwJobs {
-				got = append(got, pj.Metadata.Name)
+				got = append(got, pj.ObjectMeta.Name)
 			}
 			t.Errorf("Deleted wrong number of prowjobs: got %d (%s), expected %d (%s)",
 				len(got), strings.Join(got, ", "), len(deletedProwJobs), strings.Join(deletedProwJobs, ", "))
@@ -380,7 +430,7 @@ func TestClean(t *testing.T) {
 		for _, n := range deletedProwJobs {
 			found := false
 			for _, j := range kc.DeletedProwJobs {
-				if j.Metadata.Name == n {
+				if j.ObjectMeta.Name == n {
 					found = true
 				}
 			}

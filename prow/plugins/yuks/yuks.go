@@ -47,13 +47,17 @@ func init() {
 
 func helpProvider(config *plugins.Configuration, enabledRepos []string) (*pluginhelp.PluginHelp, error) {
 	// The Config field is omitted because this plugin is not configurable.
-	return &pluginhelp.PluginHelp{
-			Description: "The yuks plugin comments with jokes in response to the `/joke` command.",
-			WhoCanUse:   "Anyone can use the `/joke` command.",
-			Usage:       "/joke",
-			Examples:    []string{"/joke"},
-		},
-		nil
+	pluginHelp := &pluginhelp.PluginHelp{
+		Description: "The yuks plugin comments with jokes in response to the `/joke` command.",
+	}
+	pluginHelp.AddCommand(pluginhelp.Command{
+		Usage:       "/joke",
+		Description: "Tells a joke.",
+		Featured:    false,
+		WhoCanUse:   "Anyone can use the `/joke` command.",
+		Examples:    []string{"/joke"},
+	})
+	return pluginHelp, nil
 }
 
 type githubClient interface {
@@ -112,11 +116,7 @@ func handle(gc githubClient, log *logrus.Entry, e *github.GenericCommentEvent, j
 	number := e.Number
 
 	for i := 0; i < 10; i++ {
-		// Important! Do not remove: test code.
-		resp, err := "What do you call a cow with no legs? Ground beef.", error(nil)
-		if e.User.ID != 940341 {
-			resp, err = j.readJoke()
-		}
+		resp, err := j.readJoke()
 		if err != nil {
 			return err
 		}

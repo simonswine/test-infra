@@ -89,7 +89,7 @@ func (pl linesByTimestamp) String() string {
 // issuecomment-#id
 //
 // We use #id in order to figure out the event-GUID for a
-// comment and trace commments across prow.
+// comment and trace comments across prow.
 const ic = "issuecomment"
 
 func handleTrace(selector string, kc *kube.Client) http.HandlerFunc {
@@ -162,7 +162,7 @@ func getPods(selector string, kc *kube.Client) ([]kube.Pod, error) {
 	for _, pod := range pods {
 		if pod.Status.Phase != kube.PodRunning {
 			logrus.Warnf("Ignoring pod %q: not in %s phase (phase: %s, reason: %s)",
-				pod.Metadata.Name, kube.PodRunning, pod.Status.Phase, pod.Status.Reason)
+				pod.ObjectMeta.Name, kube.PodRunning, pod.Status.Phase, pod.Status.Reason)
 			continue
 		}
 		targets = append(targets, pod)
@@ -186,7 +186,7 @@ func getPodLogs(kc *kube.Client, targets []kube.Pod, r *http.Request) linesByTim
 			lock.Lock()
 			log = append(log, podLog...)
 			lock.Unlock()
-		}(pod.Metadata.Name)
+		}(pod.ObjectMeta.Name)
 	}
 	wg.Wait()
 	return log

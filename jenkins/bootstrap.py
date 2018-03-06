@@ -209,10 +209,18 @@ def random_sleep(attempt):
     """Sleep 2**attempt seconds with a random fractional offset."""
     time.sleep(random.random() + attempt ** 2)
 
+def auth_google_gerrit(git, call):
+    """authenticate to foo.googlesource.com"""
+    call([git, 'clone', 'https://gerrit.googlesource.com/gcompute-tools'])
+    call(['./gcompute-tools/git-cookie-authdaemon'])
 
-def checkout(call, repo, branch, pull, ssh='', git_cache='', clean=False):
-    """Fetch and checkout the repository at the specified branch/pull."""
-    # pylint: disable=too-many-locals
+
+def checkout(call, repo, repo_path, branch, pull, ssh='', git_cache='', clean=False):
+    """Fetch and checkout the repository at the specified branch/pull.
+
+    Note that repo and repo_path should usually be the same, but repo_path can
+    be set to a different relative path where repo should be checked out."""
+    # pylint: disable=too-many-locals,too-many-branches
     if bool(branch) == bool(pull):
         raise ValueError('Must specify one of --branch or --pull')
 
@@ -222,17 +230,24 @@ def checkout(call, repo, branch, pull, ssh='', git_cache='', clean=False):
         refs, checkouts = branch_ref(branch)
 
     git = 'git'
+
+    # auth to google gerrit instance
+    # TODO(krzyzacy): when migrate to init container we'll make a gerrit
+    # checkout image and move this logic there
+    if '.googlesource.com' in repo:
+        auth_google_gerrit(git, call)
+
     if git_cache:
         cache_dir = '%s/%s' % (git_cache, repo)
         try:
             os.makedirs(cache_dir)
         except OSError:
             pass
-        call([git, 'init', repo, '--separate-git-dir=%s' % cache_dir])
+        call([git, 'init', repo_path, '--separate-git-dir=%s' % cache_dir])
         call(['rm', '-f', '%s/index.lock' % cache_dir])
     else:
-        call([git, 'init', repo])
-    os.chdir(repo)
+        call([git, 'init', repo_path])
+    os.chdir(repo_path)
 
     if clean:
         call([git, 'clean', '-dfx'])
@@ -779,13 +794,22 @@ def job_args(args):
     return [os.path.expandvars(a) for a in args]
 
 
-def job_script(job, extra_job_args):
+def job_script(job, scenario, extra_job_args):
     """Return path to script for job."""
     with open(test_infra('jobs/config.json')) as fp:
         config = json.loads(fp.read())
-    job_config = config[job]
-    cmd = test_infra('scenarios/%s.py' % job_config['scenario'])
-    return [cmd] + job_args(job_config.get('args', []) + extra_job_args)
+    if job.startswith('pull-security-kubernetes-'):
+        job = job.replace('pull-security-kubernetes-', 'pull-kubernetes-', 1)
+    config_json_args = []
+    if job in config:
+        job_config = config[job]
+        if not scenario:
+            scenario = job_config['scenario']
+        config_json_args = job_config.get('args', [])
+    elif not scenario:
+        raise ValueError('cannot find scenario for job', job)
+    cmd = test_infra('scenarios/%s.py' % scenario)
+    return [cmd] + job_args(config_json_args + extra_job_args)
 
 
 def gubernator_uri(paths):
@@ -802,6 +826,13 @@ def choose_ssh_key(ssh):
     if not ssh:  # Nothing to do
         yield
         return
+
+    try:
+        os.makedirs(os.path.join(os.environ[HOME_ENV], '.ssh'))
+    except OSError as exc:
+        logging.info('cannot create $HOME/.ssh, continue : %s', exc)
+    except KeyError as exc:
+        logging.info('$%s does not exist, continue : %s', HOME_ENV, exc)
 
     # Create a script for use with GIT_SSH, which defines the program git uses
     # during git fetch. In the future change this to GIT_SSH_COMMAND
@@ -832,14 +863,29 @@ def setup_root(call, root, repos, ssh, git_cache, clean):
     os.chdir(root_dir)
     logging.info('cd to %s', root_dir)
 
+    # we want to checkout the correct repo for k-s/k but *everything*
+    # under the sun assumes $GOPATH/src/k8s.io/kubernetes so... :(
+    # after this method is called we've already computed the upload paths
+    # etc. so we can just swap it out for the desired path on disk
     with choose_ssh_key(ssh):
         for repo, (branch, pull) in repos.items():
             os.chdir(root_dir)
+            # for k-s/k these are different, for the rest they are the same
+            # TODO(bentheelder,cjwagner,stevekuznetsov): in the integrated
+            # prow checkout support remapping checkouts and kill this monstrosity
+            repo_path = repo
+            if repo == "github.com/kubernetes-security/kubernetes":
+                repo_path = "k8s.io/kubernetes"
             logging.info(
-                'Checkout: %s %s',
+                'Checkout: %s %s to %s',
                 os.path.join(root_dir, repo),
-                pull and pull or branch)
-            checkout(call, repo, branch, pull, ssh, git_cache, clean)
+                pull and pull or branch,
+                os.path.join(root_dir, repo_path))
+            checkout(call, repo, repo_path, branch, pull, ssh, git_cache, clean)
+    # switch out the main repo for the actual path on disk if we are k-s/k
+    # from this point forward this is the path we want to use for everything
+    if repos.main == "github.com/kubernetes-security/kubernetes":
+        repos["k8s.io/kubernetes"], repos.main = repos[repos.main], "k8s.io/kubernetes"
     if len(repos) > 1:  # cd back into the primary repo
         os.chdir(root_dir)
         os.chdir(repos.main)
@@ -914,8 +960,13 @@ def bootstrap(args):
     build = build_name(started)
 
     if upload:
-        if repos and repos[repos.main][1]:  # merging commits, a pr
+        # TODO(bentheelder, cjwager, stevekuznetsov): support the workspace
+        # repo not matching the upload repo in the shiny new init container
+        pull_ref_repos = [repo for repo in repos if repos[repo][1]]
+        if pull_ref_repos:
+            workspace_main, repos.main = repos.main, pull_ref_repos[0]
             paths = pr_paths(upload, repos, job, build)
+            repos.main = workspace_main
         else:
             paths = ci_paths(upload, job, build)
         logging.info('Gubernator results at %s', gubernator_uri(paths))
@@ -924,7 +975,6 @@ def bootstrap(args):
 
     version = 'unknown'
     exc_type = None
-    setup_creds = False
 
     try:
         setup_root(call, args.root, repos, args.ssh, args.git_cache, args.clean)
@@ -935,13 +985,12 @@ def bootstrap(args):
             version = ''
         setup_magic_environment(job)
         setup_credentials(call, args.service_account, upload)
-        setup_creds = True
         logging.info('Start %s at %s...', build, version)
         if upload:
             start(gsutil, paths, started, node(), version, repos)
         success = False
         try:
-            call(job_script(job, args.extra_job_args))
+            call(job_script(job, args.scenario, args.extra_job_args))
             logging.info('PASS: %s', job)
             success = True
         except subprocess.CalledProcessError:
@@ -950,8 +999,9 @@ def bootstrap(args):
         exc_type, exc_value, exc_traceback = sys.exc_info()
         logging.exception('unexpected error')
         success = False
-    if not setup_creds:
-        setup_credentials(call, args.service_account, upload)
+
+    # jobs can change service account, always set it back before we upload logs
+    setup_credentials(call, args.service_account, upload)
     if upload:
         logging.info('Upload result and artifacts...')
         logging.info('Gubernator results at %s', gubernator_uri(paths))
@@ -1007,6 +1057,11 @@ def parse_args(arguments=None):
         '--clean',
         action='store_true',
         help='Clean the git repo before running tests.')
+    # TODO(krzyzacy): later we should merge prow+config.json
+    # and utilize this flag
+    parser.add_argument(
+        '--scenario',
+        help='Scenario to use, if not specified in config.json')
     # split out args after `--` as job arguments
     extra_job_args = []
     if '--' in arguments:

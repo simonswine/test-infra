@@ -48,7 +48,7 @@ def get_required_jobs():
 class JobTest(unittest.TestCase):
 
     excludes = [
-        'BUILD',  # For bazel
+        'BUILD.bazel',  # For bazel
         'config.json',  # For --json mode
         'validOwners.json', # Contains a list of current sigs; sigs are allowed to own jobs
         'config_sort.py', # Tool script to sort config.json
@@ -58,16 +58,6 @@ class JobTest(unittest.TestCase):
     ]
     # also exclude .pyc
     excludes.extend(e + 'c' for e in excludes if e.endswith('.py'))
-
-    yaml_suffix = {
-        'jenkins/job-configs/bootstrap-maintenance.yaml' : 'suffix',
-        'jenkins/job-configs/kubernetes-jenkins-pull/bootstrap-pull-json.yaml' : 'jsonsuffix',
-        'jenkins/job-configs/kubernetes-jenkins-pull/bootstrap-security-pull.yaml' : 'suffix',
-        'jenkins/job-configs/kubernetes-jenkins/bootstrap-ci-commit.yaml' : 'commit-suffix',
-        'jenkins/job-configs/kubernetes-jenkins/bootstrap-ci-repo.yaml' : 'repo-suffix',
-        'jenkins/job-configs/kubernetes-jenkins/bootstrap-ci-soak.yaml' : 'soak-suffix',
-        'jenkins/job-configs/kubernetes-jenkins/bootstrap-ci-dockerpush.yaml' : 'dockerpush-suffix'
-    }
 
     prow_config = '../prow/config.yaml'
 
@@ -97,7 +87,8 @@ class JobTest(unittest.TestCase):
                           '`bazel run //jobs:config_sort`')
         with open(config_sort.test_infra('prow/config.yaml')) as fp:
             original = fp.read()
-            expect = config_sort.sorted_prow_config().getvalue()
+            expect = config_sort.sorted_prow_config(
+                config_sort.test_infra('prow/config.yaml')).getvalue()
             if original != expect:
                 self.fail('prow/config.yaml is not sorted, please run '
                           '`bazel run //jobs:config_sort`')
@@ -114,108 +105,6 @@ class JobTest(unittest.TestCase):
             self.fail('the following .env files are not referenced ' +
                       'in config.json, please run `bazel run //jobs:env_gc: ' +
                       ' '.join(orphans))
-
-    def test_bootstrap_maintenance_yaml(self):
-        def check(job, name):
-            job_name = 'maintenance-%s' % name
-            self.assertIn('frequency', job)
-            self.assertIn('repo-name', job)
-            self.assertIn('.', job['repo-name'])  # Has domain
-            self.assertGreater(job['timeout'], 0)
-            return job_name
-
-        self.check_bootstrap_yaml('jenkins/job-configs/bootstrap-maintenance.yaml', check)
-
-    def test_bootstrap_pull_json_yaml(self):
-        def check(job, name):
-            job_name = 'pull-%s' % name
-            self.assertIn('max-total', job)
-            self.assertIn('repo-name', job)
-            self.assertIn('.', job['repo-name'])  # Has domain
-            self.assertIn('timeout', job)
-            self.assertNotIn('json', job)
-            self.assertGreater(job['timeout'], 0)
-            return job_name
-
-        self.check_bootstrap_yaml(
-            'jenkins/job-configs/kubernetes-jenkins-pull/bootstrap-pull-json.yaml', check)
-
-    def test_bootstrap_security_pull(self):
-        def check(job, name):
-            job_name = 'pull-%s' % name
-            self.assertIn('max-total', job)
-            self.assertIn('repo-name', job)
-            self.assertIn('.', job['repo-name'])  # Has domain
-            self.assertIn('timeout', job)
-            self.assertNotIn('json', job)
-            self.assertGreater(job['timeout'], 0)
-            return job_name
-
-        self.check_bootstrap_yaml(
-            'jenkins/job-configs/kubernetes-jenkins-pull/bootstrap-security-pull.yaml', check)
-
-    def test_bootstrap_security_match(self):
-        json_jobs = self.load_bootstrap_yaml(
-            'jenkins/job-configs/kubernetes-jenkins-pull/bootstrap-pull-json.yaml')
-
-        sec_jobs = self.load_bootstrap_yaml(
-            'jenkins/job-configs/kubernetes-jenkins-pull/bootstrap-security-pull.yaml')
-        for name, job in sec_jobs.iteritems():
-            self.assertIn(name, json_jobs)
-            job2 = json_jobs[name]
-            for attr in job:
-                if attr == 'repo-name':
-                    continue
-                self.assertEquals(job[attr], job2[attr])
-
-
-    def test_bootstrap_ci_commit_yaml(self):
-        def check(job, name):
-            job_name = 'ci-%s' % name
-            self.assertIn('branch', job)
-            self.assertIn('commit-frequency', job)
-            self.assertIn('giturl', job)
-            self.assertIn('repo-name', job)
-            self.assertIn('timeout', job)
-            self.assertNotIn('use-logexporter', job)
-            self.assertGreater(job['timeout'], 0, job)
-
-            return job_name
-
-        self.check_bootstrap_yaml(
-            'jenkins/job-configs/kubernetes-jenkins/bootstrap-ci-commit.yaml',
-            check)
-
-    def test_bootstrap_ci_repo_yaml(self):
-        def check(job, name):
-            job_name = 'ci-%s' % name
-            self.assertIn('branch', job)
-            self.assertIn('frequency', job)
-            self.assertIn('repo-name', job)
-            self.assertIn('timeout', job)
-            self.assertNotIn('json', job)
-            self.assertNotIn('use-logexporter', job)
-            self.assertGreater(job['timeout'], 0, name)
-            return job_name
-
-        self.check_bootstrap_yaml(
-            'jenkins/job-configs/kubernetes-jenkins/bootstrap-ci-repo.yaml',
-            check)
-
-    def test_bootstrap_ci_dockerpush(self):
-        def check(job, name):
-            job_name = 'ci-%s' % name
-            self.assertIn('branch', job)
-            self.assertIn('frequency', job)
-            self.assertIn('repo-name', job)
-            self.assertIn('timeout', job)
-            self.assertNotIn('use-logexporter', job)
-            self.assertGreater(job['timeout'], 0, name)
-            return job_name
-
-        self.check_bootstrap_yaml(
-            'jenkins/job-configs/kubernetes-jenkins/bootstrap-ci-dockerpush.yaml',
-            check)
 
     def check_job_template(self, tmpl):
         builders = tmpl.get('builders')
@@ -250,7 +139,7 @@ class JobTest(unittest.TestCase):
             for container in spec.get('containers'):
                 if 'args' in container:
                     for arg in container.get('args'):
-                        match = re.match(r'[\'"]?--timeout=(\d+)', arg)
+                        match = re.match(r'[\'\"]?--timeout=(\d+)', arg)
                         if match:
                             real_job['timeout'] = match.group(1)
         if 'pull-' not in name and name in self.realjobs and name not in self.prowjobs:
@@ -286,147 +175,29 @@ class JobTest(unittest.TestCase):
             for job in joblist:
                 self.add_prow_job(job)
 
-    def load_bootstrap_yaml(self, path):
-        with open(config_sort.test_infra(path)) as fp:
-            doc = yaml.safe_load(fp)
-
-        project = None
-        defined_templates = set()
-        for item in doc:
-            if not isinstance(item, dict):
-                continue
-            if isinstance(item.get('job-template'), dict):
-                defined_templates.add(item['job-template']['name'])
-                self.check_job_template(item['job-template'])
-            if not isinstance(item.get('project'), dict):
-                continue
-            project = item['project']
-            self.assertIn('bootstrap-', project.get('name'))
-            break
-        else:
-            self.fail('Could not find bootstrap-pull-jobs project')
-
-        self.assertIn('jobs', project)
-        used_templates = {j for j in project['jobs']}
-        msg = '\nMissing templates: %s\nUnused templates: %s' % (
-            ','.join(used_templates - defined_templates),
-            ','.join(defined_templates - used_templates))
-        self.assertEquals(defined_templates, used_templates, msg)
-
-        self.assertIn(path, self.yaml_suffix)
-        jobs = project.get(self.yaml_suffix[path])
-        if not jobs or not isinstance(jobs, list):
-            self.fail('Could not find suffix list in %s' % (project))
-
-        real_jobs = {}
-        for job in jobs:
-            # Things to check on all bootstrap jobs
-            if not isinstance(job, dict):
-                self.fail('suffix items should be dicts: %s' % jobs)
-            self.assertEquals(1, len(job), job)
-            name = job.keys()[0]
-            real_job = job[name]
-            self.assertNotIn(name, real_jobs, 'duplicate job: %s' % name)
-            real_jobs[name] = real_job
-            real_name = real_job.get('job-name', 'unset-%s' % name)
-            if real_name not in self.realjobs:
-                self.realjobs[real_name] = real_job
-        return real_jobs
-
-    def check_bootstrap_yaml(self, path, check):
-        for name, real_job in self.load_bootstrap_yaml(path).iteritems():
-            # Things to check on all bootstrap jobs
-
-            for key, value in real_job.items():
-                if not isinstance(value, (basestring, int)):
-                    self.fail('Jobs may not contain child objects %s: %s' % (
-                        key, value))
-                if '{' in str(value):
-                    self.fail('Jobs may not contain {expansions} - %s: %s' % (
-                        key, value))  # Use simple strings
-            # Things to check on specific flavors.
-            job_name = check(real_job, name)
-            self.assertTrue(job_name)
-            self.assertEquals(job_name, real_job.get('job-name'))
-
     def get_real_bootstrap_job(self, job):
         key = os.path.splitext(job.strip())[0]
         if not key in self.realjobs:
-            for yamlf in self.yaml_suffix:
-                self.load_bootstrap_yaml(yamlf)
             self.load_prow_yaml(self.prow_config)
         self.assertIn(key, sorted(self.realjobs))  # sorted for clearer error message
         return self.realjobs.get(key)
 
-    def test_non_blocking_jenkins(self):
-        """All PR non-blocking jenkins jobs are always_run: false"""
-        # ref https://github.com/kubernetes/test-infra/issues/4637
-        if not self.presubmits:
-            self.load_prow_yaml(self.prow_config)
-        required_jobs = get_required_jobs()
-        # TODO(bentheelder): should we also include other repos?
-        # If we do, we need to check which ones have a deployment in get_required_jobs
-        # and ignore the ones without submit-queue deployments. This seems brittle
-        # and unnecessary for now though.
-        for job in self.presubmits.get('kubernetes/kubernetes', []):
-            if (job['agent'] == 'jenkins' and
-                    job['name'] not in required_jobs and
-                    job.get('always_run', False)):
-                self.fail(
-                    'Jenkins jobs should not be `always_run: true`'
-                    ' unless they are required! %s'
-                    % job['name'])
-
     def test_valid_timeout(self):
-        """All jobs set a timeout less than 120m or set DOCKER_TIMEOUT."""
-        default_timeout = 60
+        """All e2e jobs has 20min or more container timeout than kubetest timeout."""
         bad_jobs = set()
         with open(config_sort.test_infra('jobs/config.json')) as fp:
             config = json.loads(fp.read())
 
-        for job, job_path in self.jobs:
-            job_name = job.rsplit('.', 1)[0]
-            modern = config.get(job_name, {}).get('scenario') in [
-                'kubernetes_e2e',
-                'kubernetes_kops_aws',
-            ]
-            valids = [
-                'kubernetes-e2e-',
-                'kubernetes-kubemark-',
-                'kubernetes-soak-',
-                'kubernetes-federation-e2e-',
-                'kops-e2e-',
-            ]
-
-            if not re.search('|'.join(valids), job):
+        for job in config:
+            if config.get(job, {}).get('scenario') != 'kubernetes_e2e':
                 continue
-            with open(job_path) as fp:
-                lines = list(l for l in fp if not l.startswith('#'))
-            container_timeout = default_timeout
-            kubetest_timeout = None
-            for line in lines:  # Validate old pattern no longer used
-                if line.startswith('### Reporting'):
-                    bad_jobs.add(job)
-                if '{rc}' in line:
-                    bad_jobs.add(job)
-            self.assertFalse(job.endswith('.sh'), job)
-            self.assertTrue(modern, job)
-
             realjob = self.get_real_bootstrap_job(job)
             self.assertTrue(realjob)
             self.assertIn('timeout', realjob, job)
             container_timeout = int(realjob['timeout'])
-            for line in lines:
-                if 'DOCKER_TIMEOUT=' in line:
-                    self.fail('Set container timeout in prow and/or bootstrap yaml: %s' % job)
-                if 'KUBEKINS_TIMEOUT=' in line:
-                    self.fail(
-                        'Set kubetest --timeout in config.json, not KUBEKINS_TIMEOUT: %s'
-                        % job
-                    )
-            for arg in config[job_name]['args']:
-                if arg == '--timeout=None':
-                    bad_jobs.add(('Must specify a timeout', job, arg))
+
+            kubetest_timeout = None
+            for arg in config[job]['args']:
                 mat = re.match(r'--timeout=(\d+)m', arg)
                 if not mat:
                     continue
@@ -468,7 +239,7 @@ class JobTest(unittest.TestCase):
                     self.assertTrue(job in self.prowjobs or job in self.realjobs,
                                     '%s must have a matching jenkins/prow entry' % job)
 
-                # onwership assertions
+                # ownership assertions
                 self.assertIn('sigOwners', config[job], job)
                 self.assertIsInstance(config[job]['sigOwners'], list, job)
                 self.assertTrue(config[job]['sigOwners'], job) # non-empty
@@ -557,15 +328,24 @@ class JobTest(unittest.TestCase):
                     extracts = [a for a in args if '--extract=' in a]
                     shared_builds = [a for a in args if '--use-shared-build' in a]
                     node_e2e = [a for a in args if '--deployment=node' in a]
+                    local_e2e = [a for a in args if '--deployment=local' in a]
+                    builds = [a for a in args if '--build' in a]
                     if shared_builds and extracts:
                         self.fail(('e2e jobs cannot have --use-shared-build'
                                    ' and --extract: %s %s') % (job, args))
                     elif not extracts and not shared_builds and not node_e2e:
-                        self.fail(('e2e job needs --extract or'
-                                   ' --use-shared-build: %s %s') % (job, args))
+                        # we should at least have --build and --stage
+                        if not builds:
+                            self.fail(('e2e job needs --extract or'
+                                       ' --use-shared-build or'
+                                       ' --build: %s %s') % (job, args))
 
                     if shared_builds or node_e2e:
                         expected = 0
+                    elif builds and not extracts:
+                        expected = 0
+                    elif 'ingress' in job:
+                        expected = 1
                     elif any(s in job for s in [
                             'upgrade', 'skew', 'downgrade', 'rollback',
                             'ci-kubernetes-e2e-gce-canary',
@@ -592,7 +372,7 @@ class JobTest(unittest.TestCase):
                         self.fail('--image-family and --image-project must be'
                                   'both set or unset: %s' % job)
 
-                    if job.startswith('pull-kubernetes-') and not node_e2e:
+                    if job.startswith('pull-kubernetes-') and not node_e2e and not local_e2e:
                         if 'gke' in job:
                             stage = 'gs://kubernetes-release-dev/ci'
                             suffix = True
@@ -765,6 +545,7 @@ class JobTest(unittest.TestCase):
             'ci-kubernetes-kubemark-high-density-100-gce': 'ci-kubernetes-kubemark-*',
             'ci-kubernetes-kubemark-gce-scale': 'ci-kubernetes-scale-*',
             'pull-kubernetes-kubemark-e2e-gce-big': 'ci-kubernetes-scale-*',
+            'pull-kubernetes-kubemark-e2e-gce-scale': 'ci-kubernetes-scale-*',
             'ci-kubernetes-e2e-gce-large-manual-up': 'ci-kubernetes-scale-*',
             'ci-kubernetes-e2e-gce-large-manual-down': 'ci-kubernetes-scale-*',
             'ci-kubernetes-e2e-gce-large-correctness': 'ci-kubernetes-scale-*',
@@ -795,9 +576,18 @@ class JobTest(unittest.TestCase):
             'ci-cri-containerd-node-e2e': 'cri-containerd-node-e2e-*',
             'ci-cri-containerd-node-e2e-serial': 'cri-containerd-node-e2e-*',
             'ci-cri-containerd-node-e2e-flaky': 'cri-containerd-node-e2e-*',
+            'ci-cri-containerd-node-e2e-benchmark': 'cri-containerd-node-e2e-*',
+            # ci-cri-containerd-e2e-gce-stackdriver intentionally share projects with
+            # ci-kubernetes-e2e-gce-stackdriver.
+            'ci-kubernetes-e2e-gce-stackdriver': 'k8s-jkns-e2e-gce-stackdriver',
+            'ci-cri-containerd-e2e-gce-stackdriver': 'k8s-jkns-e2e-gce-stackdriver',
             # ingress-GCE e2e jobs
             'pull-ingress-gce-e2e': 'e2e-ingress-gce',
             'ci-ingress-gce-e2e': 'e2e-ingress-gce',
+            # sig-autoscaling jobs intentionally share projetcs
+            'ci-kubernetes-e2e-gci-gce-autoscaling-hpa':'ci-kubernetes-e2e-gci-gce-autoscaling',
+            'ci-kubernetes-e2e-gci-gce-autoscaling-migs-hpa':'ci-kubernetes-e2e-gci-gce-autoscaling-migs',
+            'ci-kubernetes-e2e-gci-gke-autoscaling-hpa':'ci-kubernetes-e2e-gci-gke-autoscaling',
         }
         for soak_prefix in [
                 'ci-kubernetes-soak-gce-1.5',
@@ -847,29 +637,10 @@ class JobTest(unittest.TestCase):
 
     def test_jobs_do_not_source_shell(self):
         for job, job_path in self.jobs:
-            if job.startswith('pull-'):
-                continue  # No clean way to determine version
             with open(job_path) as fp:
                 script = fp.read()
             self.assertFalse(re.search(r'\Wsource ', script), job)
             self.assertNotIn('\n. ', script, job)
-
-    def test_all_bash_jobs_have_errexit(self):
-        options = {
-            'errexit',
-            'nounset',
-            'pipefail',
-        }
-        for job, job_path in self.jobs:
-            if not job.endswith('.sh'):
-                continue
-            with open(job_path) as fp:
-                lines = list(fp)
-            for option in options:
-                expected = 'set -o %s\n' % option
-                self.assertIn(
-                    expected, lines,
-                    '%s not found in %s' % (expected, job_path))
 
     def _check_env(self, job, setting):
         if not re.match(r'[0-9A-Z_]+=[^\n]*', setting):
@@ -945,7 +716,7 @@ class JobTest(unittest.TestCase):
                     'GINKGO_TEST_ARGS=',
                     'KUBERNETES_PROVIDER=',
             ]:
-                continue  # TOOD(fejta): migrate kops jobs
+                continue  # TODO(fejta): migrate kops jobs
             if setting.startswith(env):
                 self.fail('[%s]: Env %s: Convert %s to use %s in jobs/config.json' % (
                     job, setting, env, fix))

@@ -17,6 +17,7 @@ limitations under the License.
 package requiresig
 
 import (
+	"regexp"
 	"testing"
 
 	"github.com/sirupsen/logrus"
@@ -42,7 +43,9 @@ func TestHandle(t *testing.T) {
 		name           string
 		action         github.IssueEventAction
 		isPR           bool
+		body           string
 		initialLabels  []string
+		unrelatedLabel bool
 		expectComment  bool
 		expectedAdd    string
 		expectedRemove string
@@ -103,8 +106,41 @@ func TestHandle(t *testing.T) {
 			initialLabels:  []string{helpWanted, needsSigLabel, wgContainerIdentity},
 			expectedRemove: needsSigLabel,
 		},
+		{
+			name:          "issue has no sig/foo label, no needs-sig label, body mentions sig",
+			action:        github.IssueActionOpened,
+			body:          "I am mentioning a sig @kubernetes/sig-testing-misc more stuff.",
+			initialLabels: []string{helpWanted},
+		},
+		{
+			name:          "issue has no sig/foo label, no needs-sig label, body uses /sig command",
+			action:        github.IssueActionOpened,
+			body:          "I am using a sig command.\n/sig testing",
+			initialLabels: []string{helpWanted},
+		},
+		// Ignoring label events for labels other than sig labels prevents the
+		// plugin from adding and then removing the needs-sig label when new
+		// issues are created and include multiple label commands including a
+		// `/sig` command. In this case a label event caused by adding a non-sig
+		// label may occur before the `/sig` command is processed and the sig
+		// label is added.
+		{
+			name:           "ignore non-sig label added events",
+			action:         github.IssueActionLabeled,
+			body:           "I am using a sig command.\n/kind bug\n/sig testing",
+			initialLabels:  []string{helpWanted},
+			unrelatedLabel: true,
+		},
+		{
+			name:           "ignore non-sig label removed events",
+			action:         github.IssueActionUnlabeled,
+			body:           "I am using a sig command.\n/kind bug\n/sig testing",
+			initialLabels:  []string{helpWanted},
+			unrelatedLabel: true,
+		},
 	}
 
+	mentionRe := regexp.MustCompile(`(?m)@kubernetes/sig-testing-misc`)
 	for _, test := range tests {
 		fghc := &fakegithub.FakeClient{
 			IssueComments: make(map[int][]github.IssueComment),
@@ -124,9 +160,17 @@ func TestHandle(t *testing.T) {
 				Labels:      initLabels,
 				Number:      5,
 				PullRequest: pr,
+				Body:        test.body,
 			},
 		}
-		if err := handle(logrus.WithField("plugin", "require-sig"), fghc, &fakePruner{}, ie); err != nil {
+		if test.action == github.IssueActionUnlabeled || test.action == github.IssueActionLabeled {
+			if test.unrelatedLabel {
+				ie.Label.Name = "kind/bug"
+			} else {
+				ie.Label.Name = "sig/awesome"
+			}
+		}
+		if err := handle(logrus.WithField("plugin", "require-sig"), fghc, &fakePruner{}, ie, mentionRe); err != nil {
 			t.Fatalf("[%s] Unexpected error from handle: %v.", test.name, err)
 		}
 

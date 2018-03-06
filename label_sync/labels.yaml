@@ -7,8 +7,6 @@ labels:
   - color: 0ffa16
     name: approved
   - color: fef2c0
-    name: approved-for-milestone
-  - color: fef2c0
     name: cherrypick-approved
   - color: fef2c0
     name: cherrypick-candidate
@@ -60,6 +58,8 @@ labels:
     name: lifecycle/rotten
   - color: "795548"
     name: lifecycle/stale
+    previously:
+      - name: stale
   - color: b60205
     name: needs-ok-to-test
   - color: BDBDBD
@@ -175,6 +175,10 @@ labels:
     name: size/XS
   - color: ee0000
     name: size/XXL
+  - color: fef2c0
+    name: status/approved-for-milestone
+    previously:
+      - name: approved-for-milestone
   - color: fef2c0
     name: status/in-progress
   - color: fef2c0
