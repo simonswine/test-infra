@@ -4,8 +4,8 @@
 # The name of the test job in this file must satisfy a predefined format, which
 # consists of several dimensions, such as cloud provider, OS image name,
 # Kubernetes version and test suites. The definition of each dimension is
-# provided separately from the job defintion. A tool can automatically generate
-# the test defintion and Prow configuration from the test name by pulling the
+# provided separately from the job definition. A tool can automatically generate
+# the test definition and Prow configuration from the test name by pulling the
 # configs of each dimension in the test name and assembling them together.
 #
 # E.g., for test "ci-kubernetes-e2e-gce-ubuntustable1-k8sdev-serial", its
@@ -242,6 +242,12 @@ jobs:
   # +---------------+----------+----------+------------+------------+------------+
   # | ubuntustable2 |      n/a |      n/a |        n/a |        n/a |        n/a |
   # +---------------+----------+----------+------------+------------+------------+
+  ci-kubernetes-e2e-gce-ubuntu1-k8sdev-default:
+    interval: 2h
+    args:
+    - --check-leaked-resources=false # disabled since it uses shared project.
+    - --gcp-project=ubuntu-os-gke-cloud-dev-tests  # Canonical owned project.
+    sigOwners: ['sig-node']
   ci-kubernetes-e2e-gce-ubuntudev-k8sdev-default:
     interval: 2h
     args:
@@ -406,6 +412,11 @@ jobs:
     - --check-leaked-resources=false # disabled since it uses shared project.
     - --gcp-project=ubuntu-os-gke-cloud-dev-tests  # Canonical owned project.
     sigOwners: ['sig-node']
+
+  ci-kubernetes-e2e-gke-ubuntu1-k8sdev-default:
+    interval: 2h
+    sigOwners: ['sig-gcp']
+
   ci-kubernetes-e2e-gke-ubuntustable1-k8sdev-alphafeatures:
     interval: 2h
     sigOwners: ['sig-gcp']
@@ -431,6 +442,33 @@ jobs:
     interval: 2h
     sigOwners: ['sig-gcp']
   ci-kubernetes-e2e-gke-ubuntustable1-k8sdev-updown:
+    interval: 2h
+    sigOwners: ['sig-gcp']
+  ci-kubernetes-e2e-gke-ubuntustable2-k8sbeta-alphafeatures:
+    interval: 2h
+    sigOwners: ['sig-gcp']
+  ci-kubernetes-e2e-gke-ubuntustable2-k8sbeta-autoscaling:
+    interval: 2h
+    sigOwners: ['sig-gcp']
+  ci-kubernetes-e2e-gke-ubuntustable2-k8sbeta-default:
+    interval: 2h
+    sigOwners: ['sig-gcp']
+  ci-kubernetes-e2e-gke-ubuntustable2-k8sbeta-flaky:
+    interval: 2h
+    sigOwners: ['sig-gcp']
+  ci-kubernetes-e2e-gke-ubuntustable2-k8sbeta-ingress:
+    interval: 2h
+    sigOwners: ['sig-gcp']
+  ci-kubernetes-e2e-gke-ubuntustable2-k8sbeta-reboot:
+    interval: 2h
+    sigOwners: ['sig-gcp']
+  ci-kubernetes-e2e-gke-ubuntustable2-k8sbeta-serial:
+    interval: 2h
+    sigOwners: ['sig-gcp']
+  ci-kubernetes-e2e-gke-ubuntustable2-k8sbeta-slow:
+    interval: 2h
+    sigOwners: ['sig-gcp']
+  ci-kubernetes-e2e-gke-ubuntustable2-k8sbeta-updown:
     interval: 2h
     sigOwners: ['sig-gcp']
   ci-kubernetes-e2e-gke-ubuntustable1-k8sstable1-alphafeatures:
@@ -506,6 +544,7 @@ jobs:
     interval: 2h
     args:
     - --gcp-project=cos-image-validation
+    - --node-test-args=--feature-gates=DynamicKubeletConfig=true
     sigOwners: ['sig-node']
   ci-kubernetes-e2enode-cosbeta-k8sbeta-default:
     interval: 2h
@@ -556,6 +595,7 @@ jobs:
     interval: 2h
     args:
     - --gcp-project=k8s-test-39a894cbd4
+    - --node-test-args=--feature-gates=DynamicKubeletConfig=true
     sigOwners: ['sig-node']
   ci-kubernetes-e2enode-cosstable1-k8sbeta-default:
     interval: 2h
@@ -607,6 +647,7 @@ jobs:
     interval: 2h
     args:
     - --gcp-project=ubuntu-image-validation
+    - --node-test-args=--feature-gates=DynamicKubeletConfig=true
     sigOwners: ['sig-node']
   ci-kubernetes-e2enode-ubuntudev-k8sstable1-gkespec:
     interval: 2h
@@ -638,6 +679,7 @@ jobs:
     interval: 2h
     args:
     - --gcp-project=ubuntu-image-validation
+    - --node-test-args=--feature-gates=DynamicKubeletConfig=true
     sigOwners: ['sig-node']
   ci-kubernetes-e2enode-ubuntudev2-k8sbeta-gkespec:
     interval: 2h
@@ -659,6 +701,7 @@ jobs:
     interval: 2h
     args:
     - --gcp-project=ubuntu-image-validation
+    - --node-test-args=--feature-gates=DynamicKubeletConfig=true
     sigOwners: ['sig-node']
   ci-kubernetes-e2enode-ubuntustable1-k8sstable1-gkespec:
     interval: 2h
@@ -682,7 +725,7 @@ jobs:
     sigOwners: ['sig-node']
 
   # release branch jobs - cos only (cvm is deprecated at 1.8)
-  # beta release
+  # beta release (inactive)
   ci-kubernetes-e2e-gce-cos-k8sbeta-reboot:
     interval: 1h
     sigOwners: ['sig-gcp']
@@ -721,6 +764,7 @@ jobs:
     - --env=KUBE_PROXY_DAEMONSET=true
     - --env=ENABLE_POD_PRIORITY=true
     - --env=KUBE_FEATURE_GATES=AllAlpha=true
+    - --test_args=--ginkgo.focus=\[Feature:(Audit|BlockVolume|PodPreset|ExpandPersistentVolumes)\]|Networking --ginkgo.skip=Networking-Performance|IPv6 --minStartupPods=8
     sigOwners: ['sig-gcp']
 
   # stable1
@@ -762,6 +806,7 @@ jobs:
     - --env=KUBE_PROXY_DAEMONSET=true
     - --env=ENABLE_POD_PRIORITY=true
     - --env=KUBE_FEATURE_GATES=AllAlpha=true
+    - --test_args=--ginkgo.focus=\[Feature:(Audit|BlockVolume|PodPreset|ExpandPersistentVolumes)\]|Networking --ginkgo.skip=Networking-Performance|IPv6 --minStartupPods=8
     sigOwners: ['sig-gcp']
 
   # stable2
@@ -798,6 +843,8 @@ jobs:
   ci-kubernetes-e2e-gce-cos-k8sstable2-alphafeatures:
     interval: 6h
     args:
+    - --env=KUBE_PROXY_DAEMONSET=true
+    - --env=ENABLE_POD_PRIORITY=true
     - --env=KUBE_FEATURE_GATES=AllAlpha=true
     sigOwners: ['sig-gcp']
 
@@ -868,15 +915,19 @@ images:
     - --gcp-node-image=gci
   cosbeta:
     args:
-    - --env=KUBE_GCE_NODE_IMAGE=cos-stable-63-10032-71-0-p
-    - --env=KUBE_GCE_NODE_PROJECT=gke-node-images
-    - --env=DISABLE_DOCKER_LIVE_RESTORE=true
+    - --image-family=cos-beta
+    - --image-project=cos-cloud
     - --gcp-node-image=gci
   cosstable1:
     args:
     - --image-family=cos-stable
     - --image-project=cos-cloud
     - --gcp-node-image=gci
+  ubuntu1:
+    args:
+    - --image-family=ubuntu-gke-1604-lts-1
+    - --image-project=ubuntu-os-gke-cloud-devel
+    - --gcp-node-image=CUSTOM
   ubuntudev:
     args:
     - --image-family=ubuntu-gke-1604-lts-1
@@ -890,6 +941,11 @@ images:
   ubuntustable1:
     args:
     - --image-family=ubuntu-gke-1604-lts
+    - --image-project=ubuntu-os-gke-cloud
+    - --gcp-node-image=ubuntu
+  ubuntustable2:
+    args:
+    - --image-family=ubuntu-gke-1604-lts-2
     - --image-project=ubuntu-os-gke-cloud
     - --gcp-node-image=ubuntu
   cos:
@@ -920,7 +976,7 @@ testSuites:
     - --test_args=--ginkgo.focus=\[Feature:(ExternalTrafficLocalOnly|DynamicKubeletConfig)\] --minStartupPods=8
   autoscaling:
     args:
-    - --timeout=300m
+    - --timeout=420m
     - --test_args=--ginkgo.focus=\[Feature:ClusterSizeAutoscalingScaleUp\]|\[Feature:ClusterSizeAutoscalingScaleDown\] --ginkgo.skip=\[Flaky\] --minStartupPods=8
   default:
     args:
@@ -933,6 +989,7 @@ testSuites:
     - --test_args=--ginkgo.focus=\[Flaky\] --ginkgo.skip=\[Feature:.+\] --minStartupPods=8
   ingress:
     args:
+    - --gcp-project-type=ingress-project
     - --timeout=90m
     - --test_args=--ginkgo.focus=\[Feature:Ingress\] --minStartupPods=8
   reboot:
@@ -959,7 +1016,7 @@ testSuites:
     - --up=false
   stackdriver:
     args:
-    - --test_args=--ginkgo.focus=\[Feature:StackdriverMonitoring\]|\[Feature:StackdriverCustomMetrics\] --minStartupPods=8
+    - --test_args=--ginkgo.focus=\[Feature:StackdriverMonitoring\]|\[Feature:StackdriverCustomMetrics\]|\[Feature:StackdriverMetadataAgent\] --minStartupPods=8
     - --timeout=50m
   updown:
     args:
@@ -984,21 +1041,21 @@ nodeCommon:
 nodeImages:
   cosbeta:
     args:
-    - --node-args=--images=cos-stable-63-10032-71-0-p
+    - --node-args=--images=cos-beta-65-10323-51-0
     - --node-args=--image-project=gke-node-images
     - --node-args=--instance-metadata=user-data<test/e2e_node/jenkins/cos-init-disable-live-restore.yaml,gci-update-strategy=update_disabled
   cosstable1:
     args:
-    - --node-args=--images=cos-stable-63-10032-71-0
+    - --node-args=--images=cos-stable-64-10176-62-0
     - --node-args=--image-project=cos-cloud
     - --node-args=--instance-metadata=user-data<test/e2e_node/jenkins/gci-init.yaml,gci-update-strategy=update_disabled
   ubuntudev:
     args:
-    - --node-args=--images=ubuntu-gke-1604-xenial-v20171215
+    - --node-args=--images=ubuntu-gke-1604-xenial-v20180122
     - --node-args=--image-project=ubuntu-os-gke-cloud-devel
   ubuntudev2:
     args:
-    - --node-args=--images=ubuntu-gke-1604-xenial-v201712121
+    - --node-args=--images=ubuntu-gke-1604-xenial-v20180122-1
     - --node-args=--image-project=ubuntu-os-gke-cloud-devel
   ubuntustable1:
     args:
@@ -1009,30 +1066,29 @@ nodeK8sVersions:
   dev:
     args:
     - --repo=k8s.io/kubernetes=master
-    prowImage: gcr.io/k8s-testimages/kubekins-e2e:v20171220-29cb083c9-master
+    prowImage: gcr.io/k8s-testimages/kubekins-e2e:v20180314-34ab1109a-master
   beta:
     args:
-    - --repo=k8s.io/kubernetes=release-1.9
-    prowImage: gcr.io/k8s-testimages/kubekins-e2e:v20171220-29cb083c9-1.9
+    - --repo=k8s.io/kubernetes=release-1.10
+    prowImage: gcr.io/k8s-testimages/kubekins-e2e:v20180314-34ab1109a-1.10
   stable1:
     args:
-    - --repo=k8s.io/kubernetes=release-1.8
-    prowImage: gcr.io/k8s-testimages/kubekins-e2e:v20171218-a18c352b4-1.8
+    - --repo=k8s.io/kubernetes=release-1.9
+    prowImage: gcr.io/k8s-testimages/kubekins-e2e:v20180314-34ab1109a-1.9
   stable2:
     args:
-    - --repo=k8s.io/kubernetes=release-1.7
-    prowImage: gcr.io/k8s-testimages/kubekins-e2e:v20171218-a18c352b4-1.7
+    - --repo=k8s.io/kubernetes=release-1.8
+    prowImage: gcr.io/k8s-testimages/kubekins-e2e:v20180314-34ab1109a-1.8
   stable3:
     args:
-    - --repo=k8s.io/kubernetes=release-1.6
-    prowImage: gcr.io/k8s-testimages/kubekins-e2e:v20171218-a18c352b4-1.6
+    - --repo=k8s.io/kubernetes=release-1.7
+    prowImage: gcr.io/k8s-testimages/kubekins-e2e:v20180314-34ab1109a-1.7
 
 nodeTestSuites:
   default:
     args:
     - --timeout=70m
     - --test_args=--nodes=8 --skip="\[Flaky\]|\[Serial\]"
-    - --node-test-args=--feature-gates=KubeletConfigFile=true --generate-kubelet-config-file=true
   gkespec:
     args:
     - --node-args=--system-spec-name=gke
@@ -1042,4 +1098,4 @@ nodeTestSuites:
     args:
     - --timeout=180m
     - --test_args=--nodes=1 --focus="\[Serial\]" --skip="\[Flaky\]|\[Benchmark\]"
-    - --node-test-args=--feature-gates=DynamicKubeletConfig=true,KubeletConfigFile=true --generate-kubelet-config-file=true
+    - --node-test-args=--feature-gates=DynamicKubeletConfig=true

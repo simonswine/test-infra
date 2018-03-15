@@ -411,16 +411,12 @@ presubmits:
         - "--upload=gs://jetstack-logs/pr-logs"
         - "--timeout=90"
         env:
-        - name: GOOGLE_APPLICATION_CREDENTIALS
-          value: /etc/service-account/service-account.json
         - name: DOCKER_IN_DOCKER_ENABLED
           value: true
         # docker-in-docker needs privileged mode
         securityContext:
           privileged: true
         volumeMounts:
-        - name: service
-          mountPath: /etc/service-account
         # - name: cache-ssd
         #   mountPath: /root/.cache
         # - name: docker-graph
@@ -436,9 +432,6 @@ presubmits:
             cpu: 3800m
             memory: "12Gi"
       volumes:
-      - name: service
-        secret:
-          secretName: service-account
       # TODO: re-enable cache volumes
       # - name: cache-ssd
       #   hostPath:

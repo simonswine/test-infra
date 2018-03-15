@@ -28,10 +28,10 @@ import (
 	"time"
 
 	"github.com/sirupsen/logrus"
+	"k8s.io/apimachinery/pkg/labels"
 
 	"k8s.io/test-infra/prow/config"
 	"k8s.io/test-infra/prow/kube"
-	"k8s.io/test-infra/prow/kube/labels"
 )
 
 const (
@@ -133,7 +133,7 @@ func (ja *JobAgent) GetJobLog(job, id string) ([]byte, error) {
 	if j.Spec.Agent == kube.KubernetesAgent {
 		client, ok := ja.pkcs[j.ClusterAlias()]
 		if !ok {
-			return nil, fmt.Errorf("cannot get logs for prowjob %q with agent %q: unknown cluster alias %q", j.Metadata.Name, j.Spec.Agent, j.ClusterAlias())
+			return nil, fmt.Errorf("cannot get logs for prowjob %q with agent %q: unknown cluster alias %q", j.ObjectMeta.Name, j.Spec.Agent, j.ClusterAlias())
 		}
 		return client.GetLog(j.Status.PodName)
 	}
@@ -141,12 +141,12 @@ func (ja *JobAgent) GetJobLog(job, id string) ([]byte, error) {
 		if agentToTmpl.Agent != string(j.Spec.Agent) {
 			continue
 		}
-		if !agentToTmpl.Selector.Matches(labels.Set(j.Metadata.Labels)) {
+		if !agentToTmpl.Selector.Matches(labels.Set(j.ObjectMeta.Labels)) {
 			continue
 		}
 		var b bytes.Buffer
 		if err := agentToTmpl.URLTemplate.Execute(&b, &j); err != nil {
-			return nil, fmt.Errorf("cannot execute URL template for prowjob %q with agent %q: %v", j.Metadata.Name, j.Spec.Agent, err)
+			return nil, fmt.Errorf("cannot execute URL template for prowjob %q with agent %q: %v", j.ObjectMeta.Name, j.Spec.Agent, err)
 		}
 		resp, err := http.Get(b.String())
 		if err != nil {
@@ -155,7 +155,7 @@ func (ja *JobAgent) GetJobLog(job, id string) ([]byte, error) {
 		defer resp.Body.Close()
 		return ioutil.ReadAll(resp.Body)
 	}
-	return nil, fmt.Errorf("cannot get logs for prowjob %q with agent %q: the agent is missing from the prow config file", j.Metadata.Name, j.Spec.Agent)
+	return nil, fmt.Errorf("cannot get logs for prowjob %q with agent %q: the agent is missing from the prow config file", j.ObjectMeta.Name, j.Spec.Agent)
 }
 
 func (ja *JobAgent) GetJobLogStream(job, id string, options map[string]string) (io.ReadCloser, error) {
@@ -172,11 +172,11 @@ func (ja *JobAgent) GetJobLogStream(job, id string, options map[string]string) (
 	if j.Spec.Agent == kube.KubernetesAgent {
 		client, ok := ja.pkcs[j.ClusterAlias()]
 		if !ok {
-			return nil, fmt.Errorf("cannot get logs for prowjob %q with agent %q: unknown cluster alias %q", j.Metadata.Name, j.Spec.Agent, j.ClusterAlias())
+			return nil, fmt.Errorf("cannot get logs for prowjob %q with agent %q: unknown cluster alias %q", j.ObjectMeta.Name, j.Spec.Agent, j.ClusterAlias())
 		}
 		return client.GetLogStream(j.Status.PodName, options)
 	}
-	return nil, fmt.Errorf("streaming is available for kubernetes clients only, prowjob %q is running under %s.", j.Metadata.Name, j.Spec.Agent)
+	return nil, fmt.Errorf("streaming is available for kubernetes clients only, prowjob %q is running under %s.", j.ObjectMeta.Name, j.Spec.Agent)
 }
 
 func (ja *JobAgent) tryUpdate() {
@@ -202,7 +202,7 @@ func (ja *JobAgent) update() error {
 	for _, j := range pjs {
 		ft := time.Time{}
 		if j.Status.CompletionTime != nil {
-			ft = *j.Status.CompletionTime
+			ft = j.Status.CompletionTime.Time
 		}
 		buildID := j.Status.BuildID
 		nj := Job{
@@ -214,16 +214,16 @@ func (ja *JobAgent) update() error {
 			Job:     j.Spec.Job,
 			Context: j.Spec.Context,
 			Agent:   j.Spec.Agent,
-			ProwJob: j.Metadata.Name,
+			ProwJob: j.ObjectMeta.Name,
 			BuildID: buildID,
 
-			Started:     j.Status.StartTime.Format(time.Stamp),
+			Started:     fmt.Sprintf("%d", j.Status.StartTime.Time.Unix()),
 			State:       string(j.Status.State),
 			Description: j.Status.Description,
 			PodName:     j.Status.PodName,
 			URL:         j.Status.URL,
 
-			st: j.Status.StartTime,
+			st: j.Status.StartTime.Time,
 			ft: ft,
 		}
 		if !nj.ft.IsZero() {

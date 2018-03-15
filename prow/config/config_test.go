@@ -18,23 +18,48 @@ package config
 
 import (
 	"bytes"
+	"encoding/json"
 	"errors"
 	"fmt"
+	"io/ioutil"
 	"os"
-	"reflect"
 	"regexp"
-	"sort"
 	"strings"
 	"testing"
 
-	"github.com/ghodss/yaml"
+	"k8s.io/api/core/v1"
+	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
+	"k8s.io/apimachinery/pkg/util/sets"
 
 	"k8s.io/test-infra/prow/github"
 	"k8s.io/test-infra/prow/kube"
 )
 
+// config.json is the worst but contains useful information :-(
+type configJSON map[string]map[string]interface{}
+
+func (c configJSON) ScenarioForJob(jobName string) string {
+	if scenario, ok := c[jobName]["scenario"]; ok {
+		return scenario.(string)
+	}
+	return ""
+}
+func readConfigJSON(path string) (config configJSON, err error) {
+	raw, err := ioutil.ReadFile(path)
+	if err != nil {
+		return nil, err
+	}
+	config = configJSON{}
+	err = json.Unmarshal(raw, &config)
+	if err != nil {
+		return nil, err
+	}
+	return config, nil
+}
+
 // Loaded at TestMain.
 var c *Config
+var cj configJSON
 
 func TestMain(m *testing.M) {
 	conf, err := Load("../config.yaml")
@@ -43,75 +68,54 @@ func TestMain(m *testing.M) {
 		os.Exit(1)
 	}
 	c = conf
+
+	cj, err = readConfigJSON("../../jobs/config.json")
+	if err != nil {
+		fmt.Printf("Could not load jobs config: %v", err)
+		os.Exit(1)
+	}
+
 	os.Exit(m.Run())
 }
 
-func replace(j *Presubmit, ks *Presubmit) error {
-	name := strings.Replace(j.Name, "pull-kubernetes", "pull-security-kubernetes", -1)
-	if name != ks.Name {
-		return fmt.Errorf("%s should match %s", name, ks.Name)
+func volumesAndMountsMatch(mounts []v1.VolumeMount, volumes []v1.Volume) bool {
+	mountNames := sets.NewString()
+	volumeNames := sets.NewString()
+	for _, m := range mounts {
+		mountNames.Insert(m.Name)
 	}
-	j.Name = name
-	j.RerunCommand = strings.Replace(j.RerunCommand, "pull-kubernetes", "pull-security-kubernetes", -1)
-	j.Trigger = strings.Replace(j.Trigger, "pull-kubernetes", "pull-security-kubernetes", -1)
-	j.Context = strings.Replace(j.Context, "pull-kubernetes", "pull-security-kubernetes", -1)
-
-	if j.Agent == "kubernetes" {
-		j.Cluster = "security"
-		if len(j.Spec.Containers) != 1 {
-			return fmt.Errorf("expected a single container for %s", name)
-		}
-		for i, arg := range j.Spec.Containers[0].Args {
-			// handle --repo substitution for main repo
-			if strings.HasPrefix(arg, "--repo=k8s.io/kubernetes") || strings.HasPrefix(arg, "--repo=k8s.io/$(REPO_NAME)") {
-				j.Spec.Containers[0].Args[i] = strings.Replace(arg, "k8s.io/", "github.com/kubernetes-security/", 1)
-
-				// handle upload bucket
-			} else if strings.HasPrefix(arg, "--upload=") {
-				j.Spec.Containers[0].Args[i] = "--upload=gs://kubernetes-security-jenkins/pr-logs"
-			}
-		}
-		j.Spec.Containers[0].Args = append(j.Spec.Containers[0].Args, "--ssh=/etc/ssh-security/ssh-security")
-		sort.Strings(j.Spec.Containers[0].Args)
-		sort.Strings(ks.Spec.Containers[0].Args)
-		j.Spec.Containers[0].VolumeMounts = append(
-			[]kube.VolumeMount{
-				{
-					Name:      "ssh-security",
-					MountPath: "/etc/ssh-security",
-				},
-			},
-			j.Spec.Containers[0].VolumeMounts...,
-		)
-		j.Spec.Volumes = append(
-			[]kube.Volume{
-				{
-					Name: "ssh-security",
-					VolumeSource: kube.VolumeSource{
-						Secret: &kube.SecretSource{
-							Name:        "ssh-security",
-							DefaultMode: 0400,
-						},
-					},
-				},
-			},
-			j.Spec.Volumes...,
-		)
-
+	for _, v := range volumes {
+		volumeNames.Insert(v.Name)
 	}
+	return volumeNames.Equal(mountNames)
+}
 
-	j.re = ks.re
-	if len(j.RunAfterSuccess) != len(ks.RunAfterSuccess) {
-		return fmt.Errorf("length of RunAfterSuccess should match. - %s", name)
-	}
-
-	for i := range j.RunAfterSuccess {
-		if err := replace(&j.RunAfterSuccess[i], &ks.RunAfterSuccess[i]); err != nil {
-			return err
+func specHasMatchingVolumesAndMounts(spec *v1.PodSpec) bool {
+	for _, container := range spec.Containers {
+		if !volumesAndMountsMatch(container.VolumeMounts, spec.Volumes) {
+			return false
 		}
 	}
+	return true
+}
 
-	return nil
+// verify that all volume mounts reference volumes that exist
+func TestMountsHaveVolumes(t *testing.T) {
+	for _, job := range c.AllPresubmits(nil) {
+		if job.Spec != nil && !specHasMatchingVolumesAndMounts(job.Spec) {
+			t.Errorf("volumes and mounts do not match for: %v", job.Name)
+		}
+	}
+	for _, job := range c.AllPostsubmits(nil) {
+		if job.Spec != nil && !specHasMatchingVolumesAndMounts(job.Spec) {
+			t.Errorf("volumes and mounts do not match for: %v", job.Name)
+		}
+	}
+	for _, job := range c.AllPeriodics() {
+		if job.Spec != nil && !specHasMatchingVolumesAndMounts(job.Spec) {
+			t.Errorf("volumes and mounts do not match for: %v", job.Name)
+		}
+	}
 }
 
 func checkContext(t *testing.T, repo string, p Presubmit) {
@@ -180,33 +184,57 @@ func findRequired(t *testing.T, presubmits []Presubmit) []string {
 }
 
 func TestConfigSecurityJobsMatch(t *testing.T) {
-	conf, err := Load("../config.yaml")
-	if err != nil {
-		t.Fatalf("fail to load config for TestConfigSecurityJobsMatch : %v", err)
-	}
-	kp := conf.Presubmits["kubernetes/kubernetes"]
-	sp := conf.Presubmits["kubernetes-security/kubernetes"]
+	kp := c.Presubmits["kubernetes/kubernetes"]
+	sp := c.Presubmits["kubernetes-security/kubernetes"]
 	if len(kp) != len(sp) {
 		t.Fatalf("length of kubernetes/kubernetes presubmits %d does not equal length of kubernetes-security/kubernetes presubmits %d", len(kp), len(sp))
 	}
-	for i, j := range kp {
-		if err := replace(&j, &sp[i]); err != nil {
-			t.Fatalf("[replace] : %v", err)
+}
+
+// Unit test jobs outside kubernetes-security do not use the security cluster
+// and that jobs inside kubernetes-security DO
+func TestConfigSecurityClusterRestricted(t *testing.T) {
+	for repo, jobs := range c.Presubmits {
+		if strings.HasPrefix(repo, "kubernetes-security/") {
+			for _, job := range jobs {
+				if job.Agent != "jenkins" && job.Cluster != "security" {
+					t.Fatalf("Jobs in kubernetes-security/* should use the security cluster! %s", job.Name)
+				}
+			}
+		} else {
+			for _, job := range jobs {
+				if job.Cluster == "security" {
+					t.Fatalf("Jobs not in kubernetes-security/* should not use the security cluster! %s", job.Name)
+				}
+			}
 		}
-
-		if !reflect.DeepEqual(j, sp[i]) {
-
-			b1, _ := yaml.Marshal(j)
-			b2, _ := yaml.Marshal(sp[i])
-
-			t.Fatalf("kubernetes/kubernetes prow config jobs do not match kubernetes-security/kubernetes jobs:\n%s\nshould match: %s", b1, b2)
+	}
+	for repo, jobs := range c.Postsubmits {
+		if strings.HasPrefix(repo, "kubernetes-security/") {
+			for _, job := range jobs {
+				if job.Agent != "jenkins" && job.Cluster != "security" {
+					t.Fatalf("Jobs in kubernetes-security/* should use the security cluster! %s", job.Name)
+				}
+			}
+		} else {
+			for _, job := range jobs {
+				if job.Cluster == "security" {
+					t.Fatalf("Jobs not in kubernetes-security/* should not use the security cluster! %s", job.Name)
+				}
+			}
+		}
+	}
+	// TODO(bentheelder): this will need to be more complex if we ever add k-s periodic
+	for _, job := range c.AllPeriodics() {
+		if job.Cluster == "security" {
+			t.Fatalf("Jobs not in kubernetes-security/* should not use the security cluster! %s", job.Name)
 		}
 	}
 }
 
 // checkDockerSocketVolumes returns an error if any volume uses a hostpath
 // to the docker socket. we do not want to allow this
-func checkDockerSocketVolumes(volumes []kube.Volume) error {
+func checkDockerSocketVolumes(volumes []v1.Volume) error {
 	for _, volume := range volumes {
 		if volume.HostPath != nil && volume.HostPath.Path == "/var/run/docker.sock" {
 			return errors.New("job uses HostPath with docker socket")
@@ -246,7 +274,7 @@ func TestJobDoesNotHaveDockerSocket(t *testing.T) {
 	}
 }
 
-func checkBazelPortContainer(c kube.Container, cache bool) error {
+func checkBazelPortContainer(c v1.Container, cache bool) error {
 	if !cache {
 		if len(c.Ports) != 0 {
 			return errors.New("job does not use --cache-ssd and so should not set ports in spec")
@@ -264,6 +292,10 @@ func checkBazelPortContainer(c kube.Container, cache bool) error {
 	return nil
 }
 
+func volumeIsCacheSSD(v *kube.Volume) bool {
+	return v.HostPath != nil && strings.HasPrefix(v.HostPath.Path, "/mnt/disks/ssd0")
+}
+
 func checkBazelPortPresubmit(presubmits []Presubmit) error {
 	for _, presubmit := range presubmits {
 		if presubmit.Spec == nil {
@@ -271,8 +303,9 @@ func checkBazelPortPresubmit(presubmits []Presubmit) error {
 		}
 		hasCache := false
 		for _, volume := range presubmit.Spec.Volumes {
-			if volume.Name == "cache-ssd" || volume.Name == "docker-graph" {
+			if volumeIsCacheSSD(&volume) {
 				hasCache = true
+				break
 			}
 		}
 
@@ -294,9 +327,9 @@ func checkBazelPortPostsubmit(postsubmits []Postsubmit) error {
 	for _, postsubmit := range postsubmits {
 		hasCache := false
 		for _, volume := range postsubmit.Spec.Volumes {
-			// TODO(bentheelder): rewrite these tests and the entire caching layout...
-			if volume.Name == "cache-ssd" || volume.Name == "docker-graph" {
+			if volumeIsCacheSSD(&volume) {
 				hasCache = true
+				break
 			}
 		}
 
@@ -318,8 +351,9 @@ func checkBazelPortPeriodic(periodics []Periodic) error {
 	for _, periodic := range periodics {
 		hasCache := false
 		for _, volume := range periodic.Spec.Volumes {
-			if volume.Name == "cache-ssd" || volume.Name == "docker-graph" {
+			if volumeIsCacheSSD(&volume) {
 				hasCache = true
+				break
 			}
 		}
 
@@ -425,7 +459,7 @@ func allJobs() ([]Presubmit, []Postsubmit, []Periodic, error) {
 //   * Prow injected vars like REPO_NAME, PULL_REFS, etc are only used on non-periodic jobs
 //   * Deprecated --branch, --pull flags are not used
 //   * Required --service-account, --upload, --job, --clean flags are present
-func checkBazelbuildSpec(t *testing.T, name string, spec *kube.PodSpec, periodic bool) map[string]int {
+func checkBazelbuildSpec(t *testing.T, name string, spec *v1.PodSpec, periodic bool) map[string]int {
 	img := "gcr.io/k8s-testimages/bazelbuild"
 	tags := map[string]int{}
 	if spec == nil {
@@ -679,7 +713,7 @@ func TestURLTemplate(t *testing.T) {
 
 	for _, tc := range testcases {
 		var pj = kube.ProwJob{
-			Metadata: kube.ObjectMeta{Name: tc.name},
+			ObjectMeta: metav1.ObjectMeta{Name: tc.name},
 			Spec: kube.ProwJobSpec{
 				Type: tc.jobType,
 				Job:  tc.job,
@@ -762,63 +796,9 @@ func TestReportTemplate(t *testing.T) {
 	}
 }
 
-func TestPullKubernetesCross(t *testing.T) {
-	crossBuildJob := "pull-kubernetes-cross"
-	tests := []struct {
-		changedFile string
-		expected    bool
-	}{
-		{
-			changedFile: "pkg/kubelet/cadvisor/cadvisor_unsupported.go",
-			expected:    true,
-		},
-		{
-			changedFile: "pkg/kubelet/cadvisor/util.go",
-			expected:    false,
-		},
-		{
-			changedFile: "Makefile",
-			expected:    true,
-		},
-		{
-			changedFile: "hack/lib/etcd.sh",
-			expected:    true,
-		},
-		{
-			changedFile: "build/debs/kubelet.service",
-			expected:    true,
-		},
-		{
-			changedFile: "federation/README.md",
-			expected:    false,
-		},
-	}
-	kkPresumits := c.Presubmits["kubernetes/kubernetes"]
-	var cross *Presubmit
-	for i := range kkPresumits {
-		ps := kkPresumits[i]
-		if ps.Name == crossBuildJob {
-			cross = &ps
-			break
-		}
-	}
-	if cross == nil {
-		t.Fatalf("expected %q in the presubmit section of the prow config", crossBuildJob)
-	}
-
-	for i, test := range tests {
-		t.Logf("test run #%d", i)
-		got := cross.RunsAgainstChanges([]string{test.changedFile})
-		if got != test.expected {
-			t.Errorf("expected changes (%s) to run cross job: %t, got: %t",
-				test.changedFile, test.expected, got)
-		}
-	}
-}
-
 // checkLatestUsesImagePullPolicy returns an error if an image is a `latest-.*` tag,
 // but doesn't have imagePullPolicy: Always
-func checkLatestUsesImagePullPolicy(spec *kube.PodSpec) error {
+func checkLatestUsesImagePullPolicy(spec *v1.PodSpec) error {
 	for _, container := range spec.Containers {
 		if strings.Contains(container.Image, ":latest-") {
 			// If the job doesn't specify imagePullPolicy: Always,
@@ -864,6 +844,97 @@ func TestLatestUsesImagePullPolicy(t *testing.T) {
 	for _, periodic := range c.Periodics {
 		if periodic.Spec != nil {
 			if err := checkLatestUsesImagePullPolicy(periodic.Spec); err != nil {
+				t.Errorf("Error in periodic %q: %v", periodic.Name, err)
+			}
+		}
+	}
+}
+
+// checkKubekinsPresets returns an error if a spec references to kubekins-e2e|bootstrap image,
+// but doesn't use service preset or ssh preset
+func checkKubekinsPresets(jobName string, spec *v1.PodSpec, labels, validLabels map[string]string) error {
+	service := true
+	ssh := true
+	for _, container := range spec.Containers {
+		if strings.Contains(container.Image, "kubekins-e2e") || strings.Contains(container.Image, "bootstrap") {
+			service = false
+			for key, val := range labels {
+				if (key == "preset-gke-alpha-service" || key == "preset-service-account") && val == "true" {
+					service = true
+				}
+			}
+		}
+
+		configJSONJobName := strings.Replace(jobName, "pull-kubernetes", "pull-security-kubernetes", -1)
+		if cj.ScenarioForJob(configJSONJobName) == "kubenetes_e2e" {
+			ssh = false
+			for key, val := range labels {
+				if (key == "preset-k8s-ssh" || key == "preset-aws-ssh") && val == "true" {
+					ssh = true
+				}
+			}
+		}
+	}
+
+	if !service {
+		return fmt.Errorf("cannot find service account preset")
+	}
+
+	if !ssh {
+		return fmt.Errorf("cannot find ssh preset")
+	}
+
+	for key, val := range labels {
+		if validVal, ok := validLabels[key]; !ok {
+			return fmt.Errorf("Label %s is not a valid preset label", key)
+		} else if validVal != val {
+			return fmt.Errorf("Label %s does not have valid value, have %s, expect %s", key, val, validVal)
+		}
+	}
+
+	return nil
+}
+
+// TestValidPresets makes sure all presets name starts with 'preset-', all job presets are valid,
+// and jobs that uses kubekins-e2e image has the right service account preset
+func TestValidPresets(t *testing.T) {
+	validLabels := map[string]string{}
+	for _, preset := range c.Presets {
+		for label, val := range preset.Labels {
+			if !strings.HasPrefix(label, "preset-") {
+				t.Errorf("Preset label %s - label name should start with 'preset-'", label)
+			} else if val != "true" {
+				t.Errorf("Preset label %s - label value should be true", label)
+			}
+			if _, ok := validLabels[label]; ok {
+				t.Errorf("Duplicated preset label : %s", label)
+			} else {
+				validLabels[label] = val
+			}
+		}
+	}
+
+	for _, presubmit := range c.AllPresubmits(nil) {
+		if presubmit.Spec != nil {
+			if err := checkKubekinsPresets(presubmit.Name, presubmit.Spec, presubmit.Labels, validLabels); err != nil {
+				t.Errorf("Error in presubmit %q: %v", presubmit.Name, err)
+			}
+		}
+	}
+
+	for _, posts := range c.Postsubmits {
+		for _, postsubmit := range posts {
+			if postsubmit.Spec != nil {
+				if err := checkKubekinsPresets(postsubmit.Name, postsubmit.Spec, postsubmit.Labels, validLabels); err != nil {
+					t.Errorf("Error in postsubmit %q: %v", postsubmit.Name, err)
+				}
+			}
+		}
+	}
+
+	for _, periodic := range c.Periodics {
+		if periodic.Spec != nil {
+			if err := checkKubekinsPresets(periodic.Name, periodic.Spec, periodic.Labels, validLabels); err != nil {
 				t.Errorf("Error in periodic %q: %v", periodic.Name, err)
 			}
 		}

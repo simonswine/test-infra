@@ -30,24 +30,32 @@ import (
 const pluginName = "lgtm"
 
 var (
-	lgtmLabel    = "lgtm"
-	lgtmRe       = regexp.MustCompile(`(?mi)^/lgtm(?: no-issue)?\s*$`)
-	lgtmCancelRe = regexp.MustCompile(`(?mi)^/lgtm cancel\s*$`)
+	lgtmLabel           = "lgtm"
+	lgtmRe              = regexp.MustCompile(`(?mi)^/lgtm(?: no-issue)?\s*$`)
+	lgtmCancelRe        = regexp.MustCompile(`(?mi)^/lgtm cancel\s*$`)
+	removeLGTMLabelNoti = "New changes are detected. LGTM label has been removed."
 )
 
 func init() {
 	plugins.RegisterGenericCommentHandler(pluginName, handleGenericComment, helpProvider)
+	plugins.RegisterPullRequestHandler(pluginName, func(pc plugins.PluginClient, pe github.PullRequestEvent) error {
+		return handlePullRequest(pc.GitHubClient, pe, pc.Logger)
+	}, helpProvider)
 }
 
 func helpProvider(config *plugins.Configuration, enabledRepos []string) (*pluginhelp.PluginHelp, error) {
 	// The Config field is omitted because this plugin is not configurable.
-	return &pluginhelp.PluginHelp{
-			Description: "The lgtm plugin manages the application and removal of the 'lgtm' (Looks Good To Me) label which is typically used to gate merging.",
-			WhoCanUse:   "Members of the organization that owns the repository. '/lgtm cancel' can be used additionally by the PR author.",
-			Usage:       "/lgtm [cancel]",
-			Examples:    []string{"/lgtm", "/lgtm cancel"},
-		},
-		nil
+	pluginHelp := &pluginhelp.PluginHelp{
+		Description: "The lgtm plugin manages the application and removal of the 'lgtm' (Looks Good To Me) label which is typically used to gate merging.",
+	}
+	pluginHelp.AddCommand(pluginhelp.Command{
+		Usage:       "/lgtm [cancel]",
+		Description: "Adds or removes the 'lgtm' label which is typically used to gate merging.",
+		Featured:    true,
+		WhoCanUse:   "Members of the organization that owns the repository. '/lgtm cancel' can be used additionally by the PR author.",
+		Examples:    []string{"/lgtm", "/lgtm cancel"},
+	})
+	return pluginHelp, nil
 }
 
 type githubClient interface {
@@ -57,6 +65,9 @@ type githubClient interface {
 	CreateComment(owner, repo string, number int, comment string) error
 	RemoveLabel(owner, repo string, number int, label string) error
 	GetIssueLabels(org, repo string, number int) ([]github.Label, error)
+	ListIssueComments(org, repo string, number int) ([]github.IssueComment, error)
+	DeleteComment(org, repo string, ID int) error
+	BotName() (string, error)
 }
 
 func handleGenericComment(pc plugins.PluginClient, e github.GenericCommentEvent) error {
@@ -132,7 +143,62 @@ func handle(gc githubClient, log *logrus.Entry, e *github.GenericCommentEvent) e
 		return gc.RemoveLabel(org, repo, e.Number, lgtmLabel)
 	} else if !hasLGTM && wantLGTM {
 		log.Info("Adding LGTM label.")
-		return gc.AddLabel(org, repo, e.Number, lgtmLabel)
+		if err := gc.AddLabel(org, repo, e.Number, lgtmLabel); err != nil {
+			return err
+		}
+		// Delete the LGTM removed noti after the LGTM label is added.
+		botname, err := gc.BotName()
+		if err != nil {
+			log.WithError(err).Errorf("Failed to get bot name.")
+		}
+		comments, err := gc.ListIssueComments(org, repo, e.Number)
+		if err != nil {
+			log.WithError(err).Errorf("Failed to get the list of issue comments on %s/%s#%d.", org, repo, e.Number)
+		}
+		for _, comment := range comments {
+			if comment.User.Login == botname && comment.Body == removeLGTMLabelNoti {
+				if err := gc.DeleteComment(org, repo, comment.ID); err != nil {
+					log.WithError(err).Errorf("Failed to delete comment from %s/%s#%d, ID:%d.", org, repo, e.Number, comment.ID)
+				}
+			}
+		}
+	}
+	return nil
+}
+
+type ghLabelClient interface {
+	RemoveLabel(owner, repo string, number int, label string) error
+	CreateComment(owner, repo string, number int, comment string) error
+}
+
+func handlePullRequest(gc ghLabelClient, pe github.PullRequestEvent, log *logrus.Entry) error {
+	if pe.PullRequest.Merged {
+		return nil
+	}
+
+	if pe.Action != github.PullRequestActionSynchronize {
+		return nil
+	}
+
+	// Don't bother checking if it has the label...it's a race, and we'll have
+	// to handle failure due to not being labeled anyway.
+	org := pe.PullRequest.Base.Repo.Owner.Login
+	repo := pe.PullRequest.Base.Repo.Name
+	number := pe.PullRequest.Number
+
+	var labelNotFound bool
+	if err := gc.RemoveLabel(org, repo, number, lgtmLabel); err != nil {
+		if _, labelNotFound = err.(*github.LabelNotFound); !labelNotFound {
+			return fmt.Errorf("failed removing lgtm label: %v", err)
+		}
+
+		// If the error is indeed *github.LabelNotFound, consider it a success.
+	}
+	// Creates a comment to inform participants that LGTM label is removed due to new
+	// pull request changes.
+	if !labelNotFound {
+		log.Infof("Create a LGTM removed notification to %s/%s#%d  with a message: %s", org, repo, number, removeLGTMLabelNoti)
+		return gc.CreateComment(org, repo, number, removeLGTMLabelNoti)
 	}
 	return nil
 }

@@ -24,13 +24,11 @@ import (
 	"regexp"
 	"strings"
 	"testing"
+
+	"k8s.io/test-infra/prow/kube"
 )
 
-var (
-	podRe = regexp.MustCompile(`^[a-z0-9]([-a-z0-9]*[a-z0-9])?$`)
-
-	noChangesProvider = func() ([]string, error) { return nil, nil }
-)
+var podRe = regexp.MustCompile(`^[a-z0-9]([-a-z0-9]*[a-z0-9])?$`)
 
 const (
 	testThis   = "/test all"
@@ -265,7 +263,7 @@ func TestCommentBodyMatches(t *testing.T) {
 		},
 	}
 	for _, tc := range testcases {
-		actualJobs, _ := c.MatchingPresubmits(tc.repo, tc.body, regexp.MustCompile(`/ok-to-test`).MatchString(tc.body), noChangesProvider)
+		actualJobs := c.MatchingPresubmits(tc.repo, tc.body, regexp.MustCompile(`/ok-to-test`).MatchString(tc.body))
 		match := true
 		if len(actualJobs) != len(tc.expectedJobs) {
 			match = false
@@ -351,7 +349,7 @@ func TestRetestPresubmits(t *testing.T) {
 		},
 	}
 	for _, tc := range testcases {
-		actualContexts, _ := c.RetestPresubmits("org/repo", tc.skipContexts, tc.runContexts, noChangesProvider)
+		actualContexts := c.RetestPresubmits("org/repo", tc.skipContexts, tc.runContexts)
 		match := true
 		if len(actualContexts) != len(tc.expectedContexts) {
 			match = false
@@ -652,5 +650,167 @@ func TestNoDuplicateJobs(t *testing.T) {
 			t.Errorf("Found duplicate job in periodic %s.", j.Name)
 		}
 		allJobs[j.Name] = true
+	}
+}
+
+func TestMergePreset(t *testing.T) {
+	tcs := []struct {
+		name      string
+		jobLabels map[string]string
+		pod       *kube.PodSpec
+		presets   []Preset
+
+		shouldError  bool
+		numEnv       int
+		numVol       int
+		numVolMounts int
+	}{
+		{
+			name:      "no pod spec",
+			jobLabels: map[string]string{"foo": "bar"},
+			pod:       nil,
+			presets: []Preset{
+				{
+					Labels: map[string]string{"foo": "bar"},
+					Env:    []kube.EnvVar{{Name: "baz"}},
+				},
+			},
+		},
+		{
+			name:      "one volume",
+			jobLabels: map[string]string{"foo": "bar"},
+			pod:       &kube.PodSpec{},
+			presets: []Preset{
+				{
+					Labels:  map[string]string{"foo": "bar"},
+					Volumes: []kube.Volume{{Name: "baz"}},
+				},
+			},
+			numVol: 1,
+		},
+		{
+			name:      "wrong label",
+			jobLabels: map[string]string{"foo": "nope"},
+			pod:       &kube.PodSpec{},
+			presets: []Preset{
+				{
+					Labels:  map[string]string{"foo": "bar"},
+					Volumes: []kube.Volume{{Name: "baz"}},
+				},
+			},
+		},
+		{
+			name:      "conflicting volume name",
+			jobLabels: map[string]string{"foo": "bar"},
+			pod:       &kube.PodSpec{Volumes: []kube.Volume{{Name: "baz"}}},
+			presets: []Preset{
+				{
+					Labels:  map[string]string{"foo": "bar"},
+					Volumes: []kube.Volume{{Name: "baz"}},
+				},
+			},
+			shouldError: true,
+		},
+		{
+			name:      "non conflicting volume name",
+			jobLabels: map[string]string{"foo": "bar"},
+			pod:       &kube.PodSpec{Volumes: []kube.Volume{{Name: "baz"}}},
+			presets: []Preset{
+				{
+					Labels:  map[string]string{"foo": "bar"},
+					Volumes: []kube.Volume{{Name: "qux"}},
+				},
+			},
+			numVol: 2,
+		},
+		{
+			name:      "one env",
+			jobLabels: map[string]string{"foo": "bar"},
+			pod:       &kube.PodSpec{Containers: []kube.Container{{}}},
+			presets: []Preset{
+				{
+					Labels: map[string]string{"foo": "bar"},
+					Env:    []kube.EnvVar{{Name: "baz"}},
+				},
+			},
+			numEnv: 1,
+		},
+		{
+			name:      "one vm",
+			jobLabels: map[string]string{"foo": "bar"},
+			pod:       &kube.PodSpec{Containers: []kube.Container{{}}},
+			presets: []Preset{
+				{
+					Labels:       map[string]string{"foo": "bar"},
+					VolumeMounts: []kube.VolumeMount{{Name: "baz"}},
+				},
+			},
+			numVolMounts: 1,
+		},
+		{
+			name:      "one of each",
+			jobLabels: map[string]string{"foo": "bar"},
+			pod:       &kube.PodSpec{Containers: []kube.Container{{}}},
+			presets: []Preset{
+				{
+					Labels:       map[string]string{"foo": "bar"},
+					Env:          []kube.EnvVar{{Name: "baz"}},
+					VolumeMounts: []kube.VolumeMount{{Name: "baz"}},
+					Volumes:      []kube.Volume{{Name: "qux"}},
+				},
+			},
+			numEnv:       1,
+			numVol:       1,
+			numVolMounts: 1,
+		},
+		{
+			name:      "two vm",
+			jobLabels: map[string]string{"foo": "bar"},
+			pod:       &kube.PodSpec{Containers: []kube.Container{{}}},
+			presets: []Preset{
+				{
+					Labels:       map[string]string{"foo": "bar"},
+					VolumeMounts: []kube.VolumeMount{{Name: "baz"}, {Name: "foo"}},
+				},
+			},
+			numVolMounts: 2,
+		},
+	}
+	for _, tc := range tcs {
+		conf := &Config{
+			Presets: tc.presets,
+			Periodics: []Periodic{
+				{
+					Name:     "foo",
+					Labels:   tc.jobLabels,
+					Agent:    string(kube.JenkinsAgent),
+					Interval: "1h",
+					Spec:     tc.pod,
+				},
+			},
+		}
+		if err := parseConfig(conf); err == nil && tc.shouldError {
+			t.Fatalf("For test \"%s\": expected error but got none.", tc.name)
+		} else if err != nil && !tc.shouldError {
+			t.Fatalf("For test \"%s\": expected no error but got %v.", tc.name, err)
+		}
+		if tc.shouldError {
+			continue
+		}
+		pod := conf.Periodics[0].Spec
+		if pod == nil {
+			continue
+		}
+		if len(pod.Volumes) != tc.numVol {
+			t.Errorf("For test \"%s\": wrong number of volumes. Got %d, expected %d.", tc.name, len(pod.Volumes), tc.numVol)
+		}
+		for _, c := range pod.Containers {
+			if len(c.VolumeMounts) != tc.numVolMounts {
+				t.Errorf("For test \"%s\": wrong number of volume mounts. Got %d, expected %d.", tc.name, len(c.VolumeMounts), tc.numVolMounts)
+			}
+			if len(c.Env) != tc.numEnv {
+				t.Errorf("For test \"%s\": wrong number of env vars. Got %d, expected %d.", tc.name, len(c.Env), tc.numEnv)
+			}
+		}
 	}
 }

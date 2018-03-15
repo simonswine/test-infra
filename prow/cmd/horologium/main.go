@@ -26,17 +26,29 @@ import (
 	"k8s.io/test-infra/prow/config"
 	"k8s.io/test-infra/prow/cron"
 	"k8s.io/test-infra/prow/kube"
+	"k8s.io/test-infra/prow/logrusutil"
 	"k8s.io/test-infra/prow/pjutil"
 )
 
-var configPath = flag.String("config-path", "/etc/config/config", "Path to config.yaml.")
+type options struct {
+	configPath string
+}
+
+func gatherOptions() options {
+	o := options{}
+	flag.StringVar(&o.configPath, "config-path", "/etc/config/config", "Path to config.yaml.")
+	flag.Parse()
+	return o
+}
 
 func main() {
-	flag.Parse()
-	logrus.SetFormatter(&logrus.JSONFormatter{})
+	o := gatherOptions()
+	logrus.SetFormatter(
+		logrusutil.NewDefaultFieldsFormatter(nil, logrus.Fields{"component": "horologium"}),
+	)
 
 	configAgent := config.Agent{}
-	if err := configAgent.Start(*configPath); err != nil {
+	if err := configAgent.Start(o.configPath); err != nil {
 		logrus.WithError(err).Fatal("Error starting config agent.")
 	}
 
@@ -90,7 +102,7 @@ func sync(kc kubeClient, cfg *config.Config, cr cronClient, now time.Time) error
 		j, ok := latestJobs[p.Name]
 
 		if p.Cron == "" {
-			if !ok || (j.Complete() && now.Sub(j.Status.StartTime) > p.GetInterval()) {
+			if !ok || (j.Complete() && now.Sub(j.Status.StartTime.Time) > p.GetInterval()) {
 				if _, err := kc.CreateProwJob(pjutil.NewProwJob(pjutil.PeriodicSpec(p), p.Labels)); err != nil {
 					errs = append(errs, err)
 				}

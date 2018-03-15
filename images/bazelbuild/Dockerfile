@@ -28,6 +28,7 @@ RUN apt-get update && apt-get install -y --no-install-recommends \
     ca-certificates \
     file \
     git \
+    openssh-client \
     python \
     python-pip \
     rpm \
@@ -36,7 +37,7 @@ RUN apt-get update && apt-get install -y --no-install-recommends \
     zip \
     zlib1g-dev \
     && apt-get clean \
-    && pip install --upgrade setuptools wheel
+    && python -m pip install --upgrade pip setuptools wheel
 
 RUN wget -q https://dl.google.com/dl/cloudsdk/channels/rapid/google-cloud-sdk.tar.gz && \
     tar xf google-cloud-sdk.tar.gz && \
@@ -56,5 +57,5 @@ RUN INSTALLER="bazel-${BAZEL_VERSION}-installer-linux-x86_64.sh"; \
     chmod +x "${INSTALLER}" && "./${INSTALLER}" && rm "${INSTALLER}"
 
 WORKDIR /workspace
-COPY runner coalesce.py /usr/local/bin/
+COPY runner /usr/local/bin/
 ENTRYPOINT ["/bin/bash", "/usr/local/bin/runner"]

@@ -253,7 +253,7 @@ func TestHandleIssueComment(t *testing.T) {
 			StartsExactly: "pull-jib",
 		},
 		{
-			name:   "Rerun of run_if_changed job that has passed",
+			name:   "/test of run_if_changed job that has passed",
 			Author: "t",
 			Body:   "/test jub",
 			State:  "open",
@@ -355,6 +355,81 @@ func TestHandleIssueComment(t *testing.T) {
 						Brancher: config.Brancher{Branches: []string{"release"}},
 						Context:  "pull-jab",
 						Trigger:  `/test jab`,
+					},
+				},
+			},
+			ShouldReport: true,
+		},
+		{
+			name: "/retest of RunIfChanged job that doesn't need to run and hasn't run",
+
+			Author: "t",
+			Body:   "/retest",
+			State:  "open",
+			IsPR:   true,
+			Presubmits: map[string][]config.Presubmit{
+				"org/repo": {
+					{
+						Name:         "jeb",
+						RunIfChanged: "CHANGED2",
+						Context:      "pull-jeb",
+						Trigger:      `/test all`,
+					},
+				},
+			},
+			ShouldReport: true,
+		},
+		{
+			name: "explicit /test for RunIfChanged job that doesn't need to run",
+
+			Author: "t",
+			Body:   "/test pull-jeb",
+			State:  "open",
+			IsPR:   true,
+			Presubmits: map[string][]config.Presubmit{
+				"org/repo": {
+					{
+						Name:         "jeb",
+						RunIfChanged: "CHANGED2",
+						Context:      "pull-jib",
+						Trigger:      `/test (all|pull-jeb)`,
+					},
+				},
+			},
+			ShouldBuild: true,
+		},
+		{
+			name:   "/test all of run_if_changed job that has passed and needs to run",
+			Author: "t",
+			Body:   "/test all",
+			State:  "open",
+			IsPR:   true,
+			Presubmits: map[string][]config.Presubmit{
+				"org/repo": {
+					{
+						Name:         "jub",
+						RunIfChanged: "CHANGED",
+						Context:      "pull-jub",
+						Trigger:      `/test jub`,
+					},
+				},
+			},
+			ShouldBuild:   true,
+			StartsExactly: "pull-jub",
+		},
+		{
+			name:   "/test all of run_if_changed job that has passed and doesnt need to run",
+			Author: "t",
+			Body:   "/test all",
+			State:  "open",
+			IsPR:   true,
+			Presubmits: map[string][]config.Presubmit{
+				"org/repo": {
+					{
+						Name:         "jub",
+						RunIfChanged: "CHANGED2",
+						Context:      "pull-jub",
+						Trigger:      `/test jub`,
 					},
 				},
 			},

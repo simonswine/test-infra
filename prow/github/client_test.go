@@ -391,6 +391,44 @@ func TestRemoveLabel(t *testing.T) {
 	}
 }
 
+func TestRemoveLabelFailsOnOtherThan404(t *testing.T) {
+	ts := httptest.NewTLSServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if r.Method != http.MethodDelete {
+			t.Errorf("Bad method: %s", r.Method)
+		}
+		if r.URL.Path != "/repos/k8s/kuber/issues/5/labels/yay" {
+			t.Errorf("Bad request path: %s", r.URL.Path)
+		}
+		http.Error(w, "403 Forbidden", http.StatusForbidden)
+	}))
+	defer ts.Close()
+	c := getClient(ts.URL)
+	err := c.RemoveLabel("k8s", "kuber", 5, "yay")
+	if err == nil {
+		t.Errorf("Expected error but got none")
+	}
+	if _, ok := err.(*LabelNotFound); ok {
+		t.Fatalf("Expected error not to be a 404: %v", err)
+	}
+}
+
+func TestRemoveLabelNotFound(t *testing.T) {
+	ts := httptest.NewTLSServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		http.Error(w, `{"message": "Label does not exist"}`, 404)
+	}))
+	defer ts.Close()
+	c := getClient(ts.URL)
+	err := c.RemoveLabel("any", "old", 3, "label")
+
+	if err == nil {
+		t.Fatalf("RemoveLabel expected an error, got none")
+	}
+
+	if _, ok := err.(*LabelNotFound); !ok {
+		t.Fatalf("RemoveLabel expected LabelNotFound error, got %v", err)
+	}
+}
+
 func TestAssignIssue(t *testing.T) {
 	ts := httptest.NewTLSServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		if r.Method != http.MethodPost {
@@ -1154,7 +1192,7 @@ func TestThrottle(t *testing.T) {
 		t.Errorf("Never throttled")
 	}
 	if err := ctx.Err(); err != context.Canceled {
-		t.Errorf("Expected context cancelation did not happen: %v", err)
+		t.Errorf("Expected context cancellation did not happen: %v", err)
 	}
 }
 
@@ -1200,37 +1238,111 @@ func TestRemoveBranchProtection(t *testing.T) {
 }
 
 func TestUpdateBranchProtection(t *testing.T) {
-	ts := httptest.NewTLSServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		if r.Method != http.MethodPut {
-			t.Errorf("Bad method: %s", r.Method)
+	cases := []struct {
+		name     string
+		contexts []string
+		pushers  []string
+		err      bool
+	}{
+		{
+			name:     "both",
+			contexts: []string{"foo-pr-test", "other"},
+			pushers:  []string{"movers", "awesome-team", "shakers"},
+			err:      false,
+		},
+		{
+			name:     "empty contexts",
+			contexts: []string{"foo-pr-test", "other"},
+			pushers:  []string{},
+			err:      false,
+		},
+		{
+			name:     "empty pushers",
+			contexts: []string{},
+			pushers:  []string{"movers", "awesome-team", "shakers"},
+			err:      false,
+		},
+		{
+			name:     "nil contexts",
+			contexts: nil,
+			pushers:  []string{"movers", "awesome-team", "shakers"},
+			err:      true,
+		},
+		{
+			name:     "nil pushers",
+			contexts: []string{"foo-pr-test", "other"},
+			pushers:  nil,
+			err:      true,
+		},
+		{
+			name:     "nil both",
+			contexts: nil,
+			pushers:  nil,
+			err:      true,
+		},
+	}
+
+	for _, tc := range cases {
+		ts := httptest.NewTLSServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+			if r.Method != http.MethodPut {
+				t.Errorf("Bad method: %s", r.Method)
+			}
+			if r.URL.Path != "/repos/org/repo/branches/master/protection" {
+				t.Errorf("Bad request path: %s", r.URL.Path)
+			}
+			b, err := ioutil.ReadAll(r.Body)
+			if err != nil {
+				t.Fatalf("Could not read request body: %v", err)
+			}
+			var bpr BranchProtectionRequest
+			if err := json.Unmarshal(b, &bpr); err != nil {
+				t.Errorf("Could not unmarshal request: %v", err)
+			}
+			switch {
+			case len(bpr.RequiredStatusChecks.Contexts) != len(tc.contexts):
+				t.Errorf("Bad contexts: %v", bpr.RequiredStatusChecks.Contexts)
+			case len(bpr.Restrictions.Teams) != len(tc.pushers):
+				t.Errorf("Bad teams: %v", bpr.Restrictions.Teams)
+			default:
+				mc := map[string]bool{}
+				for _, k := range tc.contexts {
+					mc[k] = true
+				}
+				var missing []string
+				for _, k := range bpr.RequiredStatusChecks.Contexts {
+					if mc[k] != true {
+						missing = append(missing, k)
+					}
+				}
+				if n := len(missing); n > 0 {
+					t.Errorf("%s: missing %d required contexts: %v", tc.name, n, missing)
+				}
+				mp := map[string]bool{}
+				for _, k := range tc.pushers {
+					mp[k] = true
+				}
+				missing = nil
+				for _, k := range bpr.Restrictions.Teams {
+					if mp[k] != true {
+						missing = append(missing, k)
+					}
+				}
+				if n := len(missing); n > 0 {
+					t.Errorf("%s: missing %d pushers: %v", tc.name, n, missing)
+				}
+			}
+			http.Error(w, "200 OK", http.StatusOK)
+		}))
+		defer ts.Close()
+		c := getClient(ts.URL)
+
+		err := c.UpdateBranchProtection("org", "repo", "master", tc.contexts, tc.pushers)
+		if tc.err && err == nil {
+			t.Errorf("%s: expected error failed to occur", tc.name)
 		}
-		if r.URL.Path != "/repos/org/repo/branches/master/protection" {
-			t.Errorf("Bad request path: %s", r.URL.Path)
+		if !tc.err && err != nil {
+			t.Errorf("%s: received unexpected error: %v", tc.name, err)
 		}
-		b, err := ioutil.ReadAll(r.Body)
-		if err != nil {
-			t.Fatalf("Could not read request body: %v", err)
-		}
-		var bpr BranchProtectionRequest
-		if err := json.Unmarshal(b, &bpr); err != nil {
-			t.Errorf("Could not unmarshal request: %v", err)
-		}
-		switch {
-		case len(bpr.RequiredStatusChecks.Contexts) != 2:
-			t.Errorf("Bad contexts: %v", bpr.RequiredStatusChecks.Contexts)
-		case bpr.RequiredStatusChecks.Contexts[0] != "foo-pr-test":
-			t.Errorf("Bad context name: %v", bpr.RequiredStatusChecks.Contexts)
-		case len(bpr.Restrictions.Teams) != 3:
-			t.Errorf("Bad teams: %v", bpr.Restrictions.Teams)
-		case bpr.Restrictions.Teams[1] != "awesome-team":
-			t.Errorf("Bad team: %v", bpr.Restrictions.Teams)
-		}
-		http.Error(w, "200 OK", http.StatusOK)
-	}))
-	defer ts.Close()
-	c := getClient(ts.URL)
-	if err := c.UpdateBranchProtection("org", "repo", "master", []string{"foo-pr-test", "other"}, []string{"movers", "awesome-team", "shakers"}); err != nil {
-		t.Errorf("Unexpected error: %v", err)
 	}
 }
 
@@ -1256,6 +1368,55 @@ func TestClearMilestone(t *testing.T) {
 	defer ts.Close()
 	c := getClient(ts.URL)
 	if err := c.ClearMilestone("k8s", "kuber", 5); err != nil {
+		t.Errorf("Didn't expect error: %v", err)
+	}
+}
+
+func TestSetMilestone(t *testing.T) {
+	newMilestone := 42
+	ts := httptest.NewTLSServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if r.Method != http.MethodPatch {
+			t.Errorf("Bad method: %s", r.Method)
+		}
+		if r.URL.Path != "/repos/k8s/kuber/issues/5" {
+			t.Errorf("Bad request path: %s", r.URL.Path)
+		}
+		b, err := ioutil.ReadAll(r.Body)
+		if err != nil {
+			t.Fatalf("Could not read request body: %v", err)
+		}
+		var issue struct {
+			Milestone *int `json:"milestone,omitempty"`
+		}
+		if err := json.Unmarshal(b, &issue); err != nil {
+			t.Fatalf("Could not unmarshal request: %v", err)
+		}
+		if issue.Milestone == nil {
+			t.Fatal("Milestone was not set.")
+		}
+		if *issue.Milestone != newMilestone {
+			t.Errorf("Expected milestone to be set to %d, but got %d.", newMilestone, *issue.Milestone)
+		}
+	}))
+	defer ts.Close()
+	c := getClient(ts.URL)
+	if err := c.SetMilestone("k8s", "kuber", 5, newMilestone); err != nil {
+		t.Errorf("Didn't expect error: %v", err)
+	}
+}
+
+func TestListMilestones(t *testing.T) {
+	ts := httptest.NewTLSServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if r.Method != http.MethodGet {
+			t.Errorf("Bad method: %s", r.Method)
+		}
+		if r.URL.Path != "/repos/k8s/kuber/milestones" {
+			t.Errorf("Bad request path: %s", r.URL.Path)
+		}
+	}))
+	defer ts.Close()
+	c := getClient(ts.URL)
+	if err, _ := c.ListMilestones("k8s", "kuber"); err != nil {
 		t.Errorf("Didn't expect error: %v", err)
 	}
 }

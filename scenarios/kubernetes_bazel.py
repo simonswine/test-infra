@@ -200,6 +200,8 @@ def main(args):
             res = 1
         else:
             try:
+                if args.version_suffix:
+                    version += args.version_suffix
                 gcs_build = '%s/%s' % (args.gcs, version)
                 bazel.check('run', '//:push-build', '--', gcs_build)
                 # log push-build location to path child jobs can find
@@ -208,11 +210,13 @@ def main(args):
                 gcs_shared = os.path.join(args.gcs_shared, pull_refs, 'bazel-build-location.txt')
                 if pull_refs:
                     upload_string(gcs_shared, gcs_build)
+                if args.publish_version:
+                    upload_string(args.publish_version, version)
             except subprocess.CalledProcessError as exp:
                 res = exp.returncode
 
     # Coalesce test results into one file for upload.
-    check(test_infra('images/bazelbuild/coalesce.py'))
+    check(test_infra('hack/coalesce.py'))
 
     echo_result(res)
     if res != 0:
@@ -241,6 +245,10 @@ def create_parser():
         default="gs://kubernetes-jenkins/shared-results/",
         help='If $PULL_REFS is set push build location to this bucket')
     parser.add_argument(
+        '--publish-version',
+        help='publish GCS file here with the build version, like ci/latest.txt',
+    )
+    parser.add_argument(
         '--test', help='Bazel test target patterns, split by one space')
     parser.add_argument(
         '--manual-test',
@@ -253,7 +261,10 @@ def create_parser():
         default='gs://kubernetes-release-dev/bazel',
         help='GCS path for where to push build')
     parser.add_argument(
-        '--batch', action='store_true', help=" run Bazel in batch mode")
+        '--version-suffix',
+        help='version suffix for build pushing')
+    parser.add_argument(
+        '--batch', action='store_true', help='run Bazel in batch mode')
     return parser
 
 def parse_args(args=None):

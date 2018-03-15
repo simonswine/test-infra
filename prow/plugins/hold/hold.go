@@ -47,13 +47,17 @@ func init() {
 
 func helpProvider(config *plugins.Configuration, enabledRepos []string) (*pluginhelp.PluginHelp, error) {
 	// The Config field is omitted because this plugin is not configurable.
-	return &pluginhelp.PluginHelp{
-			Description: "The hold plugin allows anyone to add or remove the '" + label + "' label from a pull request in order to temporarily prevent the PR from merging without withholding approval.",
-			WhoCanUse:   "Anyone can use the /hold command to add or remove the '" + label + "' label.",
-			Usage:       "/hold [cancel]",
-			Examples:    []string{"/hold", "/hold cancel"},
-		},
-		nil
+	pluginHelp := &pluginhelp.PluginHelp{
+		Description: "The hold plugin allows anyone to add or remove the '" + label + "' label from a pull request in order to temporarily prevent the PR from merging without withholding approval.",
+	}
+	pluginHelp.AddCommand(pluginhelp.Command{
+		Usage:       "/hold [cancel]",
+		Description: "Adds or removes the `" + label + "` label which is used to indicate that the PR should not be automatically merged.",
+		Featured:    false,
+		WhoCanUse:   "Anyone can use the /hold command to add or remove the '" + label + "' label.",
+		Examples:    []string{"/hold", "/hold cancel"},
+	})
+	return pluginHelp, nil
 }
 
 type githubClient interface {

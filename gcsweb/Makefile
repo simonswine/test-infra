@@ -19,13 +19,13 @@ BIN := gcsweb
 PKG := k8s.io/test-infra/gcsweb
 
 # Where to push the docker image.
-REGISTRY ?= k8s.gcr.io
+REGISTRY ?= staging-k8s.gcr.io
 
 # Which architecture to build - see $(ALL_ARCH) for options.
 ARCH ?= amd64
 
 # The version string.
-VERSION := v1.0.5
+VERSION := v1.0.6
 
 ###
 ### These variables should not need tweaking.
@@ -54,7 +54,7 @@ endif
 
 IMAGE := $(REGISTRY)/$(BIN)-$(ARCH)
 
-BUILD_IMAGE ?= golang:1.9-alpine
+BUILD_IMAGE ?= golang:1.9.3-alpine
 
 # If you want to build all binaries, see the 'all-build' rule.
 # If you want to build all containers, see the 'all-container' rule.
@@ -114,7 +114,7 @@ container-name:
 
 push: .push-$(DOTFILE_IMAGE) push-name
 .push-$(DOTFILE_IMAGE): .container-$(DOTFILE_IMAGE)
-	@gcloud docker -- push $(IMAGE):$(VERSION)
+	@docker push $(IMAGE):$(VERSION)
 	@docker images -q $(IMAGE):$(VERSION) > $@
 
 push-name:

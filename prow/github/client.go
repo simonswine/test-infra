@@ -82,7 +82,7 @@ type httpClient interface {
 	Do(req *http.Request) (*http.Response, error)
 }
 
-// Inteface for how prow interacts with the graphql client, which we may throttle.
+// Interface for how prow interacts with the graphql client, which we may throttle.
 type gqlClient interface {
 	Query(ctx context.Context, q interface{}, vars map[string]interface{}) error
 }
@@ -294,11 +294,15 @@ func (c *Client) requestRaw(r *request) (int, []byte, error) {
 
 // Retry on transport failures. Retries on 500s, retries after sleep on
 // ratelimit exceeded, and retries 404s a couple times.
+// This function closes the response body iff it also returns an error.
 func (c *Client) requestRetry(method, path, accept string, body interface{}) (*http.Response, error) {
 	var resp *http.Response
 	var err error
 	backoff := initialDelay
 	for retries := 0; retries < maxRetries; retries++ {
+		if retries > 0 && resp != nil {
+			resp.Body.Close()
+		}
 		resp, err = c.doRequest(method, path, accept, body)
 		if err == nil {
 			if resp.StatusCode == 404 && retries < max404Retries {
@@ -308,7 +312,6 @@ func (c *Client) requestRetry(method, path, accept string, body interface{}) (*h
 				// retry more than a couple times in this case, because a 404 may
 				// be caused by a bad API call and we'll just burn through API
 				// tokens.
-				resp.Body.Close()
 				c.time.Sleep(backoff)
 				backoff *= 2
 			} else if resp.StatusCode == 403 {
@@ -320,23 +323,28 @@ func (c *Client) requestRetry(method, path, accept string, body interface{}) (*h
 						// Sleep an extra second plus how long GitHub wants us to
 						// sleep. If it's going to take too long, then break.
 						sleepTime := c.time.Until(time.Unix(int64(t), 0)) + time.Second
-						if sleepTime > 0 && sleepTime < maxSleepTime {
+						if sleepTime < maxSleepTime {
 							c.time.Sleep(sleepTime)
 						} else {
+							err = fmt.Errorf("sleep time for token reset exceeds max sleep time (%v > %v)", sleepTime, maxSleepTime)
+							resp.Body.Close()
 							break
 						}
+					} else {
+						err = fmt.Errorf("failed to parse rate limit reset unix time %q: %v", resp.Header.Get("X-RateLimit-Reset"), err)
+						resp.Body.Close()
+						break
 					}
 				} else if oauthScopes := resp.Header.Get("X-Accepted-OAuth-Scopes"); len(oauthScopes) > 0 {
 					err = fmt.Errorf("is the account using at least one of the following oauth scopes?: %s", oauthScopes)
+					resp.Body.Close()
 					break
 				}
-				resp.Body.Close()
 			} else if resp.StatusCode < 500 {
 				// Normal, happy case.
 				break
 			} else {
 				// Retry 500 after a break.
-				resp.Body.Close()
 				c.time.Sleep(backoff)
 				backoff *= 2
 			}
@@ -440,6 +448,34 @@ func (c *Client) IsMember(org, user string) (bool, error) {
 	}
 	// Should be unreachable.
 	return false, fmt.Errorf("unexpected status: %d", code)
+}
+
+// ListOrgMembers list all users who are members of an organization. If the authenticated
+// user is also a member of this organization then both concealed and public members
+// will be returned.
+//
+// https://developer.github.com/v3/orgs/members/#members-list
+func (c *Client) ListOrgMembers(org string) ([]TeamMember, error) {
+	c.log("ListOrgMembers", org)
+	if c.fake {
+		return nil, nil
+	}
+	path := fmt.Sprintf("/orgs/%s/members", org)
+	var teamMembers []TeamMember
+	err := c.readPaginatedResults(
+		path,
+		"",
+		func() interface{} {
+			return &[]TeamMember{}
+		},
+		func(obj interface{}) {
+			teamMembers = append(teamMembers, *(obj.(*[]TeamMember))...)
+		},
+	)
+	if err != nil {
+		return nil, err
+	}
+	return teamMembers, nil
 }
 
 // CreateComment creates a comment on the issue.
@@ -820,6 +856,12 @@ func (c *Client) RemoveBranchProtection(org, repo, branch string) error {
 
 func (c *Client) UpdateBranchProtection(org, repo, branch string, requiredContexts []string, pushers []string) error {
 	c.log("UpdateBranchProtection", org, repo, branch, requiredContexts, pushers)
+	if requiredContexts == nil {
+		return errors.New("requiredContexts cannot be nil")
+	}
+	if pushers == nil {
+		return errors.New("pushers cannot be nil")
+	}
 	_, err := c.request(&request{
 		method: http.MethodPut,
 		path:   fmt.Sprintf("%s/repos/%s/%s/branches/%s/protection", c.base, org, repo, branch),
@@ -832,6 +874,7 @@ func (c *Client) UpdateBranchProtection(org, repo, branch string, requiredContex
 			RequiredPullRequestReviews: nil,
 			Restrictions: Restrictions{
 				Teams: pushers,
+				Users: []string{},
 			},
 		},
 		exitCodes: []int{200},
@@ -930,15 +973,62 @@ func (c *Client) AddLabel(org, repo string, number int, label string) error {
 	return err
 }
 
+// LabelNotFound indicates that a label is not attached to an issue. For example, removing a
+// label from an issue, when the issue does not have that label.
+type LabelNotFound struct {
+	Owner, Repo string
+	Number      int
+	Label       string
+}
+
+func (e *LabelNotFound) Error() string {
+	return fmt.Sprintf("label %q does not exist on %s/%s/%d", e.Label, e.Owner, e.Repo, e.Number)
+}
+
+type githubError struct {
+	Message string `json:"message,omitempty"`
+}
+
 func (c *Client) RemoveLabel(org, repo string, number int, label string) error {
 	c.log("RemoveLabel", org, repo, number, label)
-	_, err := c.request(&request{
+	code, body, err := c.requestRaw(&request{
 		method: http.MethodDelete,
 		path:   fmt.Sprintf("%s/repos/%s/%s/issues/%d/labels/%s", c.base, org, repo, number, label),
 		// GitHub sometimes returns 200 for this call, which is a bug on their end.
+		// Do not expect a 404 exit code and handle it separately because we need
+		// to introspect the request's response body.
 		exitCodes: []int{200, 204},
-	}, nil)
-	return err
+	})
+
+	switch {
+	case code == 200 || code == 204:
+		// If our code was 200 or 204, no error info.
+		return nil
+	case code == 404:
+		// continue
+	case err != nil:
+		return err
+	default:
+		return fmt.Errorf("unexpected status code: %v", code)
+	}
+
+	ge := &githubError{}
+	if err := json.Unmarshal(body, ge); err != nil {
+		return err
+	}
+
+	// If the error was because the label was not found, annotate that error with type information.
+	if ge.Message == "Label does not exist" {
+		return &LabelNotFound{
+			Owner:  org,
+			Repo:   repo,
+			Number: number,
+			Label:  label,
+		}
+	}
+
+	// Otherwise we got some other 404 error.
+	return fmt.Errorf("deleting label 404: %s", ge.Message)
 }
 
 type MissingUsers struct {
@@ -1347,25 +1437,30 @@ type UnmergablePRError string
 
 func (e UnmergablePRError) Error() string { return string(e) }
 
+type UnmergablePRBaseChangedError string
+
+func (e UnmergablePRBaseChangedError) Error() string { return string(e) }
+
 // Merge merges a PR.
 func (c *Client) Merge(org, repo string, pr int, details MergeDetails) error {
 	c.log("Merge", org, repo, pr, details)
-	var res struct {
-		Message string `json:"message"`
-	}
+	ge := githubError{}
 	ec, err := c.request(&request{
 		method:      http.MethodPut,
 		path:        fmt.Sprintf("%s/repos/%s/%s/pulls/%d/merge", c.base, org, repo, pr),
 		requestBody: &details,
 		exitCodes:   []int{200, 405, 409},
-	}, &res)
+	}, &ge)
 	if err != nil {
 		return err
 	}
 	if ec == 405 {
-		return UnmergablePRError(res.Message)
+		if strings.Contains(ge.Message, "Base branch was modified") {
+			return UnmergablePRBaseChangedError(ge.Message)
+		}
+		return UnmergablePRError(ge.Message)
 	} else if ec == 409 {
-		return ModifiedHeadError(res.Message)
+		return ModifiedHeadError(ge.Message)
 	}
 
 	return nil
@@ -1486,4 +1581,46 @@ func (c *Client) ClearMilestone(org, repo string, num int) error {
 		exitCodes:   []int{200},
 	}, nil)
 	return err
+}
+
+// SetMilestone sets the milestone from the specified issue (if it is a valid milestone)
+func (c *Client) SetMilestone(org, repo string, issueNum, milestoneNum int) error {
+	c.log("SetMilestone", org, repo, issueNum, milestoneNum)
+
+	issue := &struct {
+		Milestone int `json:"milestone"`
+	}{Milestone: milestoneNum}
+
+	_, err := c.request(&request{
+		method:      http.MethodPatch,
+		path:        fmt.Sprintf("%s/repos/%v/%v/issues/%d", c.base, org, repo, issueNum),
+		requestBody: &issue,
+		exitCodes:   []int{200},
+	}, nil)
+	return err
+}
+
+// ListMilestones list all milestones in a repo
+// https://developer.github.com/v3/issues/milestones/#list-milestones-for-a-repository/
+func (c *Client) ListMilestones(org, repo string) ([]Milestone, error) {
+	c.log("ListMilestones", org)
+	if c.fake {
+		return nil, nil
+	}
+	path := fmt.Sprintf("/repos/%s/%s/milestones", org, repo)
+	var milestones []Milestone
+	err := c.readPaginatedResults(
+		path,
+		"",
+		func() interface{} {
+			return &[]Milestone{}
+		},
+		func(obj interface{}) {
+			milestones = append(milestones, *(obj.(*[]Milestone))...)
+		},
+	)
+	if err != nil {
+		return nil, err
+	}
+	return milestones, nil
 }

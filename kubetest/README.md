@@ -24,6 +24,12 @@ Note that developers frequently use `kubetest` by calling `go run hack/e2e.go`
 in the `kubernetes/kubernetes` repository. This `hack/e2e.go` program is a
 wrapper around updating `kubetest` (at most once a day) before calling it.
 
+If you're making a change to kubetest, watch the canary jobs after it has merged;
+these run the latest images of `kubekins-e2e`, and thus don't have to wait
+for a version bump in the prow config.  The canary jobs are used to give early
+signal on whether new kubetest features are working as intended, before bumping
+the image for general e2e tests.
+
 ## Installation
 
 Please run `go get -u k8s.io/test-infra/kubetest` to install kubetest.
@@ -72,7 +78,7 @@ a release `--extract=release/stable` or `--extract=ci/latest-1.8`.
 Note that you can extract 1 or 2 versions. Using 2 versions is useful for skew
 and upgrade testing.
 
-See [extract.go] for further details.
+See [extract_k8s.go] for further details.
 
 
 ## Cluster-lifecycle
@@ -172,7 +178,7 @@ skew directory, potentially to upgrade/downgrade kubernetes to another version.
 A simple example is:<br>
 `kubetest --up --check-version-skew=false --extract=v1.8.0-beta.1 
 --extract=v1.7.5 --upgrade_args=--ginkgo.focus="Feature:SomeUpgrade" 
---gcp-project=google.com:some-project -v`
+--gcp-project=google.com:some-project`
 
 The command runs all (and only) upgrade tests tagged with `Feature:SomeUpgrade` 
 label on GCE. The command downloads `v1.7.5` and `v1.8.0-beta.1` releases,
@@ -197,7 +203,7 @@ manifests to gcs. The command is very similar:
 `kubetest --build --stage=gs://some/path/to/v1.8.0-beta.1  --check-version-skew=false 
 --extract=gs://some/path/to/v1.8.0-beta.1  --extract=v1.7.5 
 --upgrade_args=--ginkgo.focus="Feature:SomeUpgrade" 
---gcp-project=google.com:some-project -v`
+--gcp-project=google.com:some-project`
 
 If you already have release of a specific version, you do not need to fetch the 
 release again. For instance, if you have `v1.7.5` release and its directory is at the 
@@ -205,12 +211,12 @@ right path, the command below does the same as above:
 `kubetest --build --stage=gs://some/path/to/v1.8.0-beta.1  --check-version-skew=false 
 --extract=gs://some/path/to/v1.8.0-beta.1 
 --upgrade_args=--ginkgo.focus="Feature:SomeUpgrade" 
---gcp-project=google.com:some-project -v`
+--gcp-project=google.com:some-project`
 
 [bootstrap.py]: /jenkins/bootstrap.py
 [boskos]: /boskos
 [e2e testing]: https://git.k8s.io/community/contributors/devel/e2e-tests.md
-[extract.go]: /kubetest/extract.go
+[extract_k8s.go]: /kubetest/extract_k8s.go
 [ginkgo]: https://github.com/onsi/ginkgo
 [kubekins-e2e]: /images/kubekins-e2e
 [kubekins-e2e-prow]: /images/e2e-prow

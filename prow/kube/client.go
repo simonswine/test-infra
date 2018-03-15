@@ -32,6 +32,7 @@ import (
 
 	"github.com/ghodss/yaml"
 	"github.com/sirupsen/logrus"
+	"k8s.io/api/core/v1"
 	"k8s.io/apimachinery/pkg/util/sets"
 )
 
@@ -66,13 +67,15 @@ type Client struct {
 	fake      bool
 
 	hiddenReposProvider func() []string
+	hiddenOnly          bool
 }
 
 // SetHiddenRepoProvider takes a continuation that fetches a list of orgs and repos for
 // which PJs should not be returned.
 // NOTE: This function is not thread safe and should be called before the client is in use.
-func (c *Client) SetHiddenReposProvider(p func() []string) {
+func (c *Client) SetHiddenReposProvider(p func() []string, hiddenOnly bool) {
 	c.hiddenReposProvider = p
+	c.hiddenOnly = hiddenOnly
 }
 
 // Namespace returns a copy of the client pointing at the specified namespace.
@@ -413,7 +416,13 @@ func (c *Client) DeletePod(name string) error {
 }
 
 func (c *Client) CreateProwJob(j ProwJob) (ProwJob, error) {
-	c.log("CreateProwJob", j)
+	var representation string
+	if out, err := json.Marshal(j); err == nil {
+		representation = string(out[:])
+	} else {
+		representation = fmt.Sprintf("%v", j)
+	}
+	c.log("CreateProwJob", representation)
 	var retJob ProwJob
 	err := c.request(&request{
 		method:      http.MethodPost,
@@ -430,8 +439,12 @@ func (c *Client) getHiddenRepos() sets.String {
 	return sets.NewString(c.hiddenReposProvider()...)
 }
 
-func shouldHide(pj *ProwJob, hiddenRepos sets.String) bool {
-	return hiddenRepos.HasAny(fmt.Sprintf("%s/%s", pj.Spec.Refs.Org, pj.Spec.Refs.Repo), pj.Spec.Refs.Org)
+func shouldHide(pj *ProwJob, hiddenRepos sets.String, showHiddenOnly bool) bool {
+	shouldHide := hiddenRepos.HasAny(fmt.Sprintf("%s/%s", pj.Spec.Refs.Org, pj.Spec.Refs.Repo), pj.Spec.Refs.Org)
+	if showHiddenOnly {
+		return !shouldHide
+	}
+	return shouldHide
 }
 
 func (c *Client) GetProwJob(name string) (ProwJob, error) {
@@ -440,7 +453,7 @@ func (c *Client) GetProwJob(name string) (ProwJob, error) {
 	err := c.request(&request{
 		path: fmt.Sprintf("/apis/prow.k8s.io/v1/namespaces/%s/prowjobs/%s", c.namespace, name),
 	}, &pj)
-	if err == nil && shouldHide(&pj, c.getHiddenRepos()) {
+	if err == nil && shouldHide(&pj, c.getHiddenRepos(), c.hiddenOnly) {
 		pj = ProwJob{}
 		// Revealing the existence of this prow job is ok because the the pj name cannot be used to
 		// retrieve the pj itself. Furthermore, a timing attack could differentiate true 404s from
@@ -464,7 +477,7 @@ func (c *Client) ListProwJobs(selector string) ([]ProwJob, error) {
 		hidden := c.getHiddenRepos()
 		var pjs []ProwJob
 		for _, pj := range jl.Items {
-			if !shouldHide(&pj, hidden) {
+			if !shouldHide(&pj, hidden, c.hiddenOnly) {
 				pjs = append(pjs, pj)
 			}
 		}
@@ -492,7 +505,7 @@ func (c *Client) ReplaceProwJob(name string, job ProwJob) (ProwJob, error) {
 	return retJob, err
 }
 
-func (c *Client) CreatePod(p Pod) (Pod, error) {
+func (c *Client) CreatePod(p v1.Pod) (Pod, error) {
 	c.log("CreatePod", p)
 	var retPod Pod
 	err := c.request(&request{

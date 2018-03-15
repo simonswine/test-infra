@@ -18,12 +18,12 @@ package main
 
 import (
 	"encoding/json"
-	"encoding/xml"
 	"errors"
 	"flag"
 	"fmt"
 	"io/ioutil"
 	"log"
+	"math/rand"
 	"os"
 	"os/exec"
 	"os/signal"
@@ -34,6 +34,9 @@ import (
 	"time"
 
 	"k8s.io/test-infra/boskos/client"
+	"k8s.io/test-infra/kubetest/dind"
+	"k8s.io/test-infra/kubetest/process"
+	"k8s.io/test-infra/kubetest/util"
 
 	"github.com/spf13/pflag"
 )
@@ -48,6 +51,7 @@ var (
 	verbose   = false
 	timeout   = time.Duration(0)
 	boskos    = client.NewClient(os.Getenv("JOB_NAME"), "http://boskos")
+	control   = process.NewControl(timeout, interrupt, terminate, verbose)
 )
 
 type options struct {
@@ -59,6 +63,7 @@ type options struct {
 	cluster             string
 	clusterIPRange      string
 	deployment          string
+	dindImage           string
 	down                bool
 	dump                string
 	extract             extractStrategies
@@ -70,6 +75,8 @@ type options struct {
 	gcpMasterImage      string
 	gcpNetwork          string
 	gcpNodeImage        string
+	gcpImageFamily      string
+	gcpImageProject     string
 	gcpNodes            string
 	gcpProject          string
 	gcpProjectType      string
@@ -77,6 +84,7 @@ type options struct {
 	gcpRegion           string
 	gcpZone             string
 	ginkgoParallel      ginkgoParallelValue
+	kubecfg             string
 	kubemark            bool
 	kubemarkMasterSize  string
 	kubemarkNodes       string // TODO(fejta): switch to int after migration
@@ -109,14 +117,15 @@ type options struct {
 
 func defineFlags() *options {
 	o := options{}
-	flag.Var(&o.build, "build", "Rebuild k8s binaries, optionally forcing (release|quick|bazel) strategy")
+	flag.Var(&o.build, "build", "Rebuild k8s binaries, optionally forcing (release|quick|bazel|dind) strategy")
 	flag.Var(&o.buildFederation, "build-federation", "Rebuild federation binaries, optionally forcing (release|quick|bazel) strategy")
 	flag.BoolVar(&o.charts, "charts", false, "If true, run charts tests")
 	flag.BoolVar(&o.checkSkew, "check-version-skew", true, "Verify client and server versions match")
 	flag.BoolVar(&o.checkLeaks, "check-leaked-resources", false, "Ensure project ends with the same resources")
 	flag.StringVar(&o.cluster, "cluster", "", "Cluster name. Must be set for --deployment=gke (TODO: other deployments).")
 	flag.StringVar(&o.clusterIPRange, "cluster-ip-range", "", "Specifies CLUSTER_IP_RANGE value during --up and --test (only relevant for --deployment=bash). Auto-calculated if empty.")
-	flag.StringVar(&o.deployment, "deployment", "bash", "Choices: none/bash/gke/kops/kubernetes-anywhere/node")
+	flag.StringVar(&o.deployment, "deployment", "bash", "Choices: none/bash/dind/gke/kops/kubernetes-anywhere/node/local")
+	flag.StringVar(&o.dindImage, "dind-image", "", "The dind image to use to start a cluster. Defaults to the docker tag produced by bazel.")
 	flag.BoolVar(&o.down, "down", false, "If true, tear down the cluster before exiting.")
 	flag.StringVar(&o.dump, "dump", "", "If set, dump cluster logs to this location on test or cluster-up failure")
 	flag.Var(&o.extract, "extract", "Extract k8s binaries from the specified release location")
@@ -134,7 +143,10 @@ func defineFlags() *options {
 	flag.StringVar(&o.gcpNetwork, "gcp-network", "", "Cluster network. Must be set for --deployment=gke (TODO: other deployments).")
 	flag.StringVar(&o.gcpMasterImage, "gcp-master-image", "", "Master image type (cos|debian on GCE, n/a on GKE)")
 	flag.StringVar(&o.gcpNodeImage, "gcp-node-image", "", "Node image type (cos|container_vm on GKE, cos|debian on GCE)")
+	flag.StringVar(&o.gcpImageFamily, "image-family", "", "Node image family from which to use the latest image, required when --gcp-node-image=CUSTOM")
+	flag.StringVar(&o.gcpImageProject, "image-project", "", "Project containing node image family, required when --gcp-node-image=CUSTOM")
 	flag.StringVar(&o.gcpNodes, "gcp-nodes", "", "(--provider=gce only) Number of nodes to create.")
+	flag.StringVar(&o.kubecfg, "kubeconfig", "", "The location of a kubeconfig file.")
 	flag.BoolVar(&o.kubemark, "kubemark", false, "If true, run kubemark tests.")
 	flag.StringVar(&o.kubemarkMasterSize, "kubemark-master-size", "", "Kubemark master size (only relevant if --kubemark=true). Auto-calculated based on '--kubemark-nodes' if left empty.")
 	flag.StringVar(&o.kubemarkNodes, "kubemark-nodes", "5", "Number of kubemark nodes to start (only relevant if --kubemark=true).")
@@ -162,34 +174,24 @@ func defineFlags() *options {
 	flag.StringVar(&o.testCmd, "test-cmd", "", "command to run against the cluster instead of Ginkgo e2e tests")
 	flag.StringVar(&o.testCmdName, "test-cmd-name", "", "name to log the test command as in xml results")
 	flag.DurationVar(&timeout, "timeout", time.Duration(0), "Terminate testing after the timeout duration (s/m/h)")
-	flag.BoolVar(&o.up, "up", false, "If true, start the the e2e cluster. If cluster is already up, recreate it.")
+	flag.BoolVar(&o.up, "up", false, "If true, start the e2e cluster. If cluster is already up, recreate it.")
 	flag.StringVar(&o.upgradeArgs, "upgrade_args", "", "If set, run upgrade tests before other tests")
 
-	flag.BoolVar(&verbose, "v", true, "If true, print all command output.")
+	// The "-v" flag was also used by glog, which is used by k8s.io/client-go. Duplicate flags cause panics.
+	// 1. Even if we could convince glog to change, they have too many consumers to ever do so.
+	// 2. The glog lib parses flags during init. It is impossible to dynamically rewrite the args before they're parsed by glog.
+	// 3. The glog lib takes an int value, so "-v false" is an error.
+	// 4. It's possible, but unlikely, we could convince k8s.io/client-go to use a logging shim, because a library shouldn't force a logging implementation. This would take a major version release for the lib.
+	//
+	// The most reasonable solution is to accept that we shouldn't have made a single-letter global, and rename all references to this variable.
+	flag.BoolVar(&verbose, "verbose-commands", true, "If true, print all command output.")
 
 	// go flag does not support StringArrayVar
 	pflag.StringArrayVar(&o.testCmdArgs, "test-cmd-args", []string{}, "args for test-cmd")
 	return &o
 }
 
-type testCase struct {
-	XMLName   xml.Name `xml:"testcase"`
-	ClassName string   `xml:"classname,attr"`
-	Name      string   `xml:"name,attr"`
-	Time      float64  `xml:"time,attr"`
-	Failure   string   `xml:"failure,omitempty"`
-	Skipped   string   `xml:"skipped,omitempty"`
-}
-
-type testSuite struct {
-	XMLName  xml.Name `xml:"testsuite"`
-	Failures int      `xml:"failures,attr"`
-	Tests    int      `xml:"tests,attr"`
-	Time     float64  `xml:"time,attr"`
-	Cases    []testCase
-}
-
-var suite testSuite
+var suite util.TestSuite
 
 func validWorkingDirectory() error {
 	cwd, err := os.Getwd()
@@ -207,47 +209,6 @@ func validWorkingDirectory() error {
 	return nil
 }
 
-func validGoEnv() error {
-	gp := os.Getenv("GOPATH")
-	if gp == "" {
-		return fmt.Errorf("GOPATH not set, please check your golang env setting.")
-	}
-	return nil
-}
-
-func writeXML(dump string, start time.Time) {
-	// Note whether timeout occurred
-	c := testCase{
-		Name:      "Timeout",
-		ClassName: "e2e.go",
-		Time:      timeout.Seconds(),
-	}
-	if isInterrupted() {
-		c.Failure = "kubetest --timeout triggered"
-		suite.Failures++
-	}
-	suite.Cases = append(suite.Cases, c)
-	// Write xml
-	suite.Time = time.Since(start).Seconds()
-	out, err := xml.MarshalIndent(&suite, "", "    ")
-	if err != nil {
-		log.Fatalf("Could not marshal XML: %s", err)
-	}
-	path := filepath.Join(dump, "junit_runner.xml")
-	f, err := os.Create(path)
-	if err != nil {
-		log.Fatalf("Could not create file: %s", err)
-	}
-	defer f.Close()
-	if _, err := f.WriteString(xml.Header); err != nil {
-		log.Fatalf("Error writing XML header: %s", err)
-	}
-	if _, err := f.Write(out); err != nil {
-		log.Fatalf("Error writing XML data: %s", err)
-	}
-	log.Printf("Saved XML output to %s.", path)
-}
-
 type deployer interface {
 	Up() error
 	IsUp() error
@@ -257,12 +218,20 @@ type deployer interface {
 	GetClusterCreated(gcpProject string) (time.Time, error)
 }
 
+// publisher is implemented by deployers that want to publish status on success
+type publisher interface {
+	// Publish is called when the tests were successful; the deployer should publish a success file
+	Publish() error
+}
+
 func getDeployer(o *options) (deployer, error) {
 	switch o.deployment {
 	case "bash":
 		return newBash(&o.clusterIPRange), nil
+	case "dind":
+		return dind.NewDeployer(o.kubecfg, o.dindImage, &o.testArgs, control)
 	case "gke":
-		return newGKE(o.provider, o.gcpProject, o.gcpZone, o.gcpRegion, o.gcpNetwork, o.gcpNodeImage, o.cluster, &o.testArgs, &o.upgradeArgs)
+		return newGKE(o.provider, o.gcpProject, o.gcpZone, o.gcpRegion, o.gcpNetwork, o.gcpNodeImage, o.gcpImageFamily, o.gcpImageProject, o.cluster, &o.testArgs, &o.upgradeArgs)
 	case "kops":
 		return newKops(o.provider, o.gcpProject, o.cluster)
 	case "kubernetes-anywhere":
@@ -274,6 +243,8 @@ func getDeployer(o *options) (deployer, error) {
 		return nodeDeploy{}, nil
 	case "none":
 		return noneDeploy{}, nil
+	case "local":
+		return newLocalCluster(), nil
 	default:
 		return nil, fmt.Errorf("unknown deployment strategy %q", o.deployment)
 	}
@@ -291,6 +262,10 @@ func validateFlags(o *options) error {
 
 func main() {
 	log.SetFlags(log.LstdFlags | log.Lshortfile)
+
+	// Initialize global pseudo random generator. Intializing it to select random AWS Zones.
+	rand.Seed(time.Now().UnixNano())
+
 	pflag.CommandLine = pflag.NewFlagSet(os.Args[0], pflag.ContinueOnError)
 	o := defineFlags()
 	pflag.CommandLine.AddGoFlagSet(flag.CommandLine)
@@ -301,6 +276,8 @@ func main() {
 	if err := validateFlags(o); err != nil {
 		log.Fatalf("Flags validation failed. err: %v", err)
 	}
+
+	control = process.NewControl(timeout, interrupt, terminate, verbose)
 
 	// do things when we know we are running in the CI (see the kubetest image)
 	if os.Getenv("KUBETEST_IN_DOCKER") == "true" {
@@ -335,7 +312,7 @@ func complete(o *options) error {
 
 	if o.dump != "" {
 		defer writeMetadata(o.dump, o.metadataSources)
-		defer writeXML(o.dump, time.Now())
+		defer control.WriteXML(&suite, o.dump, time.Now())
 	}
 	if o.logexporterGCSPath != "" {
 		o.testArgs += fmt.Sprintf(" --logexporter-gcs-path=%s", o.logexporterGCSPath)
@@ -374,16 +351,15 @@ func complete(o *options) error {
 		return fmt.Errorf("failed to acquire federation binaries: %v", err)
 	}
 	if o.extract.Enabled() {
-		if err := os.Chdir("kubernetes"); err != nil {
-			return fmt.Errorf("failed to chdir to kubernetes dir: %v", err)
+		// If we specified `--extract-source` we will already be in the correct directory
+		if !o.extractSource {
+			if err := os.Chdir("kubernetes"); err != nil {
+				return fmt.Errorf("failed to chdir to kubernetes dir: %v", err)
+			}
 		}
 	}
 	if err := validWorkingDirectory(); err != nil {
 		return fmt.Errorf("called from invalid working directory: %v", err)
-	}
-
-	if err := validGoEnv(); err != nil {
-		return fmt.Errorf("invalid Go Env: %v", err)
 	}
 
 	if o.down {
@@ -425,9 +401,9 @@ func complete(o *options) error {
 func acquireKubernetes(o *options) error {
 	// Potentially build kubernetes
 	if o.build.Enabled() {
-		err := xmlWrap("Build", o.build.Build)
+		err := control.XmlWrap(&suite, "Build", o.build.Build)
 		if o.flushMemAfterBuild {
-			flushMem()
+			util.FlushMem()
 		}
 		if err != nil {
 			return err
@@ -436,7 +412,10 @@ func acquireKubernetes(o *options) error {
 
 	// Potentially stage build binaries somewhere on GCS
 	if o.stage.Enabled() {
-		if err := xmlWrap("Stage", func() error {
+		if o.build == "dind" {
+			return fmt.Errorf("staging dind images isn't supported yet")
+		}
+		if err := control.XmlWrap(&suite, "Stage", func() error {
 			return o.stage.Stage(o.federation)
 		}); err != nil {
 			return err
@@ -445,7 +424,7 @@ func acquireKubernetes(o *options) error {
 
 	// Potentially download existing binaries and extract them.
 	if o.extract.Enabled() {
-		err := xmlWrap("Extract", func() error {
+		err := control.XmlWrap(&suite, "Extract", func() error {
 			// Should we restore a previous state?
 			// Restore if we are not upping the cluster or we are bringing up
 			// a federation control plane without the federated clusters.
@@ -468,7 +447,7 @@ func acquireKubernetes(o *options) error {
 			}
 
 			// New deployment, extract new version
-			return o.extract.Extract(o.gcpProject, o.gcpZone, o.extractSource)
+			return o.extract.Extract(o.gcpProject, o.gcpZone, o.gcpRegion, o.extractSource)
 		})
 		if err != nil {
 			return err
@@ -480,9 +459,9 @@ func acquireKubernetes(o *options) error {
 func acquireFederation(o *options) error {
 	// Potentially build federation
 	if o.buildFederation.Enabled() {
-		err := xmlWrap("BuildFederation", o.buildFederation.Build)
+		err := control.XmlWrap(&suite, "BuildFederation", o.buildFederation.Build)
 		if o.flushMemAfterBuild {
-			flushMem()
+			util.FlushMem()
 		}
 		if err != nil {
 			return err
@@ -491,7 +470,7 @@ func acquireFederation(o *options) error {
 
 	// Potentially stage federation binaries somewhere on GCS
 	if o.stageFederation.Enabled() {
-		if err := xmlWrap("StageFederation", func() error {
+		if err := control.XmlWrap(&suite, "StageFederation", func() error {
 			return o.stageFederation.Stage()
 		}); err != nil {
 			return err
@@ -500,7 +479,7 @@ func acquireFederation(o *options) error {
 
 	// Potentially download existing federation binaries and extract them.
 	if o.extractFederation.Enabled() {
-		err := xmlWrap("ExtractFederation", func() error {
+		err := control.XmlWrap(&suite, "ExtractFederation", func() error {
 			return o.extractFederation.Extract(o.gcpProject, o.gcpZone)
 		})
 		return err
@@ -523,7 +502,7 @@ func findVersion() string {
 	if _, err := os.Stat("hack/lib/version.sh"); err == nil {
 		// TODO(fejta): do this in go. At least we removed the upload-to-gcs.sh dep.
 		gross := `. hack/lib/version.sh && KUBE_ROOT=. kube::version::get_version_vars && echo "${KUBE_GIT_VERSION-}"`
-		b, err := output(exec.Command("bash", "-c", gross))
+		b, err := control.Output(exec.Command("bash", "-c", gross))
 		if err == nil {
 			return strings.TrimSpace(string(b))
 		}
@@ -578,27 +557,27 @@ func installGcloud(tarball string, location string) error {
 		return err
 	}
 
-	if err := finishRunning(exec.Command("tar", "xzf", tarball, "-C", location)); err != nil {
+	if err := control.FinishRunning(exec.Command("tar", "xzf", tarball, "-C", location)); err != nil {
 		return err
 	}
 
-	if err := finishRunning(exec.Command(filepath.Join(location, "google-cloud-sdk", "install.sh"), "--disable-installation-options", "--bash-completion=false", "--path-update=false", "--usage-reporting=false")); err != nil {
+	if err := control.FinishRunning(exec.Command(filepath.Join(location, "google-cloud-sdk", "install.sh"), "--disable-installation-options", "--bash-completion=false", "--path-update=false", "--usage-reporting=false")); err != nil {
 		return err
 	}
 
-	if err := insertPath(filepath.Join(location, "google-cloud-sdk", "bin")); err != nil {
+	if err := util.InsertPath(filepath.Join(location, "google-cloud-sdk", "bin")); err != nil {
 		return err
 	}
 
-	if err := finishRunning(exec.Command("gcloud", "components", "install", "alpha")); err != nil {
+	if err := control.FinishRunning(exec.Command("gcloud", "components", "install", "alpha")); err != nil {
 		return err
 	}
 
-	if err := finishRunning(exec.Command("gcloud", "components", "install", "beta")); err != nil {
+	if err := control.FinishRunning(exec.Command("gcloud", "components", "install", "beta")); err != nil {
 		return err
 	}
 
-	if err := finishRunning(exec.Command("gcloud", "info")); err != nil {
+	if err := control.FinishRunning(exec.Command("gcloud", "info")); err != nil {
 		return err
 	}
 	return nil
@@ -615,52 +594,52 @@ func migrateGcpEnvAndOptions(o *options) error {
 		network = "KUBE_GCE_NETWORK"
 		zone = "KUBE_GCE_ZONE"
 	}
-	return migrateOptions([]migratedOption{
+	return util.MigrateOptions([]util.MigratedOption{
 		{
-			env:    "PROJECT",
-			option: &o.gcpProject,
-			name:   "--gcp-project",
+			Env:    "PROJECT",
+			Option: &o.gcpProject,
+			Name:   "--gcp-project",
 		},
 		{
-			env:    zone,
-			option: &o.gcpZone,
-			name:   "--gcp-zone",
+			Env:    zone,
+			Option: &o.gcpZone,
+			Name:   "--gcp-zone",
 		},
 		{
-			env:    "REGION",
-			option: &o.gcpRegion,
-			name:   "--gcp-region",
+			Env:    "REGION",
+			Option: &o.gcpRegion,
+			Name:   "--gcp-region",
 		},
 		{
-			env:    "GOOGLE_APPLICATION_CREDENTIALS",
-			option: &o.gcpServiceAccount,
-			name:   "--gcp-service-account",
+			Env:    "GOOGLE_APPLICATION_CREDENTIALS",
+			Option: &o.gcpServiceAccount,
+			Name:   "--gcp-service-account",
 		},
 		{
-			env:    network,
-			option: &o.gcpNetwork,
-			name:   "--gcp-network",
+			Env:    network,
+			Option: &o.gcpNetwork,
+			Name:   "--gcp-network",
 		},
 		{
-			env:    "KUBE_NODE_OS_DISTRIBUTION",
-			option: &o.gcpNodeImage,
-			name:   "--gcp-node-image",
+			Env:    "KUBE_NODE_OS_DISTRIBUTION",
+			Option: &o.gcpNodeImage,
+			Name:   "--gcp-node-image",
 		},
 		{
-			env:    "KUBE_MASTER_OS_DISTRIBUTION",
-			option: &o.gcpMasterImage,
-			name:   "--gcp-master-image",
+			Env:    "KUBE_MASTER_OS_DISTRIBUTION",
+			Option: &o.gcpMasterImage,
+			Name:   "--gcp-master-image",
 		},
 		{
-			env:    "NUM_NODES",
-			option: &o.gcpNodes,
-			name:   "--gcp-nodes",
+			Env:    "NUM_NODES",
+			Option: &o.gcpNodes,
+			Name:   "--gcp-nodes",
 		},
 		{
-			env:      "CLOUDSDK_BUCKET",
-			option:   &o.gcpCloudSdk,
-			name:     "--gcp-cloud-sdk",
-			skipPush: true,
+			Env:      "CLOUDSDK_BUCKET",
+			Option:   &o.gcpCloudSdk,
+			Name:     "--gcp-cloud-sdk",
+			SkipPush: true,
 		},
 	})
 }
@@ -684,6 +663,31 @@ func prepareGcp(o *options) error {
 			if err := os.Setenv("KUBE_MASTER_OS_DISTRIBUTION", distro); err != nil {
 				return fmt.Errorf("could not set KUBE_MASTER_OS_DISTRIBUTION=%s: %v", distro, err)
 			}
+		}
+
+		hasGCPImageFamily, hasGCPImageProject := len(o.gcpImageFamily) != 0, len(o.gcpImageProject) != 0
+		if hasGCPImageFamily != hasGCPImageProject {
+			return fmt.Errorf("--image-family and --image-project must be both set or unset")
+		}
+		if hasGCPImageFamily && hasGCPImageProject {
+			out, err := control.Output(exec.Command("gcloud", "compute", "images", "describe-from-family", o.gcpImageFamily, "--project", o.gcpImageProject))
+			if err != nil {
+				return fmt.Errorf("failed to get latest image from family %q in project %q: %s", o.gcpImageFamily, o.gcpImageProject, err)
+			}
+			latestImage := ""
+			latestImageRegexp := regexp.MustCompile("^name: *(\\S+)")
+			for _, line := range strings.Split(string(out), "\n") {
+				matches := latestImageRegexp.FindStringSubmatch(line)
+				if len(matches) == 2 {
+					latestImage = matches[1]
+					break
+				}
+			}
+			if len(latestImage) == 0 {
+				return fmt.Errorf("failed to get latest image from family %q in project %q", o.gcpImageFamily, o.gcpImageProject)
+			}
+			os.Setenv("KUBE_GCE_NODE_IMAGE", latestImage)
+			os.Setenv("KUBE_GCE_NODE_PROJECT", o.gcpImageProject)
 		}
 	} else if o.provider == "gke" {
 		if o.deployment == "" {
@@ -713,6 +717,9 @@ func prepareGcp(o *options) error {
 		os.Setenv("NODE_OS_DISTRIBUTION", nod)
 	}
 	if o.gcpProject == "" {
+		log.Print("--gcp-project is missing, trying to fetch a project from boskos.\n" +
+			"(for local runs please set --gcp-project to your dev project)")
+
 		var resType string
 		if o.gcpProjectType != "" {
 			resType = o.gcpProjectType
@@ -722,7 +729,7 @@ func prepareGcp(o *options) error {
 			resType = "gce-project"
 		}
 
-		log.Printf("provider %v, will acquire resource %v from boskos", o.provider, resType)
+		log.Printf("provider %v, will acquire project type %v from boskos", o.provider, resType)
 
 		p, err := boskos.Acquire(resType, "free", "busy")
 		if err != nil {
@@ -747,7 +754,7 @@ func prepareGcp(o *options) error {
 		return fmt.Errorf("could not set CLOUDSDK_CORE_PRINT_UNHANDLED_TRACEBACKS=1: %v", err)
 	}
 
-	if err := finishRunning(exec.Command("gcloud", "config", "set", "project", o.gcpProject)); err != nil {
+	if err := control.FinishRunning(exec.Command("gcloud", "config", "set", "project", o.gcpProject)); err != nil {
 		return fmt.Errorf("fail to set project %s : err %v", o.gcpProject, err)
 	}
 
@@ -764,7 +771,7 @@ func prepareGcp(o *options) error {
 
 	// Ensure ssh keys exist
 	log.Print("Checking existing of GCP ssh keys...")
-	k := filepath.Join(home(".ssh"), "google_compute_engine")
+	k := filepath.Join(util.Home(".ssh"), "google_compute_engine")
 	if _, err := os.Stat(k); err != nil {
 		return err
 	}
@@ -774,13 +781,13 @@ func prepareGcp(o *options) error {
 	}
 
 	log.Printf("Checking presence of public key in %s", o.gcpProject)
-	if out, err := output(exec.Command("gcloud", "compute", "--project="+o.gcpProject, "project-info", "describe")); err != nil {
+	if out, err := control.Output(exec.Command("gcloud", "compute", "--project="+o.gcpProject, "project-info", "describe")); err != nil {
 		return err
 	} else if b, err := ioutil.ReadFile(pk); err != nil {
 		return err
-	} else if !strings.Contains(string(b), string(out)) {
+	} else if !strings.Contains(string(out), string(b)) {
 		log.Print("Uploading public ssh key to project metadata...")
-		if err = finishRunning(exec.Command("gcloud", "compute", "--project="+o.gcpProject, "config-ssh")); err != nil {
+		if err = control.FinishRunning(exec.Command("gcloud", "compute", "--project="+o.gcpProject, "config-ssh")); err != nil {
 			return err
 		}
 	}
@@ -788,12 +795,12 @@ func prepareGcp(o *options) error {
 	// Install custom gcloud version if necessary
 	if o.gcpCloudSdk != "" {
 		for i := 0; i < 3; i++ {
-			if err := finishRunning(exec.Command("gsutil", "-mq", "cp", "-r", o.gcpCloudSdk, home())); err == nil {
+			if err := control.FinishRunning(exec.Command("gsutil", "-mq", "cp", "-r", o.gcpCloudSdk, util.Home())); err == nil {
 				break // Success!
 			}
 			time.Sleep(1 << uint(i) * time.Second)
 		}
-		for _, f := range []string{home(".gsutil"), home("repo"), home("cloudsdk")} {
+		for _, f := range []string{util.Home(".gsutil"), util.Home("repo"), util.Home("cloudsdk")} {
 			if _, err := os.Stat(f); err == nil || !os.IsNotExist(err) {
 				if err = os.RemoveAll(f); err != nil {
 					return err
@@ -801,23 +808,23 @@ func prepareGcp(o *options) error {
 			}
 		}
 
-		install := home("repo", "google-cloud-sdk.tar.gz")
+		install := util.Home("repo", "google-cloud-sdk.tar.gz")
 		if strings.HasSuffix(o.gcpCloudSdk, ".tar.gz") {
-			install = home(filepath.Base(o.gcpCloudSdk))
+			install = util.Home(filepath.Base(o.gcpCloudSdk))
 		} else {
-			if err := os.Rename(home(filepath.Base(o.gcpCloudSdk)), home("repo")); err != nil {
+			if err := os.Rename(util.Home(filepath.Base(o.gcpCloudSdk)), util.Home("repo")); err != nil {
 				return err
 			}
 
 			// Controls which gcloud components to install.
-			pop, err := pushEnv("CLOUDSDK_COMPONENT_MANAGER_SNAPSHOT_URL", "file://"+home("repo", "components-2.json"))
+			pop, err := util.PushEnv("CLOUDSDK_COMPONENT_MANAGER_SNAPSHOT_URL", "file://"+util.Home("repo", "components-2.json"))
 			if err != nil {
 				return err
 			}
 			defer pop()
 		}
 
-		if err := installGcloud(install, home("cloudsdk")); err != nil {
+		if err := installGcloud(install, util.Home("cloudsdk")); err != nil {
 			return err
 		}
 		// gcloud creds may have changed
@@ -830,10 +837,10 @@ func prepareGcp(o *options) error {
 		if p := os.Getenv("KUBEMARK_BAZEL_BUILD"); strings.ToLower(p) == "y" {
 			// we need docker-credential-gcr to get authed properly
 			// https://github.com/bazelbuild/rules_docker#authorization
-			if err := finishRunning(exec.Command("gcloud", "components", "install", "docker-credential-gcr")); err != nil {
+			if err := control.FinishRunning(exec.Command("gcloud", "components", "install", "docker-credential-gcr")); err != nil {
 				return err
 			}
-			if err := finishRunning(exec.Command("docker-credential-gcr", "configure-docker")); err != nil {
+			if err := control.FinishRunning(exec.Command("docker-credential-gcr", "configure-docker")); err != nil {
 				return err
 			}
 		}
@@ -847,7 +854,7 @@ func prepareAws(o *options) error {
 	if err := activateServiceAccount(o.gcpServiceAccount); err != nil {
 		return err
 	}
-	return finishRunning(exec.Command("pip", "install", "awscli"))
+	return control.FinishRunning(exec.Command("pip", "install", "awscli"))
 }
 
 // Activate GOOGLE_APPLICATION_CREDENTIALS if set or do nothing.
@@ -855,27 +862,27 @@ func activateServiceAccount(path string) error {
 	if path == "" {
 		return nil
 	}
-	return finishRunning(exec.Command("gcloud", "auth", "activate-service-account", "--key-file="+path))
+	return control.FinishRunning(exec.Command("gcloud", "auth", "activate-service-account", "--key-file="+path))
 }
 
 // Make all artifacts world readable.
 // The root user winds up owning the files when the container exists.
 // Ensure that other users can read these files at that time.
 func chmodArtifacts() error {
-	return finishRunning(exec.Command("chmod", "-R", "o+r", artifacts))
+	return control.FinishRunning(exec.Command("chmod", "-R", "o+r", artifacts))
 }
 
 func prepare(o *options) error {
-	if err := migrateOptions([]migratedOption{
+	if err := util.MigrateOptions([]util.MigratedOption{
 		{
-			env:    "KUBERNETES_PROVIDER",
-			option: &o.provider,
-			name:   "--provider",
+			Env:    "KUBERNETES_PROVIDER",
+			Option: &o.provider,
+			Name:   "--provider",
 		},
 		{
-			env:    "CLUSTER_NAME",
-			option: &o.cluster,
-			name:   "--cluster",
+			Env:    "CLUSTER_NAME",
+			Option: &o.cluster,
+			Name:   "--cluster",
 		},
 	}); err != nil {
 		return err
@@ -896,16 +903,16 @@ func prepare(o *options) error {
 	}
 
 	if o.kubemark {
-		if err := migrateOptions([]migratedOption{
+		if err := util.MigrateOptions([]util.MigratedOption{
 			{
-				env:    "KUBEMARK_NUM_NODES",
-				option: &o.kubemarkNodes,
-				name:   "--kubemark-nodes",
+				Env:    "KUBEMARK_NUM_NODES",
+				Option: &o.kubemarkNodes,
+				Name:   "--kubemark-nodes",
 			},
 			{
-				env:    "KUBEMARK_MASTER_SIZE",
-				option: &o.kubemarkMasterSize,
-				name:   "--kubemark-master-size",
+				Env:    "KUBEMARK_MASTER_SIZE",
+				Option: &o.kubemarkMasterSize,
+				Name:   "--kubemark-master-size",
 			},
 		}); err != nil {
 			return err
@@ -1014,5 +1021,5 @@ func publish(pub string) error {
 		return err
 	}
 	log.Printf("Set %s version to %s", pub, string(v))
-	return finishRunning(exec.Command("gsutil", "cp", "version", pub))
+	return gcsWrite(pub, v)
 }

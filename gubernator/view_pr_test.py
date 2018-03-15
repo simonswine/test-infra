@@ -60,10 +60,14 @@ class PathTest(unittest.TestCase):
 class PRTest(main_test.TestBase):
     BUILDS = {
         'build': [('12', {'version': 'bb', 'timestamp': 1467147654}, None),
-                  ('11', {'version': 'bb', 'timestamp': 1467146654}, {'result': 'PASSED'}),
-                  ('10', {'version': 'aa', 'timestamp': 1467136654}, {'result': 'FAILED'})],
-        'e2e': [('47', {'version': 'bb', 'timestamp': '1467147654'}, {'result': '[UNSET]'}),
-                ('46', {'version': 'aa', 'timestamp': '1467136700'}, {'result': '[UNSET]'})]
+                  ('11', {'version': 'bb', 'timestamp': 1467146654},
+                   {'result': 'PASSED', 'passed': True}),
+                  ('10', {'version': 'aa', 'timestamp': 1467136654},
+                   {'result': 'FAILED', 'passed': False})],
+        'e2e': [('47', {'version': 'bb', 'timestamp': '1467147654'},
+                 {'result': '[UNSET]', 'passed': False}),
+                ('46', {'version': 'aa', 'timestamp': '1467136700'},
+                 {'result': '[UNSET]', 'passed': False})]
     }
 
     def setUp(self):
@@ -163,6 +167,25 @@ class TestDashboard(main_test.TestBase):
         resp = app.get('/pr/user')
         self.assertIn('123', resp)
 
+    def test_case_insensitive(self):
+        "Individual PR pages are case insensitive."
+        make_pr(123, ['user'], {'attn': {'User': 'fix tests'}})
+        resp = app.get('/pr/UseR')
+        self.assertIn('123', resp)
+        self.assertIn('Needs Attention (1)', resp)
+
+    def test_milestone(self):
+        "Milestone links filter by milestone."
+        make_pr(123, ['user'], {'attn': {'User': 'fix tests'}})
+        make_pr(124, ['user'], {'attn': {'user': 'fix tests'}, 'milestone': 'v1.24'})
+        resp = app.get('/pr/user')
+        self.assertIn('v1.24', resp)
+        self.assertIn('123', resp)
+        self.assertIn('124', resp)
+        resp = app.get('/pr/user?milestone=v1.24')
+        self.assertNotIn('123', resp)
+        self.assertIn('124', resp)
+
     @staticmethod
     def make_session(**kwargs):
         # set the session cookie directly (easier than the full login flow)
@@ -186,6 +209,8 @@ class TestDashboard(main_test.TestBase):
 
     def test_pr_links_user(self):
         "Individual PR pages grab digest information"
+        gcs_async_test.install_handler(self.testbed.get_stub('urlfetch'),
+            {'12345/': []})
         make_pr(12345, ['human'], {'title': 'huge pr!'})
         resp = app.get('/pr/12345')
         self.assertIn('href="/pr/human"', resp)

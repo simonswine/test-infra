@@ -53,20 +53,24 @@ func init() {
 }
 
 func helpProvider(config *plugins.Configuration, enabledRepos []string) (*pluginhelp.PluginHelp, error) {
-	return &pluginhelp.PluginHelp{
-			Description: "The milestonestatus plugin allows members of the milestone maintainers Github team to specify the 'status/*' label that should apply to a pull request.",
-			WhoCanUse:   "Members of the milestone maintainers Github team can use the '/status' command. This team is specified in the config by providing the Github team's ID.",
-			Usage:       "/status (approved-for-milestone|in-progress|in-review)",
-			Examples:    []string{"/status approved-for-milestone", "/status in-progress", "/status in-review"},
-			Config: map[string]string{
-				"": fmt.Sprintf("The milestone maintainers team is the Github team with ID: %d.", config.MilestoneStatus.MaintainersID),
-			},
+	pluginHelp := &pluginhelp.PluginHelp{
+		Description: "The milestonestatus plugin allows members of the milestone maintainers Github team to specify the 'status/*' label that should apply to a pull request.",
+		Config: map[string]string{
+			"": fmt.Sprintf("The milestone maintainers team is the Github team with ID: %d.", config.Milestone.MaintainersID),
 		},
-		nil
+	}
+	pluginHelp.AddCommand(pluginhelp.Command{
+		Usage:       "/status (approved-for-milestone|in-progress|in-review)",
+		Description: "Applies the 'status/' label to a PR.",
+		Featured:    false,
+		WhoCanUse:   "Members of the milestone maintainers Github team can use the '/status' command. This team is specified in the config by providing the Github team's ID.",
+		Examples:    []string{"/status approved-for-milestone", "/status in-progress", "/status in-review"},
+	})
+	return pluginHelp, nil
 }
 
 func handleGenericComment(pc plugins.PluginClient, e github.GenericCommentEvent) error {
-	return handle(pc.GitHubClient, pc.Logger, &e, pc.PluginConfig.MilestoneStatus.MaintainersID)
+	return handle(pc.GitHubClient, pc.Logger, &e, pc.PluginConfig.Milestone.MaintainersID)
 }
 
 func handle(gc githubClient, log *logrus.Entry, e *github.GenericCommentEvent, maintainersID int) error {

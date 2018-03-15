@@ -18,6 +18,7 @@ package requiresig
 
 import (
 	"fmt"
+	"regexp"
 	"strings"
 
 	"k8s.io/test-infra/prow/github"
@@ -29,6 +30,8 @@ import (
 
 var (
 	labelPrefixes = []string{"sig/", "committee/", "wg/"}
+
+	sigCommandRe = regexp.MustCompile(`(?m)^/sig\s*(.*)$`)
 )
 
 const (
@@ -86,7 +89,7 @@ func helpProvider(config *plugins.Configuration, _ []string) (*pluginhelp.Plugin
 }
 
 func handleIssue(pc plugins.PluginClient, ie github.IssueEvent) error {
-	return handle(pc.Logger, pc.GitHubClient, pc.CommentPruner, &ie)
+	return handle(pc.Logger, pc.GitHubClient, pc.CommentPruner, &ie, pc.PluginConfig.SigMention.Re)
 }
 
 func isSigLabel(label string) bool {
@@ -107,6 +110,24 @@ func hasSigLabel(labels []github.Label) bool {
 	return false
 }
 
+func shouldReact(mentionRe *regexp.Regexp, ie *github.IssueEvent) bool {
+	// Ignore PRs and closed issues.
+	if ie.Issue.IsPullRequest() || ie.Issue.State == "closed" {
+		return false
+	}
+
+	switch ie.Action {
+	case github.IssueActionOpened:
+		// Don't react if the new issue has a /sig command or sig team mention.
+		return !mentionRe.MatchString(ie.Issue.Body) && !sigCommandRe.MatchString(ie.Issue.Body)
+	case github.IssueActionLabeled, github.IssueActionUnlabeled:
+		// Only react to (un)label events for sig labels.
+		return isSigLabel(ie.Label.Name)
+	default:
+		return false
+	}
+}
+
 // handle is the workhorse notifying issue owner to add a sig label if there is none
 // The algorithm:
 // (1) return if this is not an opened, labelled, or unlabelled event or if the issue is closed.
@@ -116,9 +137,10 @@ func hasSigLabel(labels []github.Label) bool {
 // (5) if the issue has none of the labels, add the needs-sig label and comment
 // (6) if the issue has only the sig label, do nothing
 // (7) if the issue has only the needs-sig label, do nothing
-func handle(log *logrus.Entry, ghc githubClient, cp commentPruner, ie *github.IssueEvent) error {
-	if ie.Issue.IsPullRequest() || ie.Issue.State == "closed" ||
-		(ie.Action != github.IssueActionOpened && ie.Action != github.IssueActionLabeled && ie.Action != github.IssueActionUnlabeled) {
+func handle(log *logrus.Entry, ghc githubClient, cp commentPruner, ie *github.IssueEvent, mentionRe *regexp.Regexp) error {
+	// Ignore PRs, closed issues, and events that aren't new issues or sig label
+	// changes.
+	if !shouldReact(mentionRe, ie) {
 		return nil
 	}
 

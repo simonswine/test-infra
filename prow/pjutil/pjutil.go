@@ -19,10 +19,11 @@ package pjutil
 
 import (
 	"fmt"
-	"time"
 
 	uuid "github.com/satori/go.uuid"
 	"github.com/sirupsen/logrus"
+	"k8s.io/api/core/v1"
+	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 
 	"k8s.io/test-infra/prow/config"
 	"k8s.io/test-infra/prow/github"
@@ -34,13 +35,13 @@ func NewProwJob(spec kube.ProwJobSpec, labels map[string]string) kube.ProwJob {
 	return kube.ProwJob{
 		APIVersion: "prow.k8s.io/v1",
 		Kind:       "ProwJob",
-		Metadata: kube.ObjectMeta{
+		ObjectMeta: metav1.ObjectMeta{
 			Name:   uuid.NewV1().String(),
 			Labels: labels,
 		},
 		Spec: spec,
 		Status: kube.ProwJobStatus{
-			StartTime: time.Now(),
+			StartTime: metav1.Now(),
 			State:     kube.TriggeredState,
 		},
 	}
@@ -137,8 +138,8 @@ func BatchSpec(p config.Presubmit, refs kube.Refs) kube.ProwJobSpec {
 }
 
 // ProwJobToPod converts a ProwJob to a Pod that will run the tests.
-func ProwJobToPod(pj kube.ProwJob, buildID string) (*kube.Pod, error) {
-	env, err := EnvForSpec(NewJobSpec(pj.Spec, buildID))
+func ProwJobToPod(pj kube.ProwJob, buildID string) (*v1.Pod, error) {
+	env, err := EnvForSpec(NewJobSpec(pj.Spec, buildID, pj.Name))
 	if err != nil {
 		return nil, err
 	}
@@ -149,21 +150,21 @@ func ProwJobToPod(pj kube.ProwJob, buildID string) (*kube.Pod, error) {
 	// Set environment variables in each container in the pod spec. We don't
 	// want to update the spec in place, since that will update the ProwJob
 	// spec. Instead, create a copy.
-	spec.Containers = []kube.Container{}
+	spec.Containers = []v1.Container{}
 	for i := range pj.Spec.PodSpec.Containers {
 		spec.Containers = append(spec.Containers, pj.Spec.PodSpec.Containers[i])
-		spec.Containers[i].Name = fmt.Sprintf("%s-%d", pj.Metadata.Name, i)
+		spec.Containers[i].Name = fmt.Sprintf("%s-%d", pj.ObjectMeta.Name, i)
 		spec.Containers[i].Env = append(spec.Containers[i].Env, kubeEnv(env)...)
 	}
 	podLabels := make(map[string]string)
-	for k, v := range pj.Metadata.Labels {
+	for k, v := range pj.ObjectMeta.Labels {
 		podLabels[k] = v
 	}
 	podLabels[kube.CreatedByProw] = "true"
 	podLabels[kube.ProwJobTypeLabel] = string(pj.Spec.Type)
-	return &kube.Pod{
-		Metadata: kube.ObjectMeta{
-			Name:   pj.Metadata.Name,
+	return &v1.Pod{
+		ObjectMeta: metav1.ObjectMeta{
+			Name:   pj.ObjectMeta.Name,
 			Labels: podLabels,
 			Annotations: map[string]string{
 				kube.ProwJobAnnotation: pj.Spec.Job,
@@ -175,10 +176,10 @@ func ProwJobToPod(pj kube.ProwJob, buildID string) (*kube.Pod, error) {
 
 // kubeEnv transforms a mapping of environment variables
 // into their serialized form for a PodSpec
-func kubeEnv(environment map[string]string) []kube.EnvVar {
-	var kubeEnvironment []kube.EnvVar
+func kubeEnv(environment map[string]string) []v1.EnvVar {
+	var kubeEnvironment []v1.EnvVar
 	for key, value := range environment {
-		kubeEnvironment = append(kubeEnvironment, kube.EnvVar{
+		kubeEnvironment = append(kubeEnvironment, v1.EnvVar{
 			Name:  key,
 			Value: value,
 		})
@@ -229,7 +230,7 @@ func GetLatestProwJobs(pjs []kube.ProwJob, jobType kube.ProwJobType) map[string]
 			continue
 		}
 		name := j.Spec.Job
-		if j.Status.StartTime.After(latestJobs[name].Status.StartTime) {
+		if j.Status.StartTime.After(latestJobs[name].Status.StartTime.Time) {
 			latestJobs[name] = j
 		}
 	}
@@ -239,11 +240,11 @@ func GetLatestProwJobs(pjs []kube.ProwJob, jobType kube.ProwJobType) map[string]
 // ProwJobFields extracts logrus fields from a prowjob useful for logging.
 func ProwJobFields(pj *kube.ProwJob) logrus.Fields {
 	fields := make(logrus.Fields)
-	fields["name"] = pj.Metadata.Name
+	fields["name"] = pj.ObjectMeta.Name
 	fields["job"] = pj.Spec.Job
 	fields["type"] = pj.Spec.Type
-	if len(pj.Metadata.Labels[github.EventGUID]) > 0 {
-		fields[github.EventGUID] = pj.Metadata.Labels[github.EventGUID]
+	if len(pj.ObjectMeta.Labels[github.EventGUID]) > 0 {
+		fields[github.EventGUID] = pj.ObjectMeta.Labels[github.EventGUID]
 	}
 	if len(pj.Spec.Refs.Pulls) == 1 {
 		fields[github.PrLogField] = pj.Spec.Refs.Pulls[0].Number

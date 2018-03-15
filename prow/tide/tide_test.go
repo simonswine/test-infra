@@ -19,9 +19,11 @@ package tide
 import (
 	"context"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"net/http"
 	"net/http/httptest"
+	"reflect"
 	"testing"
 
 	"github.com/shurcooL/githubql"
@@ -144,10 +146,10 @@ func TestAccumulateBatch(t *testing.T) {
 	for _, test := range tests {
 		var pulls []PullRequest
 		for _, p := range test.pulls {
-			pr := PullRequest{Number: githubql.Int(p.number)}
-			pr.Commits.Nodes = []struct {
-				Commit Commit
-			}{{Commit: Commit{OID: githubql.String(p.sha)}}}
+			pr := PullRequest{
+				Number:     githubql.Int(p.number),
+				HeadRefOID: githubql.String(p.sha),
+			}
 			pulls = append(pulls, pr)
 		}
 		var pjs []kube.ProwJob
@@ -320,9 +322,12 @@ func TestAccumulate(t *testing.T) {
 }
 
 type fgc struct {
+	prs       []PullRequest
 	refs      map[string]string
 	merged    int
 	setStatus bool
+
+	expectedSHA string
 }
 
 func (f *fgc) GetRef(o, r, ref string) (string, error) {
@@ -330,10 +335,25 @@ func (f *fgc) GetRef(o, r, ref string) (string, error) {
 }
 
 func (f *fgc) Query(ctx context.Context, q interface{}, vars map[string]interface{}) error {
+	sq, ok := q.(*searchQuery)
+	if !ok {
+		return errors.New("unexpected query type")
+	}
+	for _, pr := range f.prs {
+		sq.Search.Nodes = append(
+			sq.Search.Nodes,
+			struct {
+				PullRequest PullRequest `graphql:"... on PullRequest"`
+			}{PullRequest: pr},
+		)
+	}
 	return nil
 }
 
 func (f *fgc) Merge(org, repo string, number int, details github.MergeDetails) error {
+	if details.SHA == "uh oh" {
+		return errors.New("invalid sha")
+	}
 	f.merged++
 	return nil
 }
@@ -347,7 +367,131 @@ func (f *fgc) CreateStatus(org, repo, ref string, s github.Status) error {
 	return fmt.Errorf("invalid 'state' value: %q", s.State)
 }
 
+func (f *fgc) GetCombinedStatus(org, repo, ref string) (*github.CombinedStatus, error) {
+	if f.expectedSHA != ref {
+		return nil, errors.New("bad combined status request: incorrect sha")
+	}
+	return &github.CombinedStatus{
+			Statuses: []github.Status{
+				{Context: "win"},
+			},
+		},
+		nil
+}
+
+func TestExpectedStatus(t *testing.T) {
+	neededLabels := []string{"need-1", "need-2", "need-a-very-super-duper-extra-not-short-at-all-label-name"}
+	forbiddenLabels := []string{"forbidden-1", "forbidden-2"}
+	testcases := []struct {
+		name string
+
+		labels []string
+		inPool bool
+
+		state string
+		desc  string
+	}{
+		{
+			name:   "in pool",
+			inPool: true,
+
+			state: github.StatusSuccess,
+			desc:  statusInPool,
+		},
+		{
+			name:   "check truncation of label list",
+			inPool: false,
+
+			state: github.StatusPending,
+			desc:  fmt.Sprintf(statusNotInPool, " Needs need-1, need-2 labels."),
+		},
+		{
+			name:   "check truncation of label list is not excessive",
+			labels: append([]string{}, neededLabels[:2]...),
+			inPool: false,
+
+			state: github.StatusPending,
+			desc:  fmt.Sprintf(statusNotInPool, " Needs need-a-very-super-duper-extra-not-short-at-all-label-name label."),
+		},
+		{
+			name:   "has forbidden labels",
+			labels: append(append([]string{}, neededLabels...), forbiddenLabels...),
+			inPool: false,
+
+			state: github.StatusPending,
+			desc:  fmt.Sprintf(statusNotInPool, " Should not have forbidden-1, forbidden-2 labels."),
+		},
+		{
+			name:   "has one forbidden label",
+			labels: append(append([]string{}, neededLabels...), forbiddenLabels[0]),
+			inPool: false,
+
+			state: github.StatusPending,
+			desc:  fmt.Sprintf(statusNotInPool, " Should not have forbidden-1 label."),
+		},
+		{
+			name:   "only mention one requirement class",
+			labels: append(append([]string{}, neededLabels[1:]...), forbiddenLabels[0]),
+			inPool: false,
+
+			state: github.StatusPending,
+			desc:  fmt.Sprintf(statusNotInPool, " Needs need-1 label."),
+		},
+		{
+			name:   "unknown requirement",
+			labels: neededLabels,
+			inPool: false,
+
+			state: github.StatusPending,
+			desc:  fmt.Sprintf(statusNotInPool, ""),
+		},
+		{
+			name:   "check that min diff query is used",
+			labels: []string{"3", "4", "5", "6", "7"},
+			inPool: false,
+
+			state: github.StatusPending,
+			desc:  fmt.Sprintf(statusNotInPool, " Needs 1, 2 labels."),
+		},
+	}
+	queriesByRepo := map[string]config.TideQueries{
+		"": {
+			config.TideQuery{
+				Labels:        neededLabels,
+				MissingLabels: forbiddenLabels,
+			},
+			config.TideQuery{
+				Labels: []string{"1", "2", "3", "4", "5", "6", "7"}, // lots of requirements
+			},
+		},
+	}
+
+	for _, tc := range testcases {
+		t.Logf("Test Case: %q\n", tc.name)
+		var pr PullRequest
+		for _, label := range tc.labels {
+			pr.Labels.Nodes = append(
+				pr.Labels.Nodes,
+				struct{ Name githubql.String }{Name: githubql.String(label)},
+			)
+		}
+		var pool map[string]PullRequest
+		if tc.inPool {
+			pool = map[string]PullRequest{"#0": {}}
+		}
+
+		state, desc := expectedStatus(queriesByRepo, &pr, pool)
+		if state != tc.state {
+			t.Errorf("Expected status state %q, but got %q.", string(tc.state), string(state))
+		}
+		if desc != tc.desc {
+			t.Errorf("Expected status description %q, but got %q.", tc.desc, desc)
+		}
+	}
+}
+
 func TestSetStatuses(t *testing.T) {
+	statusNotInPoolEmpty := fmt.Sprintf(statusNotInPool, "")
 	testcases := []struct {
 		name string
 
@@ -382,7 +526,7 @@ func TestSetStatuses(t *testing.T) {
 			inPool:     true,
 			hasContext: true,
 			state:      githubql.StatusStateSuccess,
-			desc:       statusNotInPool,
+			desc:       statusNotInPoolEmpty,
 
 			shouldSet: true,
 		},
@@ -402,7 +546,7 @@ func TestSetStatuses(t *testing.T) {
 			inPool:     false,
 			hasContext: true,
 			state:      githubql.StatusStatePending,
-			desc:       statusNotInPool,
+			desc:       statusNotInPoolEmpty,
 
 			shouldSet: false,
 		},
@@ -452,8 +596,8 @@ func TestSetStatuses(t *testing.T) {
 			t.Fatalf("Failed to get log output before testing: %v", err)
 		}
 
-		c := &Controller{ghc: fc, ca: ca, logger: log}
-		c.setStatuses([]PullRequest{pr}, pool)
+		sc := &statusController{ghc: fc, ca: ca, logger: log}
+		sc.setStatuses([]PullRequest{pr}, pool)
 		if str, err := log.String(); err != nil {
 			t.Fatalf("For case %s: failed to get log output: %v", tc.name, err)
 		} else if str != initialLog {
@@ -558,7 +702,8 @@ func TestDividePool(t *testing.T) {
 		refs: map[string]string{"k/t-i heads/master": "123"},
 	}
 	c := &Controller{
-		ghc: fc,
+		ghc:    fc,
+		logger: logrus.WithField("component", "tide"),
 	}
 	var pulls []PullRequest
 	for _, p := range testPulls {
@@ -590,7 +735,7 @@ func TestDividePool(t *testing.T) {
 	if len(sps) == 0 {
 		t.Error("No subpools.")
 	}
-	for _, sp := range sps {
+	for sp := range sps {
 		name := fmt.Sprintf("%s/%s %s", sp.org, sp.repo, sp.branch)
 		sha := fc.refs[sp.org+"/"+sp.repo+" heads/"+sp.branch]
 		if sp.sha != sha {
@@ -661,6 +806,7 @@ func TestPickBatch(t *testing.T) {
 		},
 	}
 	sp := subpool{
+		log:    logrus.WithField("component", "tide"),
 		org:    "o",
 		repo:   "r",
 		branch: "master",
@@ -676,11 +822,13 @@ func TestPickBatch(t *testing.T) {
 		if err := lg.Checkout("o", "r", "master"); err != nil {
 			t.Fatalf("Error checking out master: %v", err)
 		}
+		oid := githubql.String(fmt.Sprintf("origin/pr-%d", i))
 		var pr PullRequest
 		pr.Number = githubql.Int(i)
+		pr.HeadRefOID = oid
 		pr.Commits.Nodes = []struct {
 			Commit Commit
-		}{{Commit: Commit{OID: githubql.String(fmt.Sprintf("origin/pr-%d", i))}}}
+		}{{Commit: Commit{OID: oid}}}
 		pr.Commits.Nodes[0].Commit.Status.Contexts = append(pr.Commits.Nodes[0].Commit.Status.Contexts, Context{State: githubql.StatusStateSuccess})
 		if !testpr.success {
 			pr.Commits.Nodes[0].Commit.Status.Contexts[0].State = githubql.StatusStateFailure
@@ -688,7 +836,8 @@ func TestPickBatch(t *testing.T) {
 		sp.prs = append(sp.prs, pr)
 	}
 	c := &Controller{
-		gc: gc,
+		logger: logrus.WithField("component", "tide"),
+		gc:     gc,
 	}
 	prs, err := c.pickBatch(sp)
 	if err != nil {
@@ -872,6 +1021,7 @@ func TestTakeAction(t *testing.T) {
 		}
 
 		sp := subpool{
+			log:    logrus.WithField("component", "tide"),
 			org:    "o",
 			repo:   "r",
 			branch: "master",
@@ -889,11 +1039,13 @@ func TestTakeAction(t *testing.T) {
 				if err := lg.Checkout("o", "r", "master"); err != nil {
 					t.Fatalf("Error checking out master: %v", err)
 				}
+				oid := githubql.String(fmt.Sprintf("origin/pr-%d", i))
 				var pr PullRequest
 				pr.Number = githubql.Int(i)
+				pr.HeadRefOID = oid
 				pr.Commits.Nodes = []struct {
 					Commit Commit
-				}{{Commit: Commit{OID: githubql.String(fmt.Sprintf("origin/pr-%d", i))}}}
+				}{{Commit: Commit{OID: oid}}}
 				sp.prs = append(sp.prs, pr)
 				prs = append(prs, pr)
 			}
@@ -942,10 +1094,17 @@ func TestTakeAction(t *testing.T) {
 }
 
 func TestServeHTTP(t *testing.T) {
+	pr1 := PullRequest{}
+	pr1.Commits.Nodes = append(pr1.Commits.Nodes, struct{ Commit Commit }{})
+	pr1.Commits.Nodes[0].Commit.Status.Contexts = []Context{{
+		Context:     githubql.String("coverage/coveralls"),
+		Description: githubql.String("Coverage increased (+0.1%) to 27.599%"),
+	}}
 	c := &Controller{
 		pools: []Pool{
 			{
-				Action: Merge,
+				MissingPRs: []PullRequest{pr1},
+				Action:     Merge,
 			},
 		},
 	}
@@ -958,12 +1117,226 @@ func TestServeHTTP(t *testing.T) {
 	defer resp.Body.Close()
 	var pools []Pool
 	if err := json.NewDecoder(resp.Body).Decode(&pools); err != nil {
-		t.Errorf("JSON decoding error: %v", err)
+		t.Fatalf("JSON decoding error: %v", err)
 	}
-	if len(pools) != 1 {
-		t.Errorf("Wrong number of pools. Got %d, want 1.", len(pools))
+	if !reflect.DeepEqual(c.pools, pools) {
+		t.Errorf("Received pools %v do not match original pools %v.", pools, c.pools)
 	}
-	if pools[0].Action != Merge {
-		t.Errorf("Wrong action. Got %v, want %v.", pools[0].Action, Merge)
+}
+
+func TestHeadContexts(t *testing.T) {
+	type commitContext struct { // one context per commit for testing
+		context string
+		sha     string
+	}
+
+	win := "win"
+	lose := "lose"
+	headSHA := "head"
+	testCases := []struct {
+		name           string
+		commitContexts []commitContext
+		expectAPICall  bool
+	}{
+		{
+			name: "first commit is head",
+			commitContexts: []commitContext{
+				{context: win, sha: headSHA},
+				{context: lose, sha: "other"},
+				{context: lose, sha: "sha"},
+			},
+		},
+		{
+			name: "last commit is head",
+			commitContexts: []commitContext{
+				{context: lose, sha: "shaaa"},
+				{context: lose, sha: "other"},
+				{context: win, sha: headSHA},
+			},
+		},
+		{
+			name: "no commit is head",
+			commitContexts: []commitContext{
+				{context: lose, sha: "shaaa"},
+				{context: lose, sha: "other"},
+				{context: lose, sha: "sha"},
+			},
+			expectAPICall: true,
+		},
+	}
+
+	for _, tc := range testCases {
+		t.Logf("Running test case %q", tc.name)
+		fgc := &fgc{}
+		if tc.expectAPICall {
+			fgc.expectedSHA = headSHA
+		}
+		pr := &PullRequest{HeadRefOID: githubql.String(headSHA)}
+		for _, ctx := range tc.commitContexts {
+			commit := Commit{
+				Status: struct{ Contexts []Context }{
+					Contexts: []Context{
+						{
+							Context: githubql.String(ctx.context),
+						},
+					},
+				},
+				OID: githubql.String(ctx.sha),
+			}
+			pr.Commits.Nodes = append(pr.Commits.Nodes, struct{ Commit Commit }{commit})
+		}
+
+		contexts, err := headContexts(logrus.WithField("component", "tide"), fgc, pr)
+		if err != nil {
+			t.Fatalf("Unexpected error from headContexts: %v", err)
+		}
+		if len(contexts) != 1 || string(contexts[0].Context) != win {
+			t.Errorf("Expected exactly 1 %q context, but got: %#v", win, contexts)
+		}
+	}
+}
+
+func testPR(org, repo, branch string, number int, mergeable githubql.MergeableState) PullRequest {
+	pr := PullRequest{
+		Number:     5,
+		Mergeable:  mergeable,
+		HeadRefOID: githubql.String("SHA"),
+	}
+	pr.Repository.Owner.Login = githubql.String(org)
+	pr.Repository.Name = githubql.String(repo)
+	pr.Repository.NameWithOwner = githubql.String(fmt.Sprintf("%s/%s", org, repo))
+	pr.BaseRef.Name = githubql.String(branch)
+
+	pr.Commits.Nodes = append(pr.Commits.Nodes, struct{ Commit Commit }{
+		Commit{
+			Status: struct{ Contexts []Context }{
+				Contexts: []Context{
+					{
+						Context: githubql.String("context"),
+						State:   githubql.StatusStateSuccess,
+					},
+				},
+			},
+			OID: githubql.String("SHA"),
+		},
+	})
+	return pr
+}
+
+func TestSync(t *testing.T) {
+	mergeableA := testPR("org", "repo", "A", 5, githubql.MergeableStateMergeable)
+	unmergeableA := testPR("org", "repo", "A", 6, githubql.MergeableStateConflicting)
+	unmergeableB := testPR("org", "repo", "B", 7, githubql.MergeableStateConflicting)
+	unknownA := testPR("org", "repo", "A", 8, githubql.MergeableStateUnknown)
+
+	testcases := []struct {
+		name string
+		prs  []PullRequest
+
+		expectedPools []Pool
+	}{
+		{
+			name:          "no PRs",
+			prs:           []PullRequest{},
+			expectedPools: []Pool{},
+		},
+		{
+			name: "1 mergeable PR",
+			prs:  []PullRequest{mergeableA},
+			expectedPools: []Pool{{
+				Org:        "org",
+				Repo:       "repo",
+				Branch:     "A",
+				SuccessPRs: []PullRequest{mergeableA},
+				Action:     Merge,
+				Target:     []PullRequest{mergeableA},
+			}},
+		},
+		{
+			name:          "1 unmergeable PR",
+			prs:           []PullRequest{unmergeableA},
+			expectedPools: []Pool{},
+		},
+		{
+			name: "1 unknown PR",
+			prs:  []PullRequest{unknownA},
+			expectedPools: []Pool{{
+				Org:        "org",
+				Repo:       "repo",
+				Branch:     "A",
+				SuccessPRs: []PullRequest{unknownA},
+				Action:     Merge,
+				Target:     []PullRequest{unknownA},
+			}},
+		},
+		{
+			name: "1 mergeable, 1 unmergeable (different pools)",
+			prs:  []PullRequest{mergeableA, unmergeableB},
+			expectedPools: []Pool{{
+				Org:        "org",
+				Repo:       "repo",
+				Branch:     "A",
+				SuccessPRs: []PullRequest{mergeableA},
+				Action:     Merge,
+				Target:     []PullRequest{mergeableA},
+			}},
+		},
+		{
+			name: "1 mergeable, 1 unmergeable (same pool)",
+			prs:  []PullRequest{mergeableA, unmergeableA},
+			expectedPools: []Pool{{
+				Org:        "org",
+				Repo:       "repo",
+				Branch:     "A",
+				SuccessPRs: []PullRequest{mergeableA},
+				Action:     Merge,
+				Target:     []PullRequest{mergeableA},
+			}},
+		},
+	}
+
+	for _, tc := range testcases {
+		fgc := &fgc{prs: tc.prs}
+		fkc := &fkc{}
+		ca := &config.Agent{}
+		ca.Set(&config.Config{Tide: config.Tide{Queries: []config.TideQuery{{}}, MaxGoroutines: 4}})
+		sc := &statusController{
+			logger:         logrus.WithField("controller", "status-update"),
+			ghc:            fgc,
+			ca:             ca,
+			newPoolPending: make(chan bool, 1),
+			shutDown:       make(chan bool),
+		}
+		go sc.run()
+		defer sc.shutdown()
+		c := &Controller{
+			ca:     ca,
+			ghc:    fgc,
+			kc:     fkc,
+			logger: logrus.WithField("controller", "sync"),
+			sc:     sc,
+		}
+
+		if err := c.Sync(); err != nil {
+			t.Errorf("Unexpected error from 'Sync()': %v.", err)
+			continue
+		}
+		if len(tc.expectedPools) != len(c.pools) {
+			t.Errorf("Tide pools did not match expected. Got %#v, expected %#v.", c.pools, tc.expectedPools)
+			continue
+		}
+		for _, expected := range tc.expectedPools {
+			var match *Pool
+			for i, actual := range c.pools {
+				if expected.Org == actual.Org && expected.Repo == actual.Repo && expected.Branch == actual.Branch {
+					match = &c.pools[i]
+				}
+			}
+			if match == nil {
+				t.Errorf("Failed to find expected pool %s/%s %s.", expected.Org, expected.Repo, expected.Branch)
+			} else if !reflect.DeepEqual(*match, expected) {
+				t.Errorf("Expected pool %#v does not match actual pool %#v.", expected, *match)
+			}
+		}
 	}
 }

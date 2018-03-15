@@ -105,6 +105,11 @@ projects:
             static_configs:
               - targets:
                   - 104.197.27.114
+          - job_name: kubernetes-bazel-cache
+            metrics_path: /prometheus
+            static_configs:
+              - targets:
+                  - 35.225.115.154
           - job_name: kubernetes-misc-mungers
             metrics_path: /prometheus
             static_configs:
@@ -162,6 +167,7 @@ projects:
       istio/istio: *transform-istio
       istio/pilot: *transform-istio
       istio/mixer: *transform-istio
+      istio/fortio: *transform-istio
       istio/proxy: *transform-istio
     nginx:
       public-ip: "130.211.224.127"

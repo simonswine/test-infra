@@ -22,6 +22,7 @@ import (
 	"strconv"
 	"sync"
 
+	"github.com/bwmarrin/snowflake"
 	"github.com/sirupsen/logrus"
 
 	"k8s.io/test-infra/prow/config"
@@ -42,7 +43,7 @@ type kubeClient interface {
 }
 
 type jenkinsClient interface {
-	Build(*kube.ProwJob) error
+	Build(*kube.ProwJob, string) error
 	ListBuilds(jobs []string) (map[string]JenkinsBuild, error)
 	Abort(job string, build *JenkinsBuild) error
 }
@@ -65,11 +66,13 @@ type syncFn func(kube.ProwJob, chan<- kube.ProwJob, map[string]JenkinsBuild) err
 
 // Controller manages ProwJobs.
 type Controller struct {
-	kc  kubeClient
-	jc  jenkinsClient
-	ghc githubClient
-	log *logrus.Entry
-	ca  configAgent
+	kc     kubeClient
+	jc     jenkinsClient
+	ghc    githubClient
+	log    *logrus.Entry
+	ca     configAgent
+	node   *snowflake.Node
+	totURL string
 	// selector that will be applied on prowjobs.
 	selector string
 
@@ -84,7 +87,11 @@ type Controller struct {
 }
 
 // NewController creates a new Controller from the provided clients.
-func NewController(kc *kube.Client, jc *Client, ghc *github.Client, logger *logrus.Entry, ca *config.Agent, selector string) *Controller {
+func NewController(kc *kube.Client, jc *Client, ghc *github.Client, logger *logrus.Entry, ca *config.Agent, totURL, selector string) (*Controller, error) {
+	n, err := snowflake.NewNode(1)
+	if err != nil {
+		return nil, err
+	}
 	if logger == nil {
 		logger = logrus.NewEntry(logrus.StandardLogger())
 	}
@@ -95,8 +102,30 @@ func NewController(kc *kube.Client, jc *Client, ghc *github.Client, logger *logr
 		log:         logger,
 		ca:          ca,
 		selector:    selector,
+		node:        n,
+		totURL:      totURL,
 		pendingJobs: make(map[string]int),
+	}, nil
+}
+
+func (c *Controller) config() config.Controller {
+	operators := c.ca.Config().JenkinsOperators
+	if len(operators) == 1 {
+		return operators[0].Controller
 	}
+	configured := make([]string, 0, len(operators))
+	for _, cfg := range operators {
+		if cfg.LabelSelectorString == c.selector {
+			return cfg.Controller
+		}
+		configured = append(configured, cfg.LabelSelectorString)
+	}
+	if len(c.selector) == 0 {
+		c.log.Panicf("You need to specify a non-empty --label-selector (existing selectors: %v).", configured)
+	} else {
+		c.log.Panicf("No config exists for --label-selector=%s.", c.selector)
+	}
+	return config.Controller{}
 }
 
 // canExecuteConcurrently checks whether the provided ProwJob can
@@ -105,7 +134,7 @@ func (c *Controller) canExecuteConcurrently(pj *kube.ProwJob) bool {
 	c.lock.Lock()
 	defer c.lock.Unlock()
 
-	if max := c.ca.Config().JenkinsOperator.MaxConcurrency; max > 0 {
+	if max := c.config().MaxConcurrency; max > 0 {
 		var running int
 		for _, num := range c.pendingJobs {
 			running += num
@@ -144,6 +173,11 @@ func (c *Controller) Sync() error {
 	if err != nil {
 		return fmt.Errorf("error listing prow jobs: %v", err)
 	}
+	// Share what we have for gathering metrics.
+	c.pjLock.Lock()
+	c.pjs = pjs
+	c.pjLock.Unlock()
+
 	// TODO: Replace the following filtering with a field selector once CRDs support field selectors.
 	// https://github.com/kubernetes/kubernetes/issues/53459
 	var jenkinsJobs []kube.ProwJob
@@ -163,11 +197,6 @@ func (c *Controller) Sync() error {
 		syncErrs = append(syncErrs, err)
 	}
 
-	// Share what we have for gathering metrics.
-	c.pjLock.Lock()
-	c.pjs = pjs
-	c.pjLock.Unlock()
-
 	pendingCh, triggeredCh := pjutil.PartitionActive(pjs)
 	errCh := make(chan error, len(pjs))
 	reportCh := make(chan kube.ProwJob, len(pjs))
@@ -177,7 +206,7 @@ func (c *Controller) Sync() error {
 	c.pendingJobs = make(map[string]int)
 	// Sync pending jobs first so we can determine what is the maximum
 	// number of new jobs we can trigger when syncing the non-pendings.
-	maxSyncRoutines := c.ca.Config().JenkinsOperator.MaxGoroutines
+	maxSyncRoutines := c.config().MaxGoroutines
 	c.log.Debugf("Handling %d pending prowjobs", len(pendingCh))
 	syncProwJobs(c.log, c.syncPendingJob, maxSyncRoutines, pendingCh, reportCh, errCh, jbs)
 	c.log.Debugf("Handling %d triggered prowjobs", len(triggeredCh))
@@ -191,7 +220,7 @@ func (c *Controller) Sync() error {
 	}
 
 	var reportErrs []error
-	reportTemplate := c.ca.Config().JenkinsOperator.ReportTemplate
+	reportTemplate := c.config().ReportTemplate
 	for report := range reportCh {
 		if err := reportlib.Report(c.ghc, reportTemplate, report); err != nil {
 			reportErrs = append(reportErrs, err)
@@ -244,15 +273,15 @@ func (c *Controller) terminateDupes(pjs []kube.ProwJob, jbs map[string]JenkinsBu
 			continue
 		}
 		cancelIndex := i
-		if pjs[prev].Status.StartTime.Before(pj.Status.StartTime) {
+		if (&pjs[prev].Status.StartTime).Before(&pj.Status.StartTime) {
 			cancelIndex = prev
 			dupes[n] = i
 		}
 		toCancel := pjs[cancelIndex]
 		// Allow aborting presubmit jobs for commits that have been superseded by
 		// newer commits in Github pull requests.
-		if c.ca.Config().JenkinsOperator.AllowCancellations {
-			build, buildExists := jbs[toCancel.Metadata.Name]
+		if c.config().AllowCancellations {
+			build, buildExists := jbs[toCancel.ObjectMeta.Name]
 			// Avoid cancelling enqueued builds.
 			if buildExists && build.IsEnqueued() {
 				continue
@@ -270,7 +299,7 @@ func (c *Controller) terminateDupes(pjs []kube.ProwJob, jbs map[string]JenkinsBu
 		c.log.WithFields(pjutil.ProwJobFields(&toCancel)).
 			WithField("from", prevState).
 			WithField("to", toCancel.Status.State).Info("Transitioning states.")
-		npj, err := c.kc.ReplaceProwJob(toCancel.Metadata.Name, toCancel)
+		npj, err := c.kc.ReplaceProwJob(toCancel.ObjectMeta.Name, toCancel)
 		if err != nil {
 			return err
 		}
@@ -312,7 +341,7 @@ func (c *Controller) syncPendingJob(pj kube.ProwJob, reports chan<- kube.ProwJob
 	// Record last known state so we can log state transitions.
 	prevState := pj.Status.State
 
-	jb, jbExists := jbs[pj.Metadata.Name]
+	jb, jbExists := jbs[pj.ObjectMeta.Name]
 	if !jbExists {
 		pj.SetComplete()
 		pj.Status.State = kube.ErrorState
@@ -339,11 +368,11 @@ func (c *Controller) syncPendingJob(pj kube.ProwJob, reports chan<- kube.ProwJob
 			pj.Status.State = kube.SuccessState
 			pj.Status.Description = "Jenkins job succeeded."
 			for _, nj := range pj.Spec.RunAfterSuccess {
-				child := pjutil.NewProwJob(nj, pj.Metadata.Labels)
+				child := pjutil.NewProwJob(nj, pj.ObjectMeta.Labels)
 				if !c.RunAfterSuccessCanRun(&pj, &child, c.ca, c.ghc) {
 					continue
 				}
-				if _, err := c.kc.CreateProwJob(pjutil.NewProwJob(nj, pj.Metadata.Labels)); err != nil {
+				if _, err := c.kc.CreateProwJob(pjutil.NewProwJob(nj, pj.ObjectMeta.Labels)); err != nil {
 					return fmt.Errorf("error starting next prowjob: %v", err)
 				}
 			}
@@ -359,10 +388,11 @@ func (c *Controller) syncPendingJob(pj kube.ProwJob, reports chan<- kube.ProwJob
 			pj.Status.Description = "Jenkins job aborted."
 		}
 		// Construct the status URL that will be used in reports.
-		pj.Status.PodName = fmt.Sprintf("%s-%d", pj.Spec.Job, jb.Number)
-		pj.Status.BuildID = strconv.Itoa(jb.Number)
+		pj.Status.PodName = pj.ObjectMeta.Name
+		pj.Status.BuildID = jb.BuildID()
+		pj.Status.JenkinsBuildID = strconv.Itoa(jb.Number)
 		var b bytes.Buffer
-		if err := c.ca.Config().JenkinsOperator.JobURLTemplate.Execute(&b, &pj); err != nil {
+		if err := c.config().JobURLTemplate.Execute(&b, &pj); err != nil {
 			return fmt.Errorf("error executing URL template: %v", err)
 		}
 		pj.Status.URL = b.String()
@@ -374,7 +404,7 @@ func (c *Controller) syncPendingJob(pj kube.ProwJob, reports chan<- kube.ProwJob
 			WithField("from", prevState).
 			WithField("to", pj.Status.State).Info("Transitioning states.")
 	}
-	_, err := c.kc.ReplaceProwJob(pj.Metadata.Name, pj)
+	_, err := c.kc.ReplaceProwJob(pj.ObjectMeta.Name, pj)
 	return err
 }
 
@@ -382,13 +412,17 @@ func (c *Controller) syncTriggeredJob(pj kube.ProwJob, reports chan<- kube.ProwJ
 	// Record last known state so we can log state transitions.
 	prevState := pj.Status.State
 
-	if _, jbExists := jbs[pj.Metadata.Name]; !jbExists {
+	if _, jbExists := jbs[pj.ObjectMeta.Name]; !jbExists {
 		// Do not start more jobs than specified.
 		if !c.canExecuteConcurrently(&pj) {
 			return nil
 		}
+		buildID, err := c.getBuildID(pj.Spec.Job)
+		if err != nil {
+			return fmt.Errorf("error getting build ID: %v", err)
+		}
 		// Start the Jenkins job.
-		if err := c.jc.Build(&pj); err != nil {
+		if err := c.jc.Build(&pj, buildID); err != nil {
 			c.log.WithError(err).WithFields(pjutil.ProwJobFields(&pj)).Warn("Cannot start Jenkins build")
 			pj.SetComplete()
 			pj.Status.State = kube.ErrorState
@@ -412,8 +446,15 @@ func (c *Controller) syncTriggeredJob(pj kube.ProwJob, reports chan<- kube.ProwJ
 			WithField("from", prevState).
 			WithField("to", pj.Status.State).Info("Transitioning states.")
 	}
-	_, err := c.kc.ReplaceProwJob(pj.Metadata.Name, pj)
+	_, err := c.kc.ReplaceProwJob(pj.ObjectMeta.Name, pj)
 	return err
+}
+
+func (c *Controller) getBuildID(name string) (string, error) {
+	if c.totURL == "" {
+		return c.node.Generate().String(), nil
+	}
+	return pjutil.GetBuildID(name, c.totURL)
 }
 
 // RunAfterSuccessCanRun returns whether a child job (specified as run_after_success in the

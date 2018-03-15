@@ -19,14 +19,13 @@ package plank
 import (
 	"bytes"
 	"fmt"
-	"io/ioutil"
-	"net/http"
 	"strings"
 	"sync"
 	"time"
 
 	"github.com/bwmarrin/snowflake"
 	"github.com/sirupsen/logrus"
+	"k8s.io/api/core/v1"
 
 	"k8s.io/test-infra/prow/config"
 	"k8s.io/test-infra/prow/github"
@@ -44,7 +43,7 @@ type kubeClient interface {
 	ListProwJobs(string) ([]kube.ProwJob, error)
 	ReplaceProwJob(string, kube.ProwJob) (kube.ProwJob, error)
 
-	CreatePod(kube.Pod) (kube.Pod, error)
+	CreatePod(v1.Pod) (kube.Pod, error)
 	ListPods(string) ([]kube.Pod, error)
 	DeletePod(string) error
 }
@@ -171,7 +170,7 @@ func (c *Controller) Sync() error {
 			return fmt.Errorf("error listing pods in cluster %q: %v", alias, err)
 		}
 		for _, pod := range pods {
-			pm[pod.Metadata.Name] = pod
+			pm[pod.ObjectMeta.Name] = pod
 		}
 	}
 	// TODO: Replace the following filtering with a field selector once CRDs support field selectors.
@@ -254,7 +253,7 @@ func (c *Controller) terminateDupes(pjs []kube.ProwJob, pm map[string]kube.Pod) 
 			continue
 		}
 		cancelIndex := i
-		if pjs[prev].Status.StartTime.Before(pj.Status.StartTime) {
+		if (&pjs[prev].Status.StartTime).Before(&pj.Status.StartTime) {
 			cancelIndex = prev
 			dupes[n] = i
 		}
@@ -262,10 +261,10 @@ func (c *Controller) terminateDupes(pjs []kube.ProwJob, pm map[string]kube.Pod) 
 		// Allow aborting presubmit jobs for commits that have been superseded by
 		// newer commits in Github pull requests.
 		if c.ca.Config().Plank.AllowCancellations {
-			if pod, exists := pm[toCancel.Metadata.Name]; exists {
+			if pod, exists := pm[toCancel.ObjectMeta.Name]; exists {
 				if client, ok := c.pkcs[toCancel.ClusterAlias()]; !ok {
 					c.log.WithFields(pjutil.ProwJobFields(&toCancel)).Errorf("Unknown cluster alias %q.", toCancel.ClusterAlias())
-				} else if err := client.DeletePod(pod.Metadata.Name); err != nil {
+				} else if err := client.DeletePod(pod.ObjectMeta.Name); err != nil {
 					c.log.WithError(err).WithFields(pjutil.ProwJobFields(&toCancel)).Warn("Cannot delete pod")
 				}
 			}
@@ -276,7 +275,7 @@ func (c *Controller) terminateDupes(pjs []kube.ProwJob, pm map[string]kube.Pod) 
 		c.log.WithFields(pjutil.ProwJobFields(&toCancel)).
 			WithField("from", prevState).
 			WithField("to", toCancel.Status.State).Info("Transitioning states.")
-		npj, err := c.kc.ReplaceProwJob(toCancel.Metadata.Name, toCancel)
+		npj, err := c.kc.ReplaceProwJob(toCancel.ObjectMeta.Name, toCancel)
 		if err != nil {
 			return err
 		}
@@ -319,7 +318,7 @@ func (c *Controller) syncPendingJob(pj kube.ProwJob, pm map[string]kube.Pod, rep
 	// Record last known state so we can log state transitions.
 	prevState := pj.Status.State
 
-	pod, podExists := pm[pj.Metadata.Name]
+	pod, podExists := pm[pj.ObjectMeta.Name]
 	if !podExists {
 		c.incrementNumPendingJobs(pj.Spec.Job)
 		// Pod is missing. This can happen in case the previous pod was deleted manually or by
@@ -350,7 +349,7 @@ func (c *Controller) syncPendingJob(pj kube.ProwJob, pm map[string]kube.Pod, rep
 			if !ok {
 				return fmt.Errorf("Unknown cluster alias %q.", pj.ClusterAlias())
 			}
-			return client.DeletePod(pj.Metadata.Name)
+			return client.DeletePod(pj.ObjectMeta.Name)
 
 		case kube.PodSucceeded:
 			// Pod succeeded. Update ProwJob, talk to GitHub, and start next jobs.
@@ -358,11 +357,11 @@ func (c *Controller) syncPendingJob(pj kube.ProwJob, pm map[string]kube.Pod, rep
 			pj.Status.State = kube.SuccessState
 			pj.Status.Description = "Job succeeded."
 			for _, nj := range pj.Spec.RunAfterSuccess {
-				child := pjutil.NewProwJob(nj, pj.Metadata.Labels)
+				child := pjutil.NewProwJob(nj, pj.ObjectMeta.Labels)
 				if !c.RunAfterSuccessCanRun(&pj, &child, c.ca, c.ghc) {
 					continue
 				}
-				if _, err := c.kc.CreateProwJob(pjutil.NewProwJob(nj, pj.Metadata.Labels)); err != nil {
+				if _, err := c.kc.CreateProwJob(pjutil.NewProwJob(nj, pj.ObjectMeta.Labels)); err != nil {
 					return fmt.Errorf("error starting next prowjob: %v", err)
 				}
 			}
@@ -375,12 +374,26 @@ func (c *Controller) syncPendingJob(pj kube.ProwJob, pm map[string]kube.Pod, rep
 				if !ok {
 					return fmt.Errorf("Unknown cluster alias %q.", pj.ClusterAlias())
 				}
-				return client.DeletePod(pj.Metadata.Name)
+				return client.DeletePod(pj.ObjectMeta.Name)
 			}
 			// Pod failed. Update ProwJob, talk to GitHub.
 			pj.SetComplete()
 			pj.Status.State = kube.FailureState
 			pj.Status.Description = "Job failed."
+
+		case kube.PodPending:
+			maxPodPending := c.ca.Config().Plank.PodPendingTimeout
+			if pod.Status.StartTime.IsZero() || time.Since(pod.Status.StartTime.Time) < maxPodPending {
+				// Pod is running. Do nothing.
+				c.incrementNumPendingJobs(pj.Spec.Job)
+				return nil
+			}
+
+			// Pod is stuck in pending state longer than maxPodPending
+			// abort the job, and talk to Github
+			pj.SetComplete()
+			pj.Status.State = kube.AbortedState
+			pj.Status.Description = "Job aborted."
 
 		default:
 			// Pod is running. Do nothing.
@@ -400,7 +413,7 @@ func (c *Controller) syncPendingJob(pj kube.ProwJob, pm map[string]kube.Pod, rep
 			WithField("from", prevState).
 			WithField("to", pj.Status.State).Info("Transitioning states.")
 	}
-	_, err := c.kc.ReplaceProwJob(pj.Metadata.Name, pj)
+	_, err := c.kc.ReplaceProwJob(pj.ObjectMeta.Name, pj)
 	return err
 }
 
@@ -409,7 +422,7 @@ func (c *Controller) syncTriggeredJob(pj kube.ProwJob, pm map[string]kube.Pod, r
 	prevState := pj.Status.State
 
 	var id, pn string
-	pod, podExists := pm[pj.Metadata.Name]
+	pod, podExists := pm[pj.ObjectMeta.Name]
 	// We may end up in a state where the pod exists but the prowjob is not
 	// updated to pending if we successfully create a new pod in a previous
 	// sync but the prowjob update fails. Simply ignore creating a new pod
@@ -434,7 +447,7 @@ func (c *Controller) syncTriggeredJob(pj kube.ProwJob, pm map[string]kube.Pod, r
 		}
 	} else {
 		id = getPodBuildID(&pod)
-		pn = pod.Metadata.Name
+		pn = pod.ObjectMeta.Name
 	}
 
 	if pj.Status.State == kube.TriggeredState {
@@ -455,7 +468,7 @@ func (c *Controller) syncTriggeredJob(pj kube.ProwJob, pm map[string]kube.Pod, r
 			WithField("from", prevState).
 			WithField("to", pj.Status.State).Info("Transitioning states.")
 	}
-	_, err := c.kc.ReplaceProwJob(pj.Metadata.Name, pj)
+	_, err := c.kc.ReplaceProwJob(pj.ObjectMeta.Name, pj)
 	return err
 }
 
@@ -480,34 +493,14 @@ func (c *Controller) startPod(pj kube.ProwJob) (string, string, error) {
 	if err != nil {
 		return "", "", err
 	}
-	return buildID, actual.Metadata.Name, nil
+	return buildID, actual.ObjectMeta.Name, nil
 }
 
 func (c *Controller) getBuildID(name string) (string, error) {
 	if c.totURL == "" {
 		return c.node.Generate().String(), nil
 	}
-	var err error
-	url := c.totURL + "/vend/" + name
-	for retries := 0; retries < 60; retries++ {
-		if retries > 0 {
-			time.Sleep(2 * time.Second)
-		}
-		var resp *http.Response
-		resp, err = http.Get(url)
-		if err != nil {
-			continue
-		}
-		defer resp.Body.Close()
-		if resp.StatusCode != 200 {
-			continue
-		}
-		if buf, err := ioutil.ReadAll(resp.Body); err == nil {
-			return string(buf), nil
-		}
-		return "", err
-	}
-	return "", err
+	return pjutil.GetBuildID(name, c.totURL)
 }
 
 func getPodBuildID(pod *kube.Pod) string {
@@ -516,7 +509,7 @@ func getPodBuildID(pod *kube.Pod) string {
 			return env.Value
 		}
 	}
-	logrus.Warningf("BUILD_NUMBER was not found in pod %q: streaming logs from deck will not work", pod.Metadata.Name)
+	logrus.Warningf("BUILD_NUMBER was not found in pod %q: streaming logs from deck will not work", pod.ObjectMeta.Name)
 	return ""
 }
 

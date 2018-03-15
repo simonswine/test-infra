@@ -20,6 +20,7 @@ package main
 
 import (
 	"encoding/json"
+	"errors"
 	"flag"
 	"fmt"
 	"io/ioutil"
@@ -30,17 +31,54 @@ import (
 	"sync"
 	"time"
 
-	log "github.com/sirupsen/logrus"
+	"github.com/sirupsen/logrus"
+
+	"k8s.io/test-infra/prow/config"
+	"k8s.io/test-infra/prow/logrusutil"
+	"k8s.io/test-infra/prow/pjutil"
+	"k8s.io/test-infra/prow/pod-utils/gcs"
 )
 
-var (
-	port        = flag.Int("port", 8888, "port to listen on")
-	storagePath = flag.String("storage", "tot.json", "where to store the results")
+type options struct {
+	port        int
+	storagePath string
 
-	// TODO(rmmh): remove this once we have no jobs running on Jenkins
-	useFallback = flag.Bool("fallback", false, "fallback to GCS bucket for missing builds")
-	fallbackURI = "https://storage.googleapis.com/kubernetes-jenkins/logs/%s/latest-build.txt"
-)
+	useFallback bool
+	fallbackURI string
+
+	configPath     string
+	fallbackBucket string
+}
+
+func gatherOptions() options {
+	o := options{}
+	flag.IntVar(&o.port, "port", 8888, "Port to listen on.")
+	flag.StringVar(&o.storagePath, "storage", "tot.json", "Where to store the results.")
+
+	flag.BoolVar(&o.useFallback, "fallback", false, "Fallback to GCS bucket for missing builds.")
+	flag.StringVar(&o.fallbackURI, "fallback-url-template",
+		"https://storage.googleapis.com/kubernetes-jenkins/logs/%s/latest-build.txt",
+		"URL template to fallback to for jobs that lack a last vended build number.",
+	)
+
+	flag.StringVar(&o.configPath, "config-path", "", "Path to prow config.")
+	flag.StringVar(&o.fallbackBucket, "fallback-bucket", "",
+		"Fallback to top-level bucket for jobs that lack a last vended build number. The bucket layout is expected to follow https://github.com/kubernetes/test-infra/tree/master/gubernator#gcs-bucket-layout",
+	)
+
+	flag.Parse()
+	return o
+}
+
+func (o *options) Validate() error {
+	if o.configPath != "" && o.fallbackBucket == "" {
+		return errors.New("you need to provide a bucket to fallback to when the prow config is specified")
+	}
+	if o.configPath == "" && o.fallbackBucket != "" {
+		return errors.New("you need to provide the prow config when a fallback bucket is specified")
+	}
+	return nil
+}
 
 type store struct {
 	Number       map[string]int // job name -> last vended build number
@@ -78,75 +116,81 @@ func (s *store) save() error {
 	return os.Rename(s.storagePath+".tmp", s.storagePath)
 }
 
-func (s *store) vend(b string) int {
+func (s *store) vend(jobName string) int {
 	s.mutex.Lock()
 	defer s.mutex.Unlock()
-	n, ok := s.Number[b]
+	n, ok := s.Number[jobName]
 	if !ok && s.fallbackFunc != nil {
-		n = s.fallbackFunc(b)
+		n = s.fallbackFunc(jobName)
 	}
 	n++
 
-	s.Number[b] = n
+	s.Number[jobName] = n
 
 	err := s.save()
 	if err != nil {
-		log.Error(err)
+		logrus.Error(err)
 	}
 
 	return n
 }
 
-func (s *store) peek(b string) int {
+func (s *store) peek(jobName string) int {
 	s.mutex.Lock()
 	defer s.mutex.Unlock()
-	return s.Number[b]
+	return s.Number[jobName]
 }
 
-func (s *store) set(b string, n int) {
+func (s *store) set(jobName string, n int) {
 	s.mutex.Lock()
 	defer s.mutex.Unlock()
-	s.Number[b] = n
+	s.Number[jobName] = n
 
 	err := s.save()
 	if err != nil {
-		log.Error(err)
+		logrus.Error(err)
 	}
 }
 
 func (s *store) handle(w http.ResponseWriter, r *http.Request) {
-	b := r.URL.Path[len("/vend/"):]
+	jobName := r.URL.Path[len("/vend/"):]
 	switch r.Method {
 	case "GET":
-		n := s.vend(b)
-		log.Infof("Vending %s number %d to %s.", b, n, r.RemoteAddr)
+		n := s.vend(jobName)
+		logrus.Infof("Vending %s number %d to %s.", jobName, n, r.RemoteAddr)
 		fmt.Fprintf(w, "%d", n)
 	case "HEAD":
-		n := s.peek(b)
-		log.Infof("Peeking %s number %d to %s.", b, n, r.RemoteAddr)
+		n := s.peek(jobName)
+		logrus.Infof("Peeking %s number %d to %s.", jobName, n, r.RemoteAddr)
 		fmt.Fprintf(w, "%d", n)
 	case "POST":
 		body, err := ioutil.ReadAll(r.Body)
 		if err != nil {
-			log.WithError(err).Error("Unable to read body.")
+			logrus.WithError(err).Error("Unable to read body.")
 			return
 		}
 		n, err := strconv.Atoi(string(body))
 		if err != nil {
-			log.WithError(err).Error("Unable to parse number.")
+			logrus.WithError(err).Error("Unable to parse number.")
 			return
 		}
-		log.Infof("Setting %s to %d from %s.", b, n, r.RemoteAddr)
-		s.set(b, n)
+		logrus.Infof("Setting %s to %d from %s.", jobName, n, r.RemoteAddr)
+		s.set(jobName, n)
 	}
 }
 
 type fallbackHandler struct {
 	template string
+	// in case a config agent is provided, tot will
+	// determine the GCS path that it needs to use
+	// based on the configured jobs in prow and
+	// bucket.
+	configAgent *config.Agent
+	bucket      string
 }
 
-func (f fallbackHandler) get(b string) int {
-	url := fmt.Sprintf(f.template, b)
+func (f fallbackHandler) get(jobName string) int {
+	url := f.getURL(jobName)
 
 	var body []byte
 
@@ -159,11 +203,11 @@ func (f fallbackHandler) get(b string) int {
 				if err == nil {
 					break
 				} else {
-					log.WithError(err).Error("Failed to read response body.")
+					logrus.WithError(err).Error("Failed to read response body.")
 				}
 			}
 		} else {
-			log.WithError(err).Errorf("Failed to GET %s.", url)
+			logrus.WithError(err).Errorf("Failed to GET %s.", url)
 		}
 		time.Sleep(2 * time.Second)
 	}
@@ -176,21 +220,80 @@ func (f fallbackHandler) get(b string) int {
 	return n
 }
 
-func main() {
-	flag.Parse()
-
-	log.SetFormatter(&log.JSONFormatter{})
-
-	s, err := newStore(*storagePath)
-	if err != nil {
-		log.WithError(err).Fatal("newStore failed")
+func (f fallbackHandler) getURL(jobName string) string {
+	if f.configAgent == nil {
+		return fmt.Sprintf(f.template, jobName)
 	}
 
-	if *useFallback {
-		s.fallbackFunc = fallbackHandler{fallbackURI}.get
+	var spec *pjutil.JobSpec
+	cfg := f.configAgent.Config()
+
+	for _, pre := range cfg.AllPresubmits(nil) {
+		if jobName == pre.Name {
+			spec = pjutil.PresubmitToJobSpec(pre)
+			break
+		}
+	}
+	if spec == nil {
+		for _, post := range cfg.AllPostsubmits(nil) {
+			if jobName == post.Name {
+				spec = pjutil.PostsubmitToJobSpec(post)
+				break
+			}
+		}
+	}
+	if spec == nil {
+		for _, per := range cfg.AllPeriodics() {
+			if jobName == per.Name {
+				spec = pjutil.PeriodicToJobSpec(per)
+				break
+			}
+		}
+	}
+	// If spec is still nil, we know nothing about the requested job.
+	if spec == nil {
+		logrus.Errorf("requested job is unknown to prow: %s", jobName)
+		return ""
+	}
+	paths := gcs.LatestBuildForSpec(spec, nil)
+	if len(paths) != 1 {
+		logrus.Errorf("expected a single GCS path, got %v", paths)
+		return ""
+	}
+	return fmt.Sprintf("%s/%s", strings.TrimSuffix(f.bucket, "/"), paths[0])
+}
+
+func main() {
+	o := gatherOptions()
+	if err := o.Validate(); err != nil {
+		logrus.Fatalf("Invalid options: %v", err)
+	}
+	logrus.SetFormatter(
+		logrusutil.NewDefaultFieldsFormatter(nil, logrus.Fields{"component": "tot"}),
+	)
+
+	s, err := newStore(o.storagePath)
+	if err != nil {
+		logrus.WithError(err).Fatal("newStore failed")
+	}
+
+	if o.useFallback {
+		var configAgent *config.Agent
+		if o.configPath != "" {
+			configAgent = &config.Agent{}
+			if err := configAgent.Start(o.configPath); err != nil {
+				logrus.WithError(err).Fatal("Error starting config agent.")
+			}
+		}
+
+		s.fallbackFunc = fallbackHandler{
+			template:    o.fallbackURI,
+			configAgent: configAgent,
+			bucket:      o.fallbackBucket,
+		}.get
 	}
 
 	http.HandleFunc("/vend/", s.handle)
 
-	log.Fatal(http.ListenAndServe(":"+strconv.Itoa(*port), nil))
+	logrus.Fatal(http.ListenAndServe(":"+strconv.Itoa(o.port), nil))
 }

@@ -17,11 +17,61 @@ limitations under the License.
 package config
 
 import (
+	"fmt"
 	"regexp"
 	"time"
 
-	"k8s.io/test-infra/prow/kube"
+	"k8s.io/api/core/v1"
 )
+
+// Preset is intended to match the k8s' PodPreset feature, and may be removed
+// if that feature goes beta.
+type Preset struct {
+	Labels       map[string]string `json:"labels"`
+	Env          []v1.EnvVar       `json:"env"`
+	Volumes      []v1.Volume       `json:"volumes"`
+	VolumeMounts []v1.VolumeMount  `json:"volumeMounts"`
+}
+
+func mergePreset(preset Preset, labels map[string]string, pod *v1.PodSpec) error {
+	if pod == nil {
+		return nil
+	}
+	for l, v := range preset.Labels {
+		if v2, ok := labels[l]; !ok || v2 != v {
+			return nil
+		}
+	}
+	for _, e1 := range preset.Env {
+		for i := range pod.Containers {
+			for _, e2 := range pod.Containers[i].Env {
+				if e1.Name == e2.Name {
+					return fmt.Errorf("env var duplicated in pod spec: %s", e1.Name)
+				}
+			}
+			pod.Containers[i].Env = append(pod.Containers[i].Env, e1)
+		}
+	}
+	for _, v1 := range preset.Volumes {
+		for _, v2 := range pod.Volumes {
+			if v1.Name == v2.Name {
+				return fmt.Errorf("volume duplicated in pod spec: %s", v1.Name)
+			}
+		}
+		pod.Volumes = append(pod.Volumes, v1)
+	}
+	for _, vm1 := range preset.VolumeMounts {
+		for i := range pod.Containers {
+			for _, vm2 := range pod.Containers[i].VolumeMounts {
+				if vm1.Name == vm2.Name {
+					return fmt.Errorf("volume mount duplicated in pod spec: %s", vm1.Name)
+				}
+			}
+			pod.Containers[i].VolumeMounts = append(pod.Containers[i].VolumeMounts, vm1)
+		}
+	}
+	return nil
+}
 
 // Presubmit is the job-specific trigger info.
 type Presubmit struct {
@@ -48,7 +98,7 @@ type Presubmit struct {
 	// Cluster is the alias of the cluster to run this job in. (Default: kube.DefaultClusterAlias)
 	Cluster string `json:"cluster"`
 	// Kubernetes pod spec.
-	Spec *kube.PodSpec `json:"spec,omitempty"`
+	Spec *v1.PodSpec `json:"spec,omitempty"`
 	// Run these jobs after successfully running this one.
 	RunAfterSuccess []Presubmit `json:"run_after_success"`
 
@@ -69,7 +119,7 @@ type Postsubmit struct {
 	// Cluster is the alias of the cluster to run this job in. (Default: kube.DefaultClusterAlias)
 	Cluster string `json:"cluster"`
 	// Kubernetes pod spec.
-	Spec *kube.PodSpec `json:"spec,omitempty"`
+	Spec *v1.PodSpec `json:"spec,omitempty"`
 	// Maximum number of this job running concurrently, 0 implies no limit.
 	MaxConcurrency int `json:"max_concurrency"`
 
@@ -88,7 +138,7 @@ type Periodic struct {
 	// Cluster is the alias of the cluster to run this job in. (Default: kube.DefaultClusterAlias)
 	Cluster string `json:"cluster"`
 	// Kubernetes pod spec.
-	Spec *kube.PodSpec `json:"spec,omitempty"`
+	Spec *v1.PodSpec `json:"spec,omitempty"`
 	// (deprecated)Interval to wait between two runs of the job.
 	Interval string `json:"interval"`
 	// Cron representation of job trigger time
@@ -153,68 +203,51 @@ func (ps Presubmit) RunsAgainstChanges(changes []string) bool {
 	return false
 }
 
-type ChangedFilesProvider func() ([]string, error)
-
-func matching(j Presubmit, body string, testAll bool, changes ChangedFilesProvider) ([]Presubmit, error) {
-	var result []Presubmit
-	if (testAll && j.AlwaysRun) || j.re.MatchString(body) {
-		result = append(result, j)
-	} else if testAll && j.RunIfChanged != "" {
-		files, err := changes()
-		if err != nil {
-			return nil, err
-		}
-		if j.RunsAgainstChanges(files) {
-			result = append(result, j)
-		}
-	}
-	for _, child := range j.RunAfterSuccess {
-		if subRes, err := matching(child, body, testAll, changes); err != nil {
-			return nil, err
-		} else {
-			result = append(result, subRes...)
-		}
-	}
-	return result, nil
+func (ps Presubmit) TriggerMatches(body string) bool {
+	return ps.re.MatchString(body)
 }
 
-func (c *Config) MatchingPresubmits(fullRepoName, body string, testAll bool, changes ChangedFilesProvider) ([]Presubmit, error) {
+type ChangedFilesProvider func() ([]string, error)
+
+func matching(j Presubmit, body string, testAll bool) []Presubmit {
+	// When matching ignore whether the job runs for the branch or whether the job runs for the
+	// PR's changes. Even if the job doesn't run, it still matches the PR and may need to be marked
+	// as skipped on github.
+	var result []Presubmit
+	if (testAll && (j.AlwaysRun || j.RunIfChanged != "")) || j.TriggerMatches(body) {
+		result = append(result, j)
+	}
+	for _, child := range j.RunAfterSuccess {
+		result = append(result, matching(child, body, testAll)...)
+	}
+	return result
+}
+
+func (c *Config) MatchingPresubmits(fullRepoName, body string, testAll bool) []Presubmit {
 	var result []Presubmit
 	if jobs, ok := c.Presubmits[fullRepoName]; ok {
 		for _, job := range jobs {
-			if subRes, err := matching(job, body, testAll, changes); err != nil {
-				return nil, err
-			} else {
-				result = append(result, subRes...)
-			}
+			result = append(result, matching(job, body, testAll)...)
 		}
 	}
-	return result, nil
+	return result
 }
 
 // RetestPresubmits returns all presubmits that should be run given a /retest command.
 // This is the set of all presubmits intersected with ((alwaysRun + runContexts) - skipContexts)
-func (c *Config) RetestPresubmits(fullRepoName string, skipContexts, runContexts map[string]bool, changes ChangedFilesProvider) ([]Presubmit, error) {
+func (c *Config) RetestPresubmits(fullRepoName string, skipContexts, runContexts map[string]bool) []Presubmit {
 	var result []Presubmit
 	if jobs, ok := c.Presubmits[fullRepoName]; ok {
 		for _, job := range jobs {
 			if skipContexts[job.Context] {
 				continue
 			}
-			if job.AlwaysRun || runContexts[job.Context] {
+			if job.AlwaysRun || job.RunIfChanged != "" || runContexts[job.Context] {
 				result = append(result, job)
-			} else if job.RunIfChanged != "" {
-				files, err := changes()
-				if err != nil {
-					return nil, err
-				}
-				if job.RunsAgainstChanges(files) {
-					result = append(result, job)
-				}
 			}
 		}
 	}
-	return result, nil
+	return result
 }
 
 // GetPresubmit returns the presubmit job for the provided repo and job name.

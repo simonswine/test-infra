@@ -24,10 +24,11 @@ See also: [Life of a Prow Job](./architecture.md)
 
 New features added to each components:
 
+ - *February 1, 2018* `updateconfig` will now update any configmap on merge
  - *November 14, 2017* `jenkins-operator:0.58` exposes prometheus metrics.
  - *November 8, 2017* `horologium:0.14` prow periodic job now support cron
-   triggers. See https://godoc.org/gopkg.in/robfig/cron.v2 for doc to the 
-   cron library we are using. 
+   triggers. See https://godoc.org/gopkg.in/robfig/cron.v2 for doc to the
+   cron library we are using.
 
 Breaking changes to external APIs (labels, GitHub interactions, configuration
 or deployment) will be documented in this section. Prow is in a pre-release
@@ -36,6 +37,23 @@ Note: versions specified in these announcements may not include bug fixes made
 in more recent versions so it is recommended that the most recent versions are
 used when updating deployments.
 
+ - *March 1, 2018* `MilestoneStatus` has been removed from the plugins Configuration
+   in favor of the `Milestone` which is shared between two plugins: 1) `milestonestatus`
+   and 2) `milestone`.  The milestonestatus plugin now uses the `Milestone` object to
+   get the maintainers team ID
+ - *February 27, 2018* `jenkins-operator` does not use `$BUILD_ID` as a fallback
+   to `$PROW_JOB_ID` anymore.
+ - *February 15, 2018* `jenkins-operator` can now accept the `--tot-url` flag
+   and will use the connection to `tot` to vend build identifiers as `plank`
+   does, giving control over where in GCS artifacts land to Prow and away from
+   Jenkins. Furthermore, the `$BUILD_ID` variable in Jenkins jobs will now
+   correctly point to the build identifier vended by `tot` and a new variable,
+   `$PROW_JOB_ID`, points to the identifier used to link ProwJobs to Jenkins builds.
+   `$PROW_JOB_ID` fallbacks to `$BUILD_ID` for backwards-compatibility, ie. to
+   not break in-flight jobs during the time of the jenkins-operator update.
+ - *February 1, 2018* The `config_updater` section in `plugins.yaml`
+ now uses a `maps` object instead of `config_file`, `plugin_file` strings.
+ Please switch over before July.
  - *November 30, 2017* If you use tide, you'll need to switch your query format
  and bump all prow component versions to reflect the changes in #5754.
  - *November 14, 2017* `horologium:0.17` fixes cron job not being scheduled.
@@ -141,8 +159,7 @@ types in `plugins`. In that package's `init` function, call
 empty import so that your plugin is included. If you forget this step then a
 unit test will fail when you try to add it to `plugins.yaml`. Don't add a brand
 new plugin to the main `kubernetes/kubernetes` repo right away, start with
-somewhere smaller and make sure it is well-behaved. If you add a command,
-document it in [commands.md](../commands.md).
+somewhere smaller and make sure it is well-behaved.
 
 The LGTM plugin is a good place to start if you're looking for an example
 plugin to mimic.
@@ -235,7 +252,7 @@ that matches `trigger` will suffice. This is useful if you want to make one
 command that reruns all jobs.
 
 
-### Job Evironment Variables
+### Job Environment Variables
 
 Prow will expose the following environment variables to your job. If the job
 runs on Kubernetes, the variables will be injected into every container in
@@ -248,6 +265,7 @@ Variable | Periodic | Postsubmit | Batch | Presubmit | Description | Example
 `JOB_TYPE` | ✓ | ✓ | ✓ | ✓ | Type of job. | `presubmit`
 `JOB_SPEC` | ✓ | ✓ | ✓ | ✓ | JSON-encoded job specification. | see below
 `BUILD_ID` | ✓ | ✓ | ✓ | ✓ | Unique build number for each run. | `12345`
+`PROW_JOB_ID` | ✓ | ✓ | ✓ | ✓ | Unique identifier for the owning Prow Job. | `1ce07fa2-0831-11e8-b07e-0a58ac101036`
 `BUILD_NUMBER` | ✓ | ✓ | ✓ | ✓ | Unique build number for each run. | `12345`
 `REPO_OWNER` | | ✓ | ✓ | ✓ | GitHub org that triggered the job. | `kubernetes`
 `REPO_NAME` | | ✓ | ✓ | ✓ | GitHub repo that triggered the job. | `test-infra`
@@ -267,21 +285,22 @@ job types:
 
 Periodic Job:
 ```json
-{"type":"periodic","job":"job-name","buildid":"0","refs":{}}
+{"type":"periodic","job":"job-name","buildid":"0","prowjobid":"uuid","refs":{}}
 ```
 
 Postsubmit Job:
 ```json
-{"type":"postsubmit","job":"job-name","buildid":"0","refs":{"org":"org-name","repo":"repo-name","base_ref":"base-ref","base_sha":"base-sha"}}```
+{"type":"postsubmit","job":"job-name","buildid":"0","prowjobid":"uuid","refs":{"org":"org-name","repo":"repo-name","base_ref":"base-ref","base_sha":"base-sha"}}
+```
 
 Presubmit Job:
 ```json
-{"type":"presubmit","job":"job-name","buildid":"0","refs":{"org":"org-name","repo":"repo-name","base_ref":"base-ref","base_sha":"base-sha","pulls":[{"number":1,"author":"author-name","sha":"pull-sha"}]}}
+{"type":"presubmit","job":"job-name","buildid":"0","prowjobid":"uuid","refs":{"org":"org-name","repo":"repo-name","base_ref":"base-ref","base_sha":"base-sha","pulls":[{"number":1,"author":"author-name","sha":"pull-sha"}]}}
 ```
 
 Batch Job:
 ```json
-{"type":"batch","job":"job-name","buildid":"0","refs":{"org":"org-name","repo":"repo-name","base_ref":"base-ref","base_sha":"base-sha","pulls":[{"number":1,"author":"author-name","sha":"pull-sha"},{"number":2,"author":"other-author-name","sha":"second-pull-sha"}]}}
+{"type":"batch","job":"job-name","buildid":"0","prowjobid":"uuid","refs":{"org":"org-name","repo":"repo-name","base_ref":"base-ref","base_sha":"base-sha","pulls":[{"number":1,"author":"author-name","sha":"pull-sha"},{"number":2,"author":"other-author-name","sha":"second-pull-sha"}]}}
 ```
 
 ## Bots home

@@ -13,7 +13,7 @@
 # limitations under the License.
 
 IMAGE ?= gcr.io/k8s-test-infra-aws/aws-janitor
-VERSION ?= 0.3
+VERSION ?= 0.4
 
 image:
 	CGO_ENABLED=0 go build k8s.io/test-infra/maintenance/aws-janitor
@@ -21,7 +21,7 @@ image:
 
 push: image
 	docker tag "$(IMAGE):$(VERSION)" "$(IMAGE):latest"
-	gcloud docker -- push "$(IMAGE):$(VERSION)"
-	gcloud docker -- push "$(IMAGE):latest"
+	docker push "$(IMAGE):$(VERSION)"
+	docker push "$(IMAGE):latest"
 
 .PHONY: image push

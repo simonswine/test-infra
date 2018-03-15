@@ -23,10 +23,12 @@ import (
 	"os/exec"
 	"strings"
 
+	"github.com/sirupsen/logrus"
 	"k8s.io/test-infra/prow/kube"
 )
 
-func Run(refs kube.Refs, dir string) Record {
+func Run(refs kube.Refs, dir, gitUserName, gitUserEmail string) Record {
+	logrus.WithFields(logrus.Fields{"refs": refs}).Infof("Cloning refs")
 	repositoryURL := fmt.Sprintf("https://github.com/%s/%s.git", refs.Org, refs.Repo)
 	cloneDir := fmt.Sprintf("%s/src/github.com/%s/%s", dir, refs.Org, refs.Repo)
 	record := Record{Refs: refs}
@@ -38,15 +40,30 @@ func Run(refs kube.Refs, dir string) Record {
 	}
 
 	commands = append(commands, shellCloneCommand(cloneDir, "git", "init"))
+	if gitUserName != "" {
+		commands = append(commands, shellCloneCommand(cloneDir, "git", "config", "user.name", gitUserName))
+	}
+	if gitUserEmail != "" {
+		commands = append(commands, shellCloneCommand(cloneDir, "git", "config", "user.email", gitUserEmail))
+	}
+	commands = append(commands, shellCloneCommand(cloneDir, "git", "fetch", repositoryURL, "--tags", "--prune"))
 	commands = append(commands, shellCloneCommand(cloneDir, "git", "fetch", repositoryURL, refs.BaseRef))
 
-	var checkout string
+	var target string
 	if refs.BaseSHA != "" {
-		checkout = refs.BaseSHA
+		target = refs.BaseSHA
 	} else {
-		checkout = "FETCH_HEAD"
+		target = "FETCH_HEAD"
 	}
-	commands = append(commands, shellCloneCommand(cloneDir, "git", "checkout", checkout))
+	// we need to be "on" the target branch after the sync
+	// so we need to set the branch to point to the base ref,
+	// but we cannot update a branch we are on, so in case we
+	// are on the branch we are syncing, we check out the SHA
+	// first and reset the branch second, then check out the
+	// branch we just reset to be in the correct final state
+	commands = append(commands, shellCloneCommand(cloneDir, "git", "checkout", target))
+	commands = append(commands, shellCloneCommand(cloneDir, "git", "branch", "--force", refs.BaseRef, target))
+	commands = append(commands, shellCloneCommand(cloneDir, "git", "checkout", refs.BaseRef))
 
 	for _, prRef := range refs.Pulls {
 		commands = append(commands, shellCloneCommand(cloneDir, "git", "fetch", repositoryURL, fmt.Sprintf("pull/%d/head", prRef.Number)))
@@ -61,7 +78,13 @@ func Run(refs kube.Refs, dir string) Record {
 
 	for _, command := range commands {
 		formattedCommand, output, err := command()
-		record.Commands = append(record.Commands, Command{Command: formattedCommand, Output: output, Error: err.Error()})
+		logrus.WithFields(logrus.Fields{"command": formattedCommand, "output": output, "error": err}).Infof("Ran clone command")
+		message := ""
+		if err != nil {
+			message = err.Error()
+			record.Failed = true
+		}
+		record.Commands = append(record.Commands, Command{Command: formattedCommand, Output: output, Error: message})
 		if err != nil {
 			break
 		}

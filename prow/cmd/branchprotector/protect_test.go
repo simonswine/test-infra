@@ -27,6 +27,168 @@ import (
 	"k8s.io/test-infra/prow/github"
 )
 
+func TestOptions_Validate(t *testing.T) {
+	var testCases = []struct {
+		name        string
+		opt         options
+		expectedErr bool
+	}{
+		{
+			name: "all ok",
+			opt: options{
+				config:   "dummy",
+				token:    "fake",
+				endpoint: "https://api.github.com",
+			},
+			expectedErr: false,
+		},
+		{
+			name: "no config",
+			opt: options{
+				config:   "",
+				token:    "fake",
+				endpoint: "https://api.github.com",
+			},
+			expectedErr: true,
+		},
+		{
+			name: "no token",
+			opt: options{
+				config:   "dummy",
+				token:    "",
+				endpoint: "https://api.github.com",
+			},
+			expectedErr: true,
+		},
+		{
+			name: "invalid endpoint",
+			opt: options{
+				config:   "dummy",
+				token:    "fake",
+				endpoint: ":",
+			},
+			expectedErr: true,
+		},
+	}
+
+	for _, testCase := range testCases {
+		err := testCase.opt.Validate()
+		if testCase.expectedErr && err == nil {
+			t.Errorf("%s: expected an error but got none", testCase.name)
+		}
+		if !testCase.expectedErr && err != nil {
+			t.Errorf("%s: expected no error but got one: %v", testCase.name, err)
+		}
+	}
+}
+
+func TestJobRequirements(t *testing.T) {
+	cases := []struct {
+		name     string
+		config   []config.Presubmit
+		expected []string
+	}{
+		{
+			name: "basic",
+			config: []config.Presubmit{
+				{
+					Context:    "always-run",
+					AlwaysRun:  true,
+					SkipReport: false,
+				},
+				{
+					Context:      "run-if-changed",
+					RunIfChanged: "foo",
+					AlwaysRun:    false,
+					SkipReport:   false,
+				},
+				{
+					Context:    "optional",
+					AlwaysRun:  false,
+					SkipReport: false,
+				},
+			},
+			expected: []string{"always-run", "run-if-changed"},
+		},
+		{
+			name: "children",
+			config: []config.Presubmit{
+				{
+					Context:    "always-run",
+					AlwaysRun:  true,
+					SkipReport: false,
+					RunAfterSuccess: []config.Presubmit{
+						{
+							Context: "include-me",
+						},
+					},
+				},
+				{
+					Context:      "run-if-changed",
+					RunIfChanged: "foo",
+					SkipReport:   true,
+					AlwaysRun:    false,
+					RunAfterSuccess: []config.Presubmit{
+						{
+							Context: "me2",
+						},
+					},
+				},
+				{
+					Context:    "run-and-skip",
+					AlwaysRun:  true,
+					SkipReport: true,
+					RunAfterSuccess: []config.Presubmit{
+						{
+							Context: "also-me-3",
+						},
+					},
+				},
+				{
+					Context:    "optional",
+					AlwaysRun:  false,
+					SkipReport: false,
+					RunAfterSuccess: []config.Presubmit{
+						{
+							Context: "no thanks",
+						},
+					},
+				},
+				{
+					Context:    "hidden-grandpa",
+					AlwaysRun:  true,
+					SkipReport: true,
+					RunAfterSuccess: []config.Presubmit{
+						{
+							Context:    "hidden-parent",
+							SkipReport: true,
+							AlwaysRun:  false,
+							RunAfterSuccess: []config.Presubmit{
+								{
+									Context: "visible-kid",
+								},
+							},
+						},
+					},
+				},
+			},
+			expected: []string{
+				"always-run", "include-me",
+				"me2",
+				"also-me-3",
+				"visible-kid",
+			},
+		},
+	}
+
+	for _, tc := range cases {
+		actual := jobRequirements(tc.config, false)
+		if !reflect.DeepEqual(actual, tc.expected) {
+			t.Errorf("%s: actual %v != expected %v", tc.name, actual, tc.expected)
+		}
+	}
+}
+
 type FakeClient struct {
 	repos    map[string][]github.Repo
 	branches map[string][]github.Branch
@@ -219,6 +381,7 @@ func TestProtect(t *testing.T) {
 			name: "unknown org",
 			config: config.Config{
 				BranchProtection: config.BranchProtection{
+					Protect: &yes,
 					Orgs: map[string]config.Org{
 						"unknown": {},
 					},
@@ -286,6 +449,54 @@ func TestProtect(t *testing.T) {
 			},
 		},
 		{
+			name:     "require a defined branch to make a protection decision",
+			branches: []string{"org/repo=branch"},
+			config: config.Config{
+				BranchProtection: config.BranchProtection{
+					Orgs: map[string]config.Org{
+						"org": {
+							Repos: map[string]config.Repo{
+								"repo": {
+									Branches: map[string]config.Branch{
+										"branch": {},
+									},
+								},
+							},
+						},
+					},
+				},
+			},
+			errors: 1,
+		},
+		{
+			name:     "require pushers to set protection",
+			branches: []string{"org/repo=push"},
+			config: config.Config{
+				BranchProtection: config.BranchProtection{
+					Protect: &no,
+					Pushers: []string{"oncall"},
+					Orgs: map[string]config.Org{
+						"org": {},
+					},
+				},
+			},
+			errors: 1,
+		},
+		{
+			name:     "require requiring contexts to set protection",
+			branches: []string{"org/repo=context"},
+			config: config.Config{
+				BranchProtection: config.BranchProtection{
+					Protect:  &no,
+					Contexts: []string{"test-foo"},
+					Orgs: map[string]config.Org{
+						"org": {},
+					},
+				},
+			},
+			errors: 1,
+		},
+		{
 			name:     "protect org but skip a repo",
 			branches: []string{"org/repo1=master", "org/repo1=branch", "org/skip=master"},
 			config: config.Config{
@@ -295,7 +506,7 @@ func TestProtect(t *testing.T) {
 						"org": {
 							Protect: &yes,
 							Repos: map[string]config.Repo{
-								"org/skip": {
+								"skip": {
 									Protect: &no,
 								},
 							},
@@ -335,7 +546,7 @@ func TestProtect(t *testing.T) {
 						"org": {
 							Contexts: []string{"org-presubmit"},
 							Repos: map[string]config.Repo{
-								"org/repo": {
+								"repo": {
 									Contexts: []string{"repo-presubmit"},
 									Branches: map[string]config.Branch{
 										"master": {
@@ -369,7 +580,7 @@ func TestProtect(t *testing.T) {
 						"org": {
 							Pushers: []string{"org-team"},
 							Repos: map[string]config.Repo{
-								"org/repo": {
+								"repo": {
 									Pushers: []string{"repo-team"},
 									Branches: map[string]config.Branch{
 										"master": {
@@ -416,7 +627,7 @@ func TestProtect(t *testing.T) {
 		}
 		for org, r := range repos {
 			for rname := range r {
-				fc.repos[org] = append(fc.repos[org], github.Repo{Name: rname})
+				fc.repos[org] = append(fc.repos[org], github.Repo{Name: rname, FullName: org + "/" + rname})
 			}
 		}
 
@@ -450,13 +661,12 @@ func TestProtect(t *testing.T) {
 				for _, e := range tc.expected {
 					if e.Org == a.Org && e.Repo == a.Repo && e.Branch == a.Branch {
 						found = true
-						if e.Protect != a.Protect {
+						switch {
+						case e.Protect != a.Protect:
 							t.Errorf("%s: %s/%s=%s actual protect %t != expected %t", tc.name, e.Org, e.Repo, e.Branch, a.Protect, e.Protect)
-						}
-						if !reflect.DeepEqual(e.Contexts, a.Contexts) {
+						case len(e.Contexts) != len(a.Contexts), len(e.Contexts) > 0 && !reflect.DeepEqual(e.Contexts, a.Contexts):
 							t.Errorf("%s: %s/%s=%s actual contexts %v != expected %v", tc.name, e.Org, e.Repo, e.Branch, a.Contexts, e.Contexts)
-						}
-						if !reflect.DeepEqual(e.Pushers, a.Pushers) {
+						case len(e.Pushers) != len(a.Pushers), len(e.Pushers) > 0 && !reflect.DeepEqual(e.Pushers, a.Pushers):
 							t.Errorf("%s: %s/%s=%s actual pushers %v != expected %v", tc.name, e.Org, e.Repo, e.Branch, a.Pushers, e.Pushers)
 						}
 						break

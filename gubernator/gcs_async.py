@@ -14,19 +14,33 @@
 
 import json
 import logging
+import urlparse
 import zlib
 
 import google.appengine.ext.ndb as ndb
+from google.appengine.api import app_identity
 
 
 GCS_API_URL = 'https://storage.googleapis.com'
 STORAGE_API_URL = 'https://www.googleapis.com/storage/v1/b'
-
+MAX_SIZE = 30 * 1024 ** 2  # 30MiB
 
 @ndb.tasklet
 def get(url):
     context = ndb.get_context()
-    headers = {'accept-encoding': 'gzip, *', 'x-goog-api-version': '2'}
+
+    headers = {
+        'accept-encoding': 'gzip, *',
+        'x-goog-api-version': '2',
+        }
+
+    url_result = urlparse.urlparse(url)
+    if url_result.netloc.endswith('.googleapis.com'):
+        auth_token, _ = app_identity.get_access_token(
+            'https://www.googleapis.com/auth/cloud-platform')
+        if auth_token:
+            headers['Authorization'] = 'OAuth %s' % auth_token
+
     for retry in xrange(6):
         result = yield context.urlfetch(url, headers=headers)
         status = result.status_code
@@ -36,7 +50,12 @@ def get(url):
         if status in (200, 206):
             content = result.content
             if result.headers.get('content-encoding') == 'gzip':
-                content = zlib.decompress(result.content, 15 | 16)
+                dec = zlib.decompressobj(15 | 16)
+                content = dec.decompress(result.content, MAX_SIZE)
+                if dec.unconsumed_tail:
+                    logging.warning('only decompressed %d KB, %d KB remain in buffer.',
+                                    len(content) / 1024,
+                                    len(dec.unconsumed_tail) / 1024)
             raise ndb.Return(content)
         logging.error("unable to fetch '%s': status code %d", url, status)
         raise ndb.Return(None)

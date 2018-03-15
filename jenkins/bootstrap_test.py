@@ -71,9 +71,13 @@ class FakeSubprocess(object):
     """Keep track of calls."""
     def __init__(self):
         self.calls = []
+        self.file_data = []
 
     def __call__(self, cmd, *a, **kw):
         self.calls.append((cmd, a, kw))
+        for arg in cmd:
+            if arg.startswith('/') and os.path.exists(arg):
+                self.file_data.append(open(arg).read())
 
 
 # pylint: disable=invalid-name
@@ -283,19 +287,19 @@ class PullRefsTest(unittest.TestCase):
         )
 
 
-class ChooseSshKeyTest(unittest.TestCase):
-    """Tests for choose_ssh_key()."""
+class ConfigureSshKeyTest(unittest.TestCase):
+    """Tests for configure_ssh_key()."""
     def test_empty(self):
         """Do not change environ if no ssh key."""
         fake_env = {}
         with Stub(os, 'environ', fake_env):
-            with bootstrap.choose_ssh_key(''):
+            with bootstrap.configure_ssh_key(''):
                 self.assertFalse(fake_env)
 
     def test_full(self):
         fake_env = {}
         with Stub(os, 'environ', fake_env):
-            with bootstrap.choose_ssh_key('hello there'):
+            with bootstrap.configure_ssh_key('hello there'):
                 self.assertIn('GIT_SSH', fake_env)
                 with open(fake_env['GIT_SSH']) as fp:
                     buf = fp.read()
@@ -308,7 +312,7 @@ class ChooseSshKeyTest(unittest.TestCase):
         fake_env = {'GIT_SSH': 'random-value'}
         old_env = dict(fake_env)
         with Stub(os, 'environ', fake_env):
-            with bootstrap.choose_ssh_key('hello there'):
+            with bootstrap.configure_ssh_key('hello there'):
                 self.assertNotEqual(old_env, fake_env)
             self.assertEquals(old_env, fake_env)
 
@@ -320,7 +324,7 @@ class CheckoutTest(unittest.TestCase):
         """checkout cleans and resets if asked to."""
         fake = FakeSubprocess()
         with Stub(os, 'chdir', Pass):
-            bootstrap.checkout(fake, REPO, None, PULL, clean=True)
+            bootstrap.checkout(fake, REPO, REPO, None, PULL, clean=True)
 
         self.assertTrue(any(
             'clean' in cmd for cmd, _, _ in fake.calls if 'git' in cmd))
@@ -338,14 +342,14 @@ class CheckoutTest(unittest.TestCase):
                 raise subprocess.CalledProcessError(128, cmd, None)
         with Stub(os, 'chdir', Pass):
             with Stub(time, 'sleep', Pass):
-                bootstrap.checkout(third_time_charm, REPO, None, PULL)
+                bootstrap.checkout(third_time_charm, REPO, REPO, None, PULL)
         self.assertEquals(expected_attempts, self.tries)
 
     def test_pull_ref(self):
         """checkout fetches the right ref for a pull."""
         fake = FakeSubprocess()
         with Stub(os, 'chdir', Pass):
-            bootstrap.checkout(fake, REPO, None, PULL)
+            bootstrap.checkout(fake, REPO, REPO, None, PULL)
 
         expected_ref = bootstrap.pull_ref(PULL)[0][0]
         self.assertTrue(any(
@@ -355,7 +359,7 @@ class CheckoutTest(unittest.TestCase):
         """checkout fetches the right ref for a branch."""
         fake = FakeSubprocess()
         with Stub(os, 'chdir', Pass):
-            bootstrap.checkout(fake, REPO, BRANCH, None)
+            bootstrap.checkout(fake, REPO, REPO, BRANCH, None)
 
         expected_ref = BRANCH
         self.assertTrue(any(
@@ -365,7 +369,7 @@ class CheckoutTest(unittest.TestCase):
         """checkout initializes and fetches the right repo."""
         fake = FakeSubprocess()
         with Stub(os, 'chdir', Pass):
-            bootstrap.checkout(fake, REPO, BRANCH, None)
+            bootstrap.checkout(fake, REPO, REPO, BRANCH, None)
 
         expected_uri = 'https://%s' % REPO
         self.assertTrue(any(
@@ -375,21 +379,35 @@ class CheckoutTest(unittest.TestCase):
         """Either branch or pull specified, not both."""
         with Stub(os, 'chdir', Bomb):
             with self.assertRaises(ValueError):
-                bootstrap.checkout(Bomb, REPO, None, None)
+                bootstrap.checkout(Bomb, REPO, REPO, None, None)
             with self.assertRaises(ValueError):
-                bootstrap.checkout(Bomb, REPO, BRANCH, PULL)
+                bootstrap.checkout(Bomb, REPO, REPO, BRANCH, PULL)
 
     def test_happy(self):
         """checkout sanity check."""
         fake = FakeSubprocess()
         with Stub(os, 'chdir', Pass):
-            bootstrap.checkout(fake, REPO, BRANCH, None)
+            bootstrap.checkout(fake, REPO, REPO, BRANCH, None)
 
         self.assertTrue(any(
             '--tags' in cmd for cmd, _, _ in fake.calls if 'fetch' in cmd))
         self.assertTrue(any(
             'FETCH_HEAD' in cmd for cmd, _, _ in fake.calls
             if 'checkout' in cmd))
+
+    def test_repo_path(self):
+        """checkout repo to different local path."""
+        fake = FakeSubprocess()
+        repo_path = "foo/bar"
+        with Stub(os, 'chdir', Pass):
+            bootstrap.checkout(fake, REPO, repo_path, BRANCH, None)
+
+        expected_uri = 'https://%s' % REPO
+        self.assertTrue(any(
+            expected_uri in cmd for cmd, _, _ in fake.calls if 'fetch' in cmd))
+
+        self.assertTrue(any(
+            repo_path in cmd for cmd, _, _ in fake.calls if 'init' in cmd))
 
 class ParseReposTest(unittest.TestCase):
     def test_bare(self):
@@ -474,7 +492,7 @@ class GSUtilTest(unittest.TestCase):
         gsutil.upload_json('fake_path', {'wee': 'fun'})
         self.assertTrue(any(
             'application/json' in a for a in fake.calls[0][0]))
-        self.assertIn('stdin', fake.calls[0][2])  # kwargs
+        self.assertEqual(fake.file_data, ['{\n  "wee": "fun"\n}'])
 
     def test_upload_text_cached(self):
         fake = FakeSubprocess()
@@ -483,7 +501,7 @@ class GSUtilTest(unittest.TestCase):
         self.assertFalse(any(
             'Cache-Control' in a and 'max-age' in a
             for a in fake.calls[0][0]))
-        self.assertIn('stdin', fake.calls[0][2])  # kwargs
+        self.assertEqual(fake.file_data, ['hello world'])
 
     def test_upload_text_default(self):
         fake = FakeSubprocess()
@@ -492,7 +510,7 @@ class GSUtilTest(unittest.TestCase):
         self.assertFalse(any(
             'Cache-Control' in a and 'max-age' in a
             for a in fake.calls[0][0]))
-        self.assertIn('stdin', fake.calls[0][2])  # kwargs
+        self.assertEqual(fake.file_data, ['hello world'])
 
     def test_upload_text_uncached(self):
         fake = FakeSubprocess()
@@ -501,13 +519,14 @@ class GSUtilTest(unittest.TestCase):
         self.assertTrue(any(
             'Cache-Control' in a and 'max-age' in a
             for a in fake.calls[0][0]))
-        self.assertIn('stdin', fake.calls[0][2])  # kwargs
+        self.assertEqual(fake.file_data, ['hello world'])
 
     def test_upload_text_metalink(self):
         fake = FakeSubprocess()
         gsutil = bootstrap.GSUtil(fake)
         gsutil.upload_text('txt', 'path', additional_headers=['foo: bar'])
         self.assertTrue(any('foo: bar' in a for a in fake.calls[0][0]))
+        self.assertEqual(fake.file_data, ['path'])
 
 class FakeGSUtil(object):
     generation = 123
@@ -1054,6 +1073,7 @@ class FakeArgs(object):
     timeout = 0
     upload = UPLOAD
     json = False
+    scenario = ''
 
     def __init__(self, **kw):
         self.branch = BRANCH
@@ -1411,7 +1431,7 @@ class IntegrationTest(unittest.TestCase):
                         root=self.root_workspace)
 
     def test_job_missing(self):
-        with self.assertRaises(KeyError):
+        with self.assertRaises(ValueError):
             test_bootstrap(
                 job='this-job-no-exists',
                 repo=self.REPO,

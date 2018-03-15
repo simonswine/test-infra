@@ -18,22 +18,26 @@ limitations under the License.
 package config
 
 import (
+	"errors"
 	"fmt"
 	"io/ioutil"
 	"regexp"
+	"strings"
 	"text/template"
 	"time"
 
 	"github.com/ghodss/yaml"
 	"github.com/sirupsen/logrus"
 	cron "gopkg.in/robfig/cron.v2"
+	"k8s.io/apimachinery/pkg/labels"
 
 	"k8s.io/test-infra/prow/kube"
-	"k8s.io/test-infra/prow/kube/labels"
 )
 
 // Config is a read-only snapshot of the config.
 type Config struct {
+	// Presets apply to all job types.
+	Presets []Preset `json:"presets,omitempty"`
 	// Full repo name (such as "kubernetes/kubernetes") -> list of jobs.
 	Presubmits  map[string][]Presubmit  `json:"presubmits,omitempty"`
 	Postsubmits map[string][]Postsubmit `json:"postsubmits,omitempty"`
@@ -46,9 +50,11 @@ type Config struct {
 	Sinker           Sinker           `json:"sinker,omitempty"`
 	Deck             Deck             `json:"deck,omitempty"`
 	BranchProtection BranchProtection `json:"branch-protection,omitempty"`
+	Gerrit           Gerrit           `json:"gerrit,omitempty"`
 
 	// TODO: Move this out of the main config.
-	JenkinsOperator JenkinsOperator `json:"jenkins_operator,omitempty"`
+	JenkinsOperator  *JenkinsOperator  `json:"jenkins_operator,omitempty"`
+	JenkinsOperators []JenkinsOperator `json:"jenkins_operators,omitempty"`
 
 	// ProwJobNamespace is the namespace in the cluster that prow
 	// components will use for looking up ProwJobs. The namespace
@@ -73,6 +79,20 @@ type Config struct {
 
 	// PushGateway is a prometheus push gateway.
 	PushGateway PushGateway `json:"push_gateway,omitempty"`
+
+	// OwnersDirBlacklist is used to configure which directories to ignore when
+	// searching for OWNERS{,_ALIAS} files in a repo.
+	OwnersDirBlacklist OwnersDirBlacklist `json:"owners_dir_blacklist,omitempty"`
+}
+
+// OwnersDirBlacklist is used to configure which directories to ignore when
+// searching for OWNERS{,_ALIAS} files in a repo.
+type OwnersDirBlacklist struct {
+	// Repos configures a directory blacklist per repo (or org)
+	Repos map[string][]string `json:"repos"`
+	// Default configures a default blacklist for repos (or orgs) not
+	// specifically configured
+	Default []string `json:"default"`
 }
 
 // PushGateway is a prometheus push gateway.
@@ -115,17 +135,43 @@ type Controller struct {
 
 	// AllowCancellations enables aborting presubmit jobs for commits that
 	// have been superseded by newer commits in Github pull requests.
-	AllowCancellations bool `json:"allow_cancellations"`
+	AllowCancellations bool `json:"allow_cancellations,omitempty"`
 }
 
 // Plank is config for the plank controller.
 type Plank struct {
 	Controller `json:",inline"`
+	// PodPendingTimeoutString compiles into PodPendingTimeout at load time.
+	PodPendingTimeoutString string `json:"pod_pending_timeout,omitempty"`
+	// PodPendingTimeout is after how long the controller will perform a garbage
+	// collection on pending pods. Defaults to one day.
+	PodPendingTimeout time.Duration `json:"-"`
+}
+
+// Gerrit is config for the gerrit controller.
+type Gerrit struct {
+	// TickInterval is how often we do a sync with binded gerrit instance
+	TickIntervalString string        `json:"tick_interval,omitempty"`
+	TickInterval       time.Duration `json:"-"`
+	// RateLimit defines how many changes to query per gerrit API call
+	// default is 5
+	RateLimit int `json:"ratelimit,omitempty"`
 }
 
 // JenkinsOperator is config for the jenkins-operator controller.
 type JenkinsOperator struct {
 	Controller `json:",inline"`
+	// LabelSelectorString compiles into LabelSelector at load time.
+	// If set, this option needs to match --label-selector used by
+	// the desired jenkins-operator. This option is considered
+	// invalid when provided with a single jenkins-operator config.
+	//
+	// For label selector syntax, see below:
+	// https://kubernetes.io/docs/concepts/overview/working-with-objects/labels/#label-selectors
+	LabelSelectorString string `json:"label_selector,omitempty"`
+	// LabelSelector is used so different jenkins-operator replicas
+	// can use their own configuration.
+	LabelSelector labels.Selector `json:"-"`
 }
 
 // Sinker is config for the sinker controller.
@@ -159,7 +205,7 @@ type Deck struct {
 	// their logs in prow.
 	ExternalAgentLogs []ExternalAgentLog `json:"external_agent_logs,omitempty"`
 	// Branding of the frontend
-	Branding Branding `json:"branding,omitempty"`
+	Branding *Branding `json:"branding,omitempty"`
 }
 
 // ExternalAgentLog ensures an external agent like Jenkins can expose
@@ -223,14 +269,8 @@ func parseConfig(c *Config) error {
 		name := v.Name
 		agent := v.Agent
 		// Ensure that k8s presubmits have a pod spec.
-		if agent == string(kube.KubernetesAgent) {
-			if v.Spec == nil {
-				return fmt.Errorf("job %s has no spec", name)
-			} else {
-				if len(v.Spec.Containers) > 1 {
-					return fmt.Errorf("job %s has more than one container; see https://github.com/kubernetes/test-infra/pull/5403 for discussion on this restriction", name)
-				}
-			}
+		if agent == string(kube.KubernetesAgent) && v.Spec == nil {
+			return fmt.Errorf("job %s has no spec", name)
 		}
 		// Ensure agent is a known value.
 		if agent != string(kube.KubernetesAgent) && agent != string(kube.JenkinsAgent) {
@@ -241,20 +281,20 @@ func parseConfig(c *Config) error {
 		if v.MaxConcurrency < 0 {
 			return fmt.Errorf("job %s jas invalid max_concurrency (%d), it needs to be a non-negative number", name, v.MaxConcurrency)
 		}
+		for _, preset := range c.Presets {
+			if err := mergePreset(preset, v.Labels, v.Spec); err != nil {
+				return fmt.Errorf("could not merge preset: %v", err)
+			}
+		}
 	}
 
 	// Validate postsubmits.
 	for _, j := range c.AllPostsubmits(nil) {
 		name := j.Name
 		agent := j.Agent
-		if agent == string(kube.KubernetesAgent) {
-			if j.Spec == nil {
-				return fmt.Errorf("job %s has no spec", name)
-			} else {
-				if len(j.Spec.Containers) > 1 {
-					return fmt.Errorf("job %s has more than one container; see https://github.com/kubernetes/test-infra/pull/5403 for discussion on this restriction", name)
-				}
-			}
+		// Ensure that k8s postsubmits have a pod spec.
+		if agent == string(kube.KubernetesAgent) && j.Spec == nil {
+			return fmt.Errorf("job %s has no spec", name)
 		}
 		// Ensure agent is a known value.
 		if agent != string(kube.KubernetesAgent) && agent != string(kube.JenkinsAgent) {
@@ -265,24 +305,28 @@ func parseConfig(c *Config) error {
 		if j.MaxConcurrency < 0 {
 			return fmt.Errorf("job %s jas invalid max_concurrency (%d), it needs to be a non-negative number", name, j.MaxConcurrency)
 		}
+		for _, preset := range c.Presets {
+			if err := mergePreset(preset, j.Labels, j.Spec); err != nil {
+				return fmt.Errorf("could not merge preset: %v", err)
+			}
+		}
 	}
 
 	// Ensure that the periodic durations are valid and specs exist.
 	for _, p := range c.AllPeriodics() {
 		name := p.Name
 		agent := p.Agent
-		if agent == string(kube.KubernetesAgent) {
-			if p.Spec == nil {
-				return fmt.Errorf("job %s has no spec", name)
-			} else {
-				if len(p.Spec.Containers) > 1 {
-					return fmt.Errorf("job %s has more than one container; see https://github.com/kubernetes/test-infra/pull/5403 for discussion on this restriction", name)
-				}
-			}
+		if agent == string(kube.KubernetesAgent) && p.Spec == nil {
+			return fmt.Errorf("job %s has no spec", name)
 		}
 		if agent != string(kube.KubernetesAgent) && agent != string(kube.JenkinsAgent) {
 			return fmt.Errorf("job %s has invalid agent (%s), it needs to be one of the following: %s %s",
 				name, agent, kube.KubernetesAgent, kube.JenkinsAgent)
+		}
+		for _, preset := range c.Presets {
+			if err := mergePreset(preset, p.Labels, p.Spec); err != nil {
+				return fmt.Errorf("could not merge preset: %v", err)
+			}
 		}
 	}
 	// Set the interval on the periodic jobs. It doesn't make sense to do this
@@ -309,8 +353,57 @@ func parseConfig(c *Config) error {
 		return fmt.Errorf("validating plank config: %v", err)
 	}
 
-	if err := ValidateController(&c.JenkinsOperator.Controller); err != nil {
-		return fmt.Errorf("validating jenkins-operator config: %v", err)
+	if c.Plank.PodPendingTimeoutString == "" {
+		c.Plank.PodPendingTimeout = 24 * time.Hour
+	} else {
+		podPendingTimeout, err := time.ParseDuration(c.Plank.PodPendingTimeoutString)
+		if err != nil {
+			return fmt.Errorf("cannot parse duration for plank.pod_pending_timeout: %v", err)
+		}
+		c.Plank.PodPendingTimeout = podPendingTimeout
+	}
+
+	if c.Gerrit.TickIntervalString == "" {
+		c.Gerrit.TickInterval = time.Minute
+	} else {
+		tickInterval, err := time.ParseDuration(c.Gerrit.TickIntervalString)
+		if err != nil {
+			return fmt.Errorf("cannot parse duration for c.gerrit.tick_interval: %v", err)
+		}
+		c.Gerrit.TickInterval = tickInterval
+	}
+
+	if c.Gerrit.RateLimit == 0 {
+		c.Gerrit.RateLimit = 5
+	}
+
+	if c.JenkinsOperator != nil && len(c.JenkinsOperators) > 0 {
+		return fmt.Errorf("invalid config: use one of jenkins_operator and jenkins_operators")
+	}
+	if c.JenkinsOperator != nil {
+		// Maintain backwards-compatibility - remove JenkinsOperator in the future.
+		logrus.Warning("jenkins_operator is deprecated, please switch to the jenkins_operators option!")
+		c.JenkinsOperators = make([]JenkinsOperator, 0, 1)
+		c.JenkinsOperators = append(c.JenkinsOperators, *c.JenkinsOperator)
+	}
+	if len(c.JenkinsOperators) == 1 {
+		if c.JenkinsOperators[0].LabelSelectorString != "" {
+			return errors.New("label_selector is invalid when used for a single jenkins-operator")
+		}
+	}
+	for i := range c.JenkinsOperators {
+		if err := ValidateController(&c.JenkinsOperators[i].Controller); err != nil {
+			return fmt.Errorf("validating jenkins_operators config: %v", err)
+		}
+		sel, err := labels.Parse(c.JenkinsOperators[i].LabelSelectorString)
+		if err != nil {
+			return fmt.Errorf("invalid jenkins_operators.label_selector option: %v", err)
+		}
+		c.JenkinsOperators[i].LabelSelector = sel
+		// TODO: Invalidate overlapping selectors more
+		if len(c.JenkinsOperators) > 1 && c.JenkinsOperators[i].LabelSelectorString == "" {
+			return errors.New("selector overlap: cannot use an empty label_selector with multiple selectors")
+		}
 	}
 
 	for i, agentToTmpl := range c.Deck.ExternalAgentLogs {
@@ -386,6 +479,29 @@ func parseConfig(c *Config) error {
 			return fmt.Errorf("cannot parse duration for tide.sync_period: %v", err)
 		}
 		c.Tide.SyncPeriod = period
+	}
+	if c.Tide.StatusUpdatePeriodString == "" {
+		c.Tide.StatusUpdatePeriod = c.Tide.SyncPeriod
+	} else {
+		period, err := time.ParseDuration(c.Tide.StatusUpdatePeriodString)
+		if err != nil {
+			return fmt.Errorf("cannot parse duration for tide.status_update_period: %v", err)
+		}
+		c.Tide.StatusUpdatePeriod = period
+	}
+
+	if c.Tide.MaxGoroutines == 0 {
+		c.Tide.MaxGoroutines = 20
+	}
+	if c.Tide.MaxGoroutines <= 0 {
+		return fmt.Errorf("tide has invalid max_goroutines (%d), it needs to be a positive number", c.Tide.MaxGoroutines)
+	}
+	for i, q := range c.Tide.Queries {
+		for _, repo := range q.Repos {
+			if parts := strings.Split(repo, "/"); len(parts) != 2 {
+				return fmt.Errorf("invalid org/repo provided in tide.queries[%d].repos: %s", i, repo)
+			}
+		}
 	}
 
 	if c.ProwJobNamespace == "" {

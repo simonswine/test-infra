@@ -23,6 +23,7 @@ import gcs_async
 import github.models as ghm
 import pull_request
 import view_base
+import view_build
 
 
 @view_base.memcache_memoize('pr-details://', expires=60 * 3)
@@ -48,12 +49,7 @@ def pr_builds(path):
 
     jobs = {}
     for job, build, started_fut, finished_fut in futures:
-        started = started_fut.get_result()
-        finished = finished_fut.get_result()
-        if started is not None:
-            started = json.loads(started)
-        if finished is not None:
-            finished = json.loads(finished)
+        started, finished = view_build.normalize_metadata(started_fut, finished_fut)
         jobs.setdefault(job, []).append((build, started, finished))
 
     return jobs
@@ -141,6 +137,17 @@ def get_acks(login, prs):
     return acks
 
 
+class InsensitiveString(str):
+    """A string that uses str.lower() to compare itself to others.
+
+    Does not override __in__ (that uses hash()) or sorting."""
+    def __eq__(self, other):
+        try:
+            return other.lower() == self.lower()
+        except AttributeError:
+            return str.__eq__(self, other)
+
+
 class PRDashboard(view_base.BaseHandler):
     def get(self, user=None):
         # pylint: disable=singleton-comparison
@@ -157,8 +164,8 @@ class PRDashboard(view_base.BaseHandler):
         if not self.request.get('all', False):
             qs.append(ghm.GHIssueDigest.is_open == True)
         if user:
-            qs.append(ghm.GHIssueDigest.involved == user)
-        prs = list(ghm.GHIssueDigest.query(*qs))
+            qs.append(ghm.GHIssueDigest.involved == user.lower())
+        prs = list(ghm.GHIssueDigest.query(*qs).fetch(batch_size=200))
         prs.sort(key=lambda x: x.updated_at, reverse=True)
 
         acks = None
@@ -179,6 +186,7 @@ class PRDashboard(view_base.BaseHandler):
             self.response.write(json.dumps(prs, sort_keys=True, default=serial))
         elif fmt == 'html':
             if user:
+                user = InsensitiveString(user)
                 def acked(p):
                     if 'lgtm' in p.payload.get('labels', {}):
                         return True  # LGTM is an implicit Ack
@@ -186,7 +194,8 @@ class PRDashboard(view_base.BaseHandler):
                         return False
                     return filters.do_get_latest(p.payload, user) <= acks.get(p.key.id(), 0)
                 cats = [
-                    ('Needs Attention', lambda p: user in p.payload['attn'] and not acked(p), ''),
+                    ('Needs Attention', lambda p: any(user == u for u in p.payload['attn'])
+                                                  and not acked(p), ''),
                     ('Approvable', lambda p: user in p.payload.get('approvers', []),
                      'is:open is:pr ("additional approvers: {0}" ' +
                      'OR "additional approver: {0}")'.format(user)),
@@ -200,8 +209,14 @@ class PRDashboard(view_base.BaseHandler):
                 cats = [('Open Kubernetes PRs', lambda x: True,
                     'is:open is:pr user:kubernetes')]
 
+            milestone = self.request.get('milestone')
+            milestones = {p.payload.get('milestone') for p in prs} - {None}
+            if milestone:
+                prs = [pr for pr in prs if pr.payload.get('milestone') == milestone]
+
             self.render('pr_dashboard.html', dict(
-                prs=prs, cats=cats, user=user, login=login, acks=acks))
+                prs=prs, cats=cats, user=user, login=login, acks=acks,
+                milestone=milestone, milestones=milestones))
         else:
             self.abort(406)
 

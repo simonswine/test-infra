@@ -22,20 +22,36 @@ import (
 	"io/ioutil"
 	"net/http"
 	"regexp"
+	"text/template"
 
 	"github.com/sirupsen/logrus"
+	"k8s.io/apimachinery/pkg/labels"
 
 	"k8s.io/test-infra/prow/config"
 	"k8s.io/test-infra/prow/github"
 	"k8s.io/test-infra/prow/hook"
 	"k8s.io/test-infra/prow/kube"
 	"k8s.io/test-infra/prow/pjutil"
+	"k8s.io/test-infra/prow/pluginhelp"
 	"k8s.io/test-infra/prow/report"
 )
 
 const pluginName = "refresh"
 
 var refreshRe = regexp.MustCompile(`(?mi)^/refresh\s*$`)
+
+func HelpProvider(enabledRepos []string) (*pluginhelp.PluginHelp, error) {
+	pluginHelp := &pluginhelp.PluginHelp{
+		Description: `The refresh plugin is used for refreshing status contexts in PRs. Useful in case Github breaks down.`,
+	}
+	pluginHelp.AddCommand(pluginhelp.Command{
+		Usage:       "/refresh",
+		Description: "Refresh status contexts on a PR.",
+		WhoCanUse:   "Anyone",
+		Examples:    []string{"/refresh"},
+	})
+	return pluginHelp, nil
+}
 
 type Server struct {
 	hmacSecret  []byte
@@ -44,17 +60,6 @@ type Server struct {
 	configAgent *config.Agent
 	ghc         *github.Client
 	log         *logrus.Entry
-}
-
-func NewServer(creds string, hmac []byte, ghc *github.Client, prowURL string, configAgent *config.Agent) *Server {
-	return &Server{
-		hmacSecret:  hmac,
-		credentials: creds,
-		prowURL:     prowURL,
-		configAgent: configAgent,
-		ghc:         ghc,
-		log:         logrus.StandardLogger().WithField("plugin", pluginName),
-	}
 }
 
 func (s *Server) ServeHTTP(w http.ResponseWriter, r *http.Request) {
@@ -163,16 +168,32 @@ func (s *Server) handleIssueComment(l *logrus.Entry, ic github.IssueCommentEvent
 		return nil
 	}
 
-	jenkinsReport := s.configAgent.Config().JenkinsOperator.ReportTemplate
+	jenkinsConfig := s.configAgent.Config().JenkinsOperators
 	kubeReport := s.configAgent.Config().Plank.ReportTemplate
 	for _, pj := range pjutil.GetLatestProwJobs(presubmits, kube.PresubmitJob) {
-		s.log.WithFields(l.Data).Infof("Refreshing the status of job %q (pj: %s)", pj.Spec.Job, pj.Metadata.Name)
-		reportTemplate := jenkinsReport
-		if pj.Spec.Agent == "kubernetes" {
+		var reportTemplate *template.Template
+		switch pj.Spec.Agent {
+		case kube.KubernetesAgent:
 			reportTemplate = kubeReport
+		case kube.JenkinsAgent:
+			reportTemplate = s.reportForProwJob(pj, jenkinsConfig)
 		}
+		if reportTemplate == nil {
+			continue
+		}
+
+		s.log.WithFields(l.Data).Infof("Refreshing the status of job %q (pj: %s)", pj.Spec.Job, pj.ObjectMeta.Name)
 		if err := report.Report(s.ghc, reportTemplate, pj); err != nil {
 			s.log.WithError(err).WithFields(l.Data).Info("Failed report.")
+		}
+	}
+	return nil
+}
+
+func (s *Server) reportForProwJob(pj kube.ProwJob, configs []config.JenkinsOperator) *template.Template {
+	for _, cfg := range configs {
+		if cfg.LabelSelector.Matches(labels.Set(pj.Labels)) {
+			return cfg.ReportTemplate
 		}
 	}
 	return nil
