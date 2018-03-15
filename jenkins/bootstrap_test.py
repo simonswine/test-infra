@@ -71,9 +71,13 @@ class FakeSubprocess(object):
     """Keep track of calls."""
     def __init__(self):
         self.calls = []
+        self.file_data = []
 
     def __call__(self, cmd, *a, **kw):
         self.calls.append((cmd, a, kw))
+        for arg in cmd:
+            if arg.startswith('/') and os.path.exists(arg):
+                self.file_data.append(open(arg).read())
 
 
 # pylint: disable=invalid-name
@@ -283,19 +287,19 @@ class PullRefsTest(unittest.TestCase):
         )
 
 
-class ChooseSshKeyTest(unittest.TestCase):
-    """Tests for choose_ssh_key()."""
+class ConfigureSshKeyTest(unittest.TestCase):
+    """Tests for configure_ssh_key()."""
     def test_empty(self):
         """Do not change environ if no ssh key."""
         fake_env = {}
         with Stub(os, 'environ', fake_env):
-            with bootstrap.choose_ssh_key(''):
+            with bootstrap.configure_ssh_key(''):
                 self.assertFalse(fake_env)
 
     def test_full(self):
         fake_env = {}
         with Stub(os, 'environ', fake_env):
-            with bootstrap.choose_ssh_key('hello there'):
+            with bootstrap.configure_ssh_key('hello there'):
                 self.assertIn('GIT_SSH', fake_env)
                 with open(fake_env['GIT_SSH']) as fp:
                     buf = fp.read()
@@ -308,7 +312,7 @@ class ChooseSshKeyTest(unittest.TestCase):
         fake_env = {'GIT_SSH': 'random-value'}
         old_env = dict(fake_env)
         with Stub(os, 'environ', fake_env):
-            with bootstrap.choose_ssh_key('hello there'):
+            with bootstrap.configure_ssh_key('hello there'):
                 self.assertNotEqual(old_env, fake_env)
             self.assertEquals(old_env, fake_env)
 
@@ -488,7 +492,7 @@ class GSUtilTest(unittest.TestCase):
         gsutil.upload_json('fake_path', {'wee': 'fun'})
         self.assertTrue(any(
             'application/json' in a for a in fake.calls[0][0]))
-        self.assertIn('stdin', fake.calls[0][2])  # kwargs
+        self.assertEqual(fake.file_data, ['{\n  "wee": "fun"\n}'])
 
     def test_upload_text_cached(self):
         fake = FakeSubprocess()
@@ -497,7 +501,7 @@ class GSUtilTest(unittest.TestCase):
         self.assertFalse(any(
             'Cache-Control' in a and 'max-age' in a
             for a in fake.calls[0][0]))
-        self.assertIn('stdin', fake.calls[0][2])  # kwargs
+        self.assertEqual(fake.file_data, ['hello world'])
 
     def test_upload_text_default(self):
         fake = FakeSubprocess()
@@ -506,7 +510,7 @@ class GSUtilTest(unittest.TestCase):
         self.assertFalse(any(
             'Cache-Control' in a and 'max-age' in a
             for a in fake.calls[0][0]))
-        self.assertIn('stdin', fake.calls[0][2])  # kwargs
+        self.assertEqual(fake.file_data, ['hello world'])
 
     def test_upload_text_uncached(self):
         fake = FakeSubprocess()
@@ -515,13 +519,14 @@ class GSUtilTest(unittest.TestCase):
         self.assertTrue(any(
             'Cache-Control' in a and 'max-age' in a
             for a in fake.calls[0][0]))
-        self.assertIn('stdin', fake.calls[0][2])  # kwargs
+        self.assertEqual(fake.file_data, ['hello world'])
 
     def test_upload_text_metalink(self):
         fake = FakeSubprocess()
         gsutil = bootstrap.GSUtil(fake)
         gsutil.upload_text('txt', 'path', additional_headers=['foo: bar'])
         self.assertTrue(any('foo: bar' in a for a in fake.calls[0][0]))
+        self.assertEqual(fake.file_data, ['path'])
 
 class FakeGSUtil(object):
     generation = 123

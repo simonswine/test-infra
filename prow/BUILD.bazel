@@ -4,6 +4,8 @@ load("@io_bazel_rules_docker//docker:docker.bzl", "docker_bundle")
 load("@io_bazel_rules_docker//contrib:push-all.bzl", "docker_push")
 load(
     ":prow.bzl",
+    prow_docker_tags = "docker_tags",
+    prow_prefix = "prefix",
     prow_tags = "tags",
 )
 
@@ -22,7 +24,9 @@ docker_bundle(
         "splice",
         "tide",
         "tot",
-    ),
+    ) + prow_docker_tags(**{
+        prow_prefix("needs-rebase"): "//prow/external-plugins/needs-rebase:image",
+    }),
     stamp = True,
 )
 
@@ -54,6 +58,7 @@ filegroup(
         "//prow/cmd/deck:all-srcs",
         "//prow/cmd/entrypoint:all-srcs",
         "//prow/cmd/gcsupload:all-srcs",
+        "//prow/cmd/gerrit:all-srcs",
         "//prow/cmd/hook:all-srcs",
         "//prow/cmd/horologium:all-srcs",
         "//prow/cmd/initupload:all-srcs",
@@ -69,8 +74,10 @@ filegroup(
         "//prow/commentpruner:all-srcs",
         "//prow/config:all-srcs",
         "//prow/cron:all-srcs",
+        "//prow/errorutil:all-srcs",
         "//prow/external-plugins/needs-rebase:all-srcs",
         "//prow/genfiles:all-srcs",
+        "//prow/gerrit:all-srcs",
         "//prow/git:all-srcs",
         "//prow/github:all-srcs",
         "//prow/githuboauth:all-srcs",
@@ -87,11 +94,11 @@ filegroup(
         "//prow/pod-utils/clone:all-srcs",
         "//prow/pod-utils/gcs:all-srcs",
         "//prow/pod-utils/wrapper:all-srcs",
+        "//prow/prstatus:all-srcs",
         "//prow/repoowners:all-srcs",
         "//prow/report:all-srcs",
         "//prow/slack:all-srcs",
         "//prow/tide:all-srcs",
-        "//prow/userdashboard:all-srcs",
     ],
     tags = ["automanaged"],
 )

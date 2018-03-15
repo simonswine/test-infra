@@ -14,12 +14,19 @@ spec:
       containers:
       - name: sinker
         args:
-        image: gcr.io/k8s-prow/sinker:0.27
+        - --build-cluster=/etc/cluster/cluster
+        image: gcr.io/k8s-prow/sinker:v20180314-ac917cffb
         volumeMounts:
         - name: config
           mountPath: /etc/config
+          readOnly: true
+        - mountPath: /etc/cluster
+          name: cluster
           readOnly: true
       volumes:
       - name: config
         configMap:
           name: config
+      - name: cluster
+        secret:
+          secretName: build-cluster

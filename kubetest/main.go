@@ -75,6 +75,8 @@ type options struct {
 	gcpMasterImage      string
 	gcpNetwork          string
 	gcpNodeImage        string
+	gcpImageFamily      string
+	gcpImageProject     string
 	gcpNodes            string
 	gcpProject          string
 	gcpProjectType      string
@@ -141,6 +143,8 @@ func defineFlags() *options {
 	flag.StringVar(&o.gcpNetwork, "gcp-network", "", "Cluster network. Must be set for --deployment=gke (TODO: other deployments).")
 	flag.StringVar(&o.gcpMasterImage, "gcp-master-image", "", "Master image type (cos|debian on GCE, n/a on GKE)")
 	flag.StringVar(&o.gcpNodeImage, "gcp-node-image", "", "Node image type (cos|container_vm on GKE, cos|debian on GCE)")
+	flag.StringVar(&o.gcpImageFamily, "image-family", "", "Node image family from which to use the latest image, required when --gcp-node-image=CUSTOM")
+	flag.StringVar(&o.gcpImageProject, "image-project", "", "Project containing node image family, required when --gcp-node-image=CUSTOM")
 	flag.StringVar(&o.gcpNodes, "gcp-nodes", "", "(--provider=gce only) Number of nodes to create.")
 	flag.StringVar(&o.kubecfg, "kubeconfig", "", "The location of a kubeconfig file.")
 	flag.BoolVar(&o.kubemark, "kubemark", false, "If true, run kubemark tests.")
@@ -227,7 +231,7 @@ func getDeployer(o *options) (deployer, error) {
 	case "dind":
 		return dind.NewDeployer(o.kubecfg, o.dindImage, &o.testArgs, control)
 	case "gke":
-		return newGKE(o.provider, o.gcpProject, o.gcpZone, o.gcpRegion, o.gcpNetwork, o.gcpNodeImage, o.cluster, &o.testArgs, &o.upgradeArgs)
+		return newGKE(o.provider, o.gcpProject, o.gcpZone, o.gcpRegion, o.gcpNetwork, o.gcpNodeImage, o.gcpImageFamily, o.gcpImageProject, o.cluster, &o.testArgs, &o.upgradeArgs)
 	case "kops":
 		return newKops(o.provider, o.gcpProject, o.cluster)
 	case "kubernetes-anywhere":
@@ -443,7 +447,7 @@ func acquireKubernetes(o *options) error {
 			}
 
 			// New deployment, extract new version
-			return o.extract.Extract(o.gcpProject, o.gcpZone, o.extractSource)
+			return o.extract.Extract(o.gcpProject, o.gcpZone, o.gcpRegion, o.extractSource)
 		})
 		if err != nil {
 			return err
@@ -659,6 +663,31 @@ func prepareGcp(o *options) error {
 			if err := os.Setenv("KUBE_MASTER_OS_DISTRIBUTION", distro); err != nil {
 				return fmt.Errorf("could not set KUBE_MASTER_OS_DISTRIBUTION=%s: %v", distro, err)
 			}
+		}
+
+		hasGCPImageFamily, hasGCPImageProject := len(o.gcpImageFamily) != 0, len(o.gcpImageProject) != 0
+		if hasGCPImageFamily != hasGCPImageProject {
+			return fmt.Errorf("--image-family and --image-project must be both set or unset")
+		}
+		if hasGCPImageFamily && hasGCPImageProject {
+			out, err := control.Output(exec.Command("gcloud", "compute", "images", "describe-from-family", o.gcpImageFamily, "--project", o.gcpImageProject))
+			if err != nil {
+				return fmt.Errorf("failed to get latest image from family %q in project %q: %s", o.gcpImageFamily, o.gcpImageProject, err)
+			}
+			latestImage := ""
+			latestImageRegexp := regexp.MustCompile("^name: *(\\S+)")
+			for _, line := range strings.Split(string(out), "\n") {
+				matches := latestImageRegexp.FindStringSubmatch(line)
+				if len(matches) == 2 {
+					latestImage = matches[1]
+					break
+				}
+			}
+			if len(latestImage) == 0 {
+				return fmt.Errorf("failed to get latest image from family %q in project %q", o.gcpImageFamily, o.gcpImageProject)
+			}
+			os.Setenv("KUBE_GCE_NODE_IMAGE", latestImage)
+			os.Setenv("KUBE_GCE_NODE_PROJECT", o.gcpImageProject)
 		}
 	} else if o.provider == "gke" {
 		if o.deployment == "" {

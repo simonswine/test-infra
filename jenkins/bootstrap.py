@@ -328,11 +328,14 @@ class GSUtil(object):
             gen = ['-h', 'x-goog-if-generation-match:%s' % generation]
         else:
             gen = []
-        cmd = [
-            self.gsutil, '-q',
-            '-h', 'Content-Type:application/json'] + gen + [
-            'cp', '-', path]
-        self.call(cmd, stdin=json.dumps(jdict, indent=2))
+        with tempfile.NamedTemporaryFile(prefix='gsutil_') as fp:
+            fp.write(json.dumps(jdict, indent=2))
+            fp.flush()
+            cmd = [
+                self.gsutil, '-q',
+                '-h', 'Content-Type:application/json'] + gen + [
+                'cp', fp.name, path]
+            self.call(cmd)
 
     def copy_file(self, dest, orig):
         """Copy the file to the specified path using compressed encoding."""
@@ -346,8 +349,11 @@ class GSUtil(object):
             headers += ['-h', 'Cache-Control:private, max-age=0, no-transform']
         if additional_headers:
             headers += additional_headers
-        cmd = [self.gsutil, '-q'] + headers + ['cp', '-', path]
-        self.call(cmd, stdin=txt)
+        with tempfile.NamedTemporaryFile(prefix='gsutil_') as fp:
+            fp.write(txt)
+            fp.flush()
+            cmd = [self.gsutil, '-q'] + headers + ['cp', fp.name, path]
+            self.call(cmd)
 
     def cat(self, path, generation):
         """Return contents of path#generation"""
@@ -821,7 +827,7 @@ def gubernator_uri(paths):
 
 
 @contextlib.contextmanager
-def choose_ssh_key(ssh):
+def configure_ssh_key(ssh):
     """Creates a script for GIT_SSH that uses -i ssh if set."""
     if not ssh:  # Nothing to do
         yield
@@ -867,21 +873,20 @@ def setup_root(call, root, repos, ssh, git_cache, clean):
     # under the sun assumes $GOPATH/src/k8s.io/kubernetes so... :(
     # after this method is called we've already computed the upload paths
     # etc. so we can just swap it out for the desired path on disk
-    with choose_ssh_key(ssh):
-        for repo, (branch, pull) in repos.items():
-            os.chdir(root_dir)
-            # for k-s/k these are different, for the rest they are the same
-            # TODO(bentheelder,cjwagner,stevekuznetsov): in the integrated
-            # prow checkout support remapping checkouts and kill this monstrosity
-            repo_path = repo
-            if repo == "github.com/kubernetes-security/kubernetes":
-                repo_path = "k8s.io/kubernetes"
-            logging.info(
-                'Checkout: %s %s to %s',
-                os.path.join(root_dir, repo),
-                pull and pull or branch,
-                os.path.join(root_dir, repo_path))
-            checkout(call, repo, repo_path, branch, pull, ssh, git_cache, clean)
+    for repo, (branch, pull) in repos.items():
+        os.chdir(root_dir)
+        # for k-s/k these are different, for the rest they are the same
+        # TODO(bentheelder,cjwagner,stevekuznetsov): in the integrated
+        # prow checkout support remapping checkouts and kill this monstrosity
+        repo_path = repo
+        if repo == "github.com/kubernetes-security/kubernetes":
+            repo_path = "k8s.io/kubernetes"
+        logging.info(
+            'Checkout: %s %s to %s',
+            os.path.join(root_dir, repo),
+            pull and pull or branch,
+            os.path.join(root_dir, repo_path))
+        checkout(call, repo, repo_path, branch, pull, ssh, git_cache, clean)
     # switch out the main repo for the actual path on disk if we are k-s/k
     # from this point forward this is the path we want to use for everything
     if repos.main == "github.com/kubernetes-security/kubernetes":
@@ -953,6 +958,8 @@ def bootstrap(args):
     call = lambda *a, **kw: _call(end, *a, **kw)
     gsutil = GSUtil(call)
 
+    if len(sys.argv) > 1:
+        logging.info('Args: %s', ' '.join(pipes.quote(a) for a in sys.argv[1:]))
     logging.info('Bootstrap %s...', job)
     logging.info('Builder: %s', node())
     if IMAGE_NAME_ENV in os.environ:
@@ -977,24 +984,25 @@ def bootstrap(args):
     exc_type = None
 
     try:
-        setup_root(call, args.root, repos, args.ssh, args.git_cache, args.clean)
-        logging.info('Configure environment...')
-        if repos:
-            version = find_version(call)
-        else:
-            version = ''
-        setup_magic_environment(job)
-        setup_credentials(call, args.service_account, upload)
-        logging.info('Start %s at %s...', build, version)
-        if upload:
-            start(gsutil, paths, started, node(), version, repos)
-        success = False
-        try:
-            call(job_script(job, args.scenario, args.extra_job_args))
-            logging.info('PASS: %s', job)
-            success = True
-        except subprocess.CalledProcessError:
-            logging.error('FAIL: %s', job)
+        with configure_ssh_key(args.ssh):
+            setup_root(call, args.root, repos, args.ssh, args.git_cache, args.clean)
+            logging.info('Configure environment...')
+            if repos:
+                version = find_version(call)
+            else:
+                version = ''
+            setup_magic_environment(job)
+            setup_credentials(call, args.service_account, upload)
+            logging.info('Start %s at %s...', build, version)
+            if upload:
+                start(gsutil, paths, started, node(), version, repos)
+            success = False
+            try:
+                call(job_script(job, args.scenario, args.extra_job_args))
+                logging.info('PASS: %s', job)
+                success = True
+            except subprocess.CalledProcessError:
+                logging.error('FAIL: %s', job)
     except Exception:  # pylint: disable=broad-except
         exc_type, exc_value, exc_traceback = sys.exc_info()
         logging.exception('unexpected error')

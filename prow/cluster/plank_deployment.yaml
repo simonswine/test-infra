@@ -27,7 +27,7 @@ spec:
     spec:
       containers:
       - name: plank
-        image: gcr.io/k8s-prow/plank:v20180302-0064877cc
+        image: gcr.io/k8s-prow/plank:v20180314-ac917cffb
         args:
         - --tot-url=http://tot
         - --dry-run=false

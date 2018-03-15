@@ -46,7 +46,7 @@ import (
 	"k8s.io/test-infra/prow/logrusutil"
 	"k8s.io/test-infra/prow/pjutil"
 	"k8s.io/test-infra/prow/pluginhelp"
-	"k8s.io/test-infra/prow/userdashboard"
+	"k8s.io/test-infra/prow/prstatus"
 )
 
 type options struct {
@@ -120,7 +120,7 @@ func main() {
 		mux.Handle("/", staticHandlerFromDir("./static"))
 	} else {
 		mux.Handle("/", staticHandlerFromDir("/static"))
-		prodOnlyMain(o, mux)
+		mux = prodOnlyMain(o, mux)
 	}
 
 	// setup done, actually start the server
@@ -128,7 +128,7 @@ func main() {
 }
 
 // prodOnlyMain contains logic only used when running deployed, not locally
-func prodOnlyMain(o options, mux *http.ServeMux) {
+func prodOnlyMain(o options, mux *http.ServeMux) *http.ServeMux {
 	// setup config agent, pod log clients etc.
 	configAgent := &config.Agent{}
 	if err := configAgent.Start(o.configPath); err != nil {
@@ -244,17 +244,17 @@ func prodOnlyMain(o options, mux *http.ServeMux) {
 			}
 		}
 
-		userDashboardAgent := userdashboard.NewDashboardAgent(
+		prStatusAgent := prstatus.NewDashboardAgent(
 			repos,
 			&githubOAuthConfig,
-			logrus.WithField("client", "user-dashboard"))
+			logrus.WithField("client", "pr-status"))
 
-		mux.Handle("/user-data.js", handleNotCached(
-			userDashboardAgent.HandleUserDashboard(userDashboardAgent)))
+		mux.Handle("/pr-data.js", handleNotCached(
+			prStatusAgent.HandlePrStatus(prStatusAgent)))
 		// Handles login request.
 		mux.Handle("/github-login", goa.HandleLogin(oauthClient))
 		// Handles redirect from Github OAuth server.
-		mux.Handle("/github-login/redirect", goa.HandleRedirect(oauthClient))
+		mux.Handle("/github-login/redirect", goa.HandleRedirect(oauthClient, githuboauth.NewGithubClientGetter()))
 	}
 
 	// optionally inject http->https redirect handler when behind loadbalancer
@@ -279,6 +279,7 @@ func prodOnlyMain(o options, mux *http.ServeMux) {
 		}(mux, o.redirectHTTPTo))
 		mux = redirectMux
 	}
+	return mux
 }
 
 func loadToken(file string) ([]byte, error) {
