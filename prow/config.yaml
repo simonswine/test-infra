@@ -49,6 +49,7 @@ tide:
     - jetstack/puppet-module-vault_client
     - jetstack/test-infra
     - jetstack/navigator
+    - jetstack/cert-manager
     labels:
     - lgtm
     - approved
