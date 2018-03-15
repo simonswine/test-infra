@@ -858,6 +858,7 @@ periodics:
       - --template
       - --ceiling=1
       - --confirm
+      - --updated=30m
       volumeMounts:
       - name: token
         mountPath: /etc/token
