@@ -34,6 +34,16 @@ presets:
   - name: service
     mountPath: /etc/service-account
     readOnly: true
+- labels:
+    libvirt-socket: true
+  volumes:
+  - name: var-run-libvirt-libvirt-sock
+    hostPath:
+      path: /var/run/libvirt/libvirt-sock
+      type: Socket
+  volumeMounts:
+  - name: var-run-libvirt-libvirt-sock
+    mountPath: /var/run/libvirt/libvirt-sock
 
 tide:
   target_url: https://prow.build-infra.jetstack.net/tide.html
@@ -115,6 +125,8 @@ tide:
   skip_report: false
   max_concurrency: 2
   agent: kubernetes
+  labels:
+    libvirt-socket: true
   spec:
     nodeSelector:
       node-role.kubernetes.io/libvirt: ""
@@ -147,8 +159,6 @@ tide:
         mountPath: /cache/bundle
       - name: vagrant-boxes
         mountPath: /root/.vagrant.d/boxes
-      - mountPath: /var/run/libvirt/libvirt-sock
-        name: var-run-libvirt-libvirt-sock
     volumes:
     - name: service
       secret:
@@ -161,10 +171,6 @@ tide:
       hostPath:
         path: /var/lib/libvirt/caches/vagrant-boxes
         type: Directory
-    - name: var-run-libvirt-libvirt-sock
-      hostPath:
-        path: /var/run/libvirt/libvirt-sock
-        type: Socket
   trigger: "(?m)^/test( all| acceptance),?(\\s+|$)"
   rerun_command: "/test acceptance"
 
@@ -210,6 +216,8 @@ presubmits:
     skip_report: false
     max_concurrency: 4
     agent: kubernetes
+    labels:
+      libvirt-socket: true
     spec:
       nodeSelector:
         node-role.kubernetes.io/libvirt: ""
@@ -248,8 +256,6 @@ presubmits:
           mountPath: /var/lib/libvirt
         - name: minikube-certs
           mountPath: /var/lib/libvirt/caches/minikube/.minikube/certs
-        - name: var-run-libvirt-libvirt-sock
-          mountPath: /var/run/libvirt/libvirt-sock
       volumes:
       - name: service
         secret:
@@ -260,10 +266,6 @@ presubmits:
           type: Directory
       - name: minikube-certs
         emptyDir: {}
-      - name: var-run-libvirt-libvirt-sock
-        hostPath:
-          path: /var/run/libvirt/libvirt-sock
-          type: Socket
 
   - name: navigator-e2e-v1-8
     context: navigator-e2e-v1-8
@@ -273,6 +275,8 @@ presubmits:
     skip_report: false
     max_concurrency: 4
     agent: kubernetes
+    labels:
+      libvirt-socket: true
     spec:
       nodeSelector:
         node-role.kubernetes.io/libvirt: ""
@@ -311,8 +315,6 @@ presubmits:
           mountPath: /var/lib/libvirt
         - name: minikube-certs
           mountPath: /var/lib/libvirt/caches/minikube/.minikube/certs
-        - name: var-run-libvirt-libvirt-sock
-          mountPath: /var/run/libvirt/libvirt-sock
       volumes:
       - name: service
         secret:
@@ -323,10 +325,6 @@ presubmits:
           type: Directory
       - name: minikube-certs
         emptyDir: {}
-      - name: var-run-libvirt-libvirt-sock
-        hostPath:
-          path: /var/run/libvirt/libvirt-sock
-          type: Socket
 
   - name: navigator-e2e-v1-9
     context: navigator-e2e-v1-9
@@ -336,6 +334,8 @@ presubmits:
     skip_report: false
     max_concurrency: 4
     agent: kubernetes
+    labels:
+      libvirt-socket: true
     spec:
       nodeSelector:
         node-role.kubernetes.io/libvirt: ""
@@ -374,8 +374,6 @@ presubmits:
           mountPath: /var/lib/libvirt
         - name: minikube-certs
           mountPath: /var/lib/libvirt/caches/minikube/.minikube/certs
-        - name: var-run-libvirt-libvirt-sock
-          mountPath: /var/run/libvirt/libvirt-sock
       volumes:
       - name: service
         secret:
@@ -386,10 +384,6 @@ presubmits:
           type: Directory
       - name: minikube-certs
         emptyDir: {}
-      - name: var-run-libvirt-libvirt-sock
-        hostPath:
-          path: /var/run/libvirt/libvirt-sock
-          type: Socket
 
   - name: navigator-kubetest-e2e
     agent: kubernetes
@@ -484,6 +478,8 @@ presubmits:
     skip_report: false
     max_concurrency: 4
     agent: kubernetes
+    labels:
+      libvirt-socket: true
     spec:
       nodeSelector:
         node-role.kubernetes.io/libvirt: ""
@@ -522,8 +518,6 @@ presubmits:
           mountPath: /var/lib/libvirt
         - name: minikube-certs
           mountPath: /var/lib/libvirt/caches/minikube/.minikube/certs
-        - name: var-run-libvirt-libvirt-sock
-          mountPath: /var/run/libvirt/libvirt-sock
       volumes:
       - name: service
         secret:
@@ -534,10 +528,6 @@ presubmits:
           type: Directory
       - name: minikube-certs
         emptyDir: {}
-      - name: var-run-libvirt-libvirt-sock
-        hostPath:
-          path: /var/run/libvirt/libvirt-sock
-          type: Socket
 
   - name: cert-manager-e2e-v1-8
     context: cert-manager-e2e-v1-8
@@ -547,6 +537,8 @@ presubmits:
     skip_report: false
     max_concurrency: 4
     agent: kubernetes
+    labels:
+      libvirt-socket: true
     spec:
       nodeSelector:
         node-role.kubernetes.io/libvirt: ""
@@ -585,8 +577,6 @@ presubmits:
           mountPath: /var/lib/libvirt
         - name: minikube-certs
           mountPath: /var/lib/libvirt/caches/minikube/.minikube/certs
-        - name: var-run-libvirt-libvirt-sock
-          mountPath: /var/run/libvirt/libvirt-sock
       volumes:
       - name: service
         secret:
@@ -597,10 +587,6 @@ presubmits:
           type: Directory
       - name: minikube-certs
         emptyDir: {}
-      - name: var-run-libvirt-libvirt-sock
-        hostPath:
-          path: /var/run/libvirt/libvirt-sock
-          type: Socket
 
   - name: cert-manager-e2e-v1-9
     context: cert-manager-e2e-v1-9
@@ -610,6 +596,8 @@ presubmits:
     skip_report: false
     max_concurrency: 4
     agent: kubernetes
+    labels:
+      libvirt-socket: true
     spec:
       nodeSelector:
         node-role.kubernetes.io/libvirt: ""
@@ -648,8 +636,6 @@ presubmits:
           mountPath: /var/lib/libvirt
         - name: minikube-certs
           mountPath: /var/lib/libvirt/caches/minikube/.minikube/certs
-        - name: var-run-libvirt-libvirt-sock
-          mountPath: /var/run/libvirt/libvirt-sock
       volumes:
       - name: service
         secret:
@@ -660,11 +646,6 @@ presubmits:
           type: Directory
       - name: minikube-certs
         emptyDir: {}
-      - name: var-run-libvirt-libvirt-sock
-        hostPath:
-          path: /var/run/libvirt/libvirt-sock
-          type: Socket
-
 
   jetstack/puppet-module-aws_ebs:
   - <<: *puppet_module_verify
