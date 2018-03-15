@@ -62,7 +62,7 @@ plugins:
   - approve
   - size
   - wip
-  - close
+  - lifecycle
   - reopen
   - assign
   - hold
@@ -75,7 +75,6 @@ plugins:
   - release-note
   - blunderbuss
   - assign
-  - close
   - reopen
   - golint
   - heart
@@ -94,7 +93,7 @@ plugins:
   - docs-no-retest
   - trigger
   - assign
-  - close
+  - lifecycle
   - reopen
   - heart
   - hold
@@ -111,7 +110,7 @@ plugins:
   - release-note
   - blunderbuss
   - assign
-  - close
+  - lifecycle
   - reopen
   - golint
   - heart
@@ -131,7 +130,7 @@ plugins:
   - release-note
   - assign
   - blunderbuss
-  - close
+  - lifecycle
   - reopen
   - golint
   - heart
@@ -149,7 +148,7 @@ plugins:
   - docs-no-retest
   - trigger
   - assign
-  - close
+  - lifecycle
   - reopen
   - heart
   - hold
@@ -164,7 +163,7 @@ plugins:
   - docs-no-retest
   - trigger
   - assign
-  - close
+  - lifecycle
   - reopen
   - heart
   - hold
@@ -179,7 +178,7 @@ plugins:
   - docs-no-retest
   - trigger
   - assign
-  - close
+  - lifecycle
   - reopen
   - heart
   - hold
@@ -194,7 +193,7 @@ plugins:
   - docs-no-retest
   - trigger
   - assign
-  - close
+  - lifecycle
   - reopen
   - heart
   - hold
@@ -209,7 +208,7 @@ plugins:
   - docs-no-retest
   - trigger
   - assign
-  - close
+  - lifecycle
   - reopen
   - heart
   - hold
@@ -224,7 +223,7 @@ plugins:
   - docs-no-retest
   - trigger
   - assign
-  - close
+  - lifecycle
   - reopen
   - heart
   - hold
@@ -239,7 +238,7 @@ plugins:
   - docs-no-retest
   - trigger
   - assign
-  - close
+  - lifecycle
   - reopen
   - heart
   - hold
@@ -254,7 +253,7 @@ plugins:
   - docs-no-retest
   - trigger
   - assign
-  - close
+  - lifecycle
   - reopen
   - heart
   - hold
