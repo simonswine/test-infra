@@ -19,6 +19,9 @@ triggers:
   - jetstack/puppet-module-tarmak
   trusted_org: jetstack
 
+blunderbuss:
+  # Only request a review from 1 reviewer
+  request_count: 1
 
 external_plugins:
   jetstack/kube-lego:
