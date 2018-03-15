@@ -48,6 +48,7 @@ tide:
     - jetstack/puppet-module-tarmak
     - jetstack/puppet-module-vault_client
     - jetstack/test-infra
+    - jetstack/navigator
     labels:
     - lgtm
     - approved

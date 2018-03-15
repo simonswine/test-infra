@@ -23,6 +23,8 @@ triggers:
 external_plugins:
   jetstack/kube-lego:
   - name: needs-rebase
+  jetstack/navigator:
+  - name: needs-rebase
 
 # heart:
 #   adorees:
