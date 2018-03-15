@@ -28,6 +28,8 @@ external_plugins:
   - name: needs-rebase
   jetstack/navigator:
   - name: needs-rebase
+  jetstack/cert-manager:
+  - name: needs-rebase
 
 # heart:
 #   adorees:
