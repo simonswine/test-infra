@@ -34,6 +34,7 @@ presets:
   - name: service
     mountPath: /etc/service-account
     readOnly: true
+
 - labels:
     libvirt-socket: true
   volumes:
@@ -44,6 +45,51 @@ presets:
   volumeMounts:
   - name: var-run-libvirt-libvirt-sock
     mountPath: /var/run/libvirt/libvirt-sock
+
+- labels:
+    minikube-support: true
+  volumeMounts:
+  - name: var-lib-libvirt
+    mountPath: /var/lib/libvirt
+  - name: minikube-certs
+    mountPath: /var/lib/libvirt/caches/minikube/.minikube/certs
+  volumes:
+  - name: var-lib-libvirt
+    hostPath:
+      path: /var/lib/libvirt
+      type: Directory
+  - name: minikube-certs
+    emptyDir: {}
+  env:
+  - name: MINIKUBE_HOME
+    value: /var/lib/libvirt/caches/minikube
+
+- labels:
+    minikube-size: medium
+  env:
+  - name: MINIKUBE_CPUS
+    value: "4"
+  - name: MINIKUBE_MEMORY
+    value: "12288"
+
+- labels:
+    minikube-size: small
+  env:
+  - name: MINIKUBE_CPUS
+    value: "2"
+  - name: MINIKUBE_MEMORY
+    value: "4096"
+
+# minikube size job templates
+.minikube_medium: &minikube_medium
+  requests:
+    cpu: 3800m
+    memory: 12Gi
+
+.minikube_small: &minikube_small
+  requests:
+    cpu: 1800m
+    memory: 4Gi
 
 tide:
   target_url: https://prow.build-infra.jetstack.net/tide.html
@@ -84,6 +130,8 @@ tide:
   skip_report: false
   max_concurrency: 4
   agent: kubernetes
+  labels:
+    preset-service-account: true
   spec:
     containers:
     - image: gcr.io/jetstack-build-infra/ruby-2.3:0.5
@@ -95,22 +143,14 @@ tide:
       env:
       - name: BUNDLE_DIR
         value: /cache/bundle/$(JOB_NAME)
-      - name: GOOGLE_APPLICATION_CREDENTIALS
-        value: /etc/service-account/service-account.json
       resources:
         requests:
           cpu: 750m
           memory: 1Gi
       volumeMounts:
-      - name: service
-        mountPath: /etc/service-account
-        readOnly: true
       - name: bundle-cache
         mountPath: /cache/bundle
     volumes:
-    - name: service
-      secret:
-        secretName: service-account
     - name: bundle-cache
       hostPath:
         path: /var/lib/libvirt/caches/bundle
@@ -126,6 +166,7 @@ tide:
   max_concurrency: 2
   agent: kubernetes
   labels:
+    preset-service-account: true
     libvirt-socket: true
   spec:
     nodeSelector:
@@ -145,24 +186,16 @@ tide:
       env:
       - name: BUNDLE_DIR
         value: /cache/bundle/$(JOB_NAME)
-      - name: GOOGLE_APPLICATION_CREDENTIALS
-        value: /etc/service-account/service-account.json
       resources:
         requests:
           cpu: 750m
           memory: 1Gi
       volumeMounts:
-      - name: service
-        mountPath: /etc/service-account
-        readOnly: true
       - name: bundle-cache
         mountPath: /cache/bundle
       - name: vagrant-boxes
         mountPath: /root/.vagrant.d/boxes
     volumes:
-    - name: service
-      secret:
-        secretName: service-account
     - name: bundle-cache
       hostPath:
         path: /var/lib/libvirt/caches/bundle
@@ -182,6 +215,8 @@ presubmits:
     context: navigator-quick-verify
     max_concurrency: 2
     agent: kubernetes
+    labels:
+      preset-service-account: true
     spec:
       containers:
       - image: gcr.io/jetstack-build-infra/gcloud-in-go:0.8
@@ -190,21 +225,10 @@ presubmits:
         - "--root=/go/src"
         - "--upload=gs://jetstack-logs/pr-logs"
         - "--clean"
-        env:
-        - name: GOOGLE_APPLICATION_CREDENTIALS
-          value: /etc/service-account/service-account.json
         resources:
           requests:
             cpu: 1
             memory: 1Gi
-        volumeMounts:
-        - name: service
-          mountPath: /etc/service-account
-          readOnly: true
-      volumes:
-      - name: service
-        secret:
-          secretName: service-account
     trigger: "(?m)^/test( all| verify| quick verify),?(\\s+|$)"
     rerun_command: "/test verify"
 
@@ -217,7 +241,10 @@ presubmits:
     max_concurrency: 4
     agent: kubernetes
     labels:
+      preset-service-account: true
       libvirt-socket: true
+      minikube-support: true
+      minikube-size: medium
     spec:
       nodeSelector:
         node-role.kubernetes.io/libvirt: ""
@@ -233,39 +260,9 @@ presubmits:
         - "--root=/go/src"
         - "--upload=gs://jetstack-logs/pr-logs"
         - "--clean"
-        env:
-        - name: GOOGLE_APPLICATION_CREDENTIALS
-          value: /etc/service-account/service-account.json
-        - name: MINIKUBE_HOME
-          value: /var/lib/libvirt/caches/minikube
-        - name: MINIKUBE_CPUS
-          value: "4"
-        - name: MINIKUBE_MEMORY
-          value: "12288"
-        resources:
-          requests:
-            cpu: "3800m"
-            memory: 12Gi
+        <<: *minikube_medium
         securityContext:
           privileged: true
-        volumeMounts:
-        - name: service
-          mountPath: /etc/service-account
-          readOnly: true
-        - name: var-lib-libvirt
-          mountPath: /var/lib/libvirt
-        - name: minikube-certs
-          mountPath: /var/lib/libvirt/caches/minikube/.minikube/certs
-      volumes:
-      - name: service
-        secret:
-          secretName: service-account
-      - name: var-lib-libvirt
-        hostPath:
-          path: /var/lib/libvirt
-          type: Directory
-      - name: minikube-certs
-        emptyDir: {}
 
   - name: navigator-e2e-v1-8
     context: navigator-e2e-v1-8
@@ -276,7 +273,10 @@ presubmits:
     max_concurrency: 4
     agent: kubernetes
     labels:
+      preset-service-account: true
       libvirt-socket: true
+      minikube-support: true
+      minikube-size: medium
     spec:
       nodeSelector:
         node-role.kubernetes.io/libvirt: ""
@@ -292,39 +292,9 @@ presubmits:
         - "--root=/go/src"
         - "--upload=gs://jetstack-logs/pr-logs"
         - "--clean"
-        env:
-        - name: GOOGLE_APPLICATION_CREDENTIALS
-          value: /etc/service-account/service-account.json
-        - name: MINIKUBE_HOME
-          value: /var/lib/libvirt/caches/minikube
-        - name: MINIKUBE_CPUS
-          value: "4"
-        - name: MINIKUBE_MEMORY
-          value: "12288"
-        resources:
-          requests:
-            cpu: "3800m"
-            memory: 12Gi
+        <<: *minikube_medium
         securityContext:
           privileged: true
-        volumeMounts:
-        - name: service
-          mountPath: /etc/service-account
-          readOnly: true
-        - name: var-lib-libvirt
-          mountPath: /var/lib/libvirt
-        - name: minikube-certs
-          mountPath: /var/lib/libvirt/caches/minikube/.minikube/certs
-      volumes:
-      - name: service
-        secret:
-          secretName: service-account
-      - name: var-lib-libvirt
-        hostPath:
-          path: /var/lib/libvirt
-          type: Directory
-      - name: minikube-certs
-        emptyDir: {}
 
   - name: navigator-e2e-v1-9
     context: navigator-e2e-v1-9
@@ -335,7 +305,10 @@ presubmits:
     max_concurrency: 4
     agent: kubernetes
     labels:
+      preset-service-account: true
       libvirt-socket: true
+      minikube-support: true
+      minikube-size: medium
     spec:
       nodeSelector:
         node-role.kubernetes.io/libvirt: ""
@@ -352,38 +325,9 @@ presubmits:
         - "--upload=gs://jetstack-logs/pr-logs"
         - "--clean"
         env:
-        - name: GOOGLE_APPLICATION_CREDENTIALS
-          value: /etc/service-account/service-account.json
-        - name: MINIKUBE_HOME
-          value: /var/lib/libvirt/caches/minikube
-        - name: MINIKUBE_CPUS
-          value: "4"
-        - name: MINIKUBE_MEMORY
-          value: "12288"
-        resources:
-          requests:
-            cpu: "3800m"
-            memory: 12Gi
+        <<: *minikube_medium
         securityContext:
           privileged: true
-        volumeMounts:
-        - name: service
-          mountPath: /etc/service-account
-          readOnly: true
-        - name: var-lib-libvirt
-          mountPath: /var/lib/libvirt
-        - name: minikube-certs
-          mountPath: /var/lib/libvirt/caches/minikube/.minikube/certs
-      volumes:
-      - name: service
-        secret:
-          secretName: service-account
-      - name: var-lib-libvirt
-        hostPath:
-          path: /var/lib/libvirt
-          type: Directory
-      - name: minikube-certs
-        emptyDir: {}
 
   - name: navigator-kubetest-e2e
     agent: kubernetes
@@ -444,6 +388,8 @@ presubmits:
     context: cert-manager-quick-verify
     max_concurrency: 2
     agent: kubernetes
+    labels:
+      preset-service-account: true
     spec:
       containers:
       - image: gcr.io/jetstack-build-infra/gcloud-in-go:0.9
@@ -452,21 +398,10 @@ presubmits:
         - "--root=/go/src"
         - "--upload=gs://jetstack-logs/pr-logs"
         - "--clean"
-        env:
-        - name: GOOGLE_APPLICATION_CREDENTIALS
-          value: /etc/service-account/service-account.json
         resources:
           requests:
             cpu: 1
             memory: 1Gi
-        volumeMounts:
-        - name: service
-          mountPath: /etc/service-account
-          readOnly: true
-      volumes:
-      - name: service
-        secret:
-          secretName: service-account
     trigger: "(?m)^/test( all| verify| quick verify),?(\\s+|$)"
     rerun_command: "/test verify"
 
@@ -479,7 +414,10 @@ presubmits:
     max_concurrency: 4
     agent: kubernetes
     labels:
+      preset-service-account: true
       libvirt-socket: true
+      minikube-support: true
+      minikube-size: small
     spec:
       nodeSelector:
         node-role.kubernetes.io/libvirt: ""
@@ -495,39 +433,9 @@ presubmits:
         - "--root=/go/src"
         - "--upload=gs://jetstack-logs/pr-logs"
         - "--clean"
-        env:
-        - name: GOOGLE_APPLICATION_CREDENTIALS
-          value: /etc/service-account/service-account.json
-        - name: MINIKUBE_HOME
-          value: /var/lib/libvirt/caches/minikube
-        - name: MINIKUBE_CPUS
-          value: "2"
-        - name: MINIKUBE_MEMORY
-          value: "4096"
-        resources:
-          requests:
-            cpu: 1800m
-            memory: 4Gi
+        <<: *minikube_small
         securityContext:
           privileged: true
-        volumeMounts:
-        - name: service
-          mountPath: /etc/service-account
-          readOnly: true
-        - name: var-lib-libvirt
-          mountPath: /var/lib/libvirt
-        - name: minikube-certs
-          mountPath: /var/lib/libvirt/caches/minikube/.minikube/certs
-      volumes:
-      - name: service
-        secret:
-          secretName: service-account
-      - name: var-lib-libvirt
-        hostPath:
-          path: /var/lib/libvirt
-          type: Directory
-      - name: minikube-certs
-        emptyDir: {}
 
   - name: cert-manager-e2e-v1-8
     context: cert-manager-e2e-v1-8
@@ -538,7 +446,10 @@ presubmits:
     max_concurrency: 4
     agent: kubernetes
     labels:
+      preset-service-account: true
       libvirt-socket: true
+      minikube-support: true
+      minikube-size: small
     spec:
       nodeSelector:
         node-role.kubernetes.io/libvirt: ""
@@ -554,39 +465,9 @@ presubmits:
         - "--root=/go/src"
         - "--upload=gs://jetstack-logs/pr-logs"
         - "--clean"
-        env:
-        - name: GOOGLE_APPLICATION_CREDENTIALS
-          value: /etc/service-account/service-account.json
-        - name: MINIKUBE_HOME
-          value: /var/lib/libvirt/caches/minikube
-        - name: MINIKUBE_CPUS
-          value: "2"
-        - name: MINIKUBE_MEMORY
-          value: "4096"
-        resources:
-          requests:
-            cpu: 1800m
-            memory: 4Gi
+        <<: *minikube_small
         securityContext:
           privileged: true
-        volumeMounts:
-        - name: service
-          mountPath: /etc/service-account
-          readOnly: true
-        - name: var-lib-libvirt
-          mountPath: /var/lib/libvirt
-        - name: minikube-certs
-          mountPath: /var/lib/libvirt/caches/minikube/.minikube/certs
-      volumes:
-      - name: service
-        secret:
-          secretName: service-account
-      - name: var-lib-libvirt
-        hostPath:
-          path: /var/lib/libvirt
-          type: Directory
-      - name: minikube-certs
-        emptyDir: {}
 
   - name: cert-manager-e2e-v1-9
     context: cert-manager-e2e-v1-9
@@ -597,7 +478,10 @@ presubmits:
     max_concurrency: 4
     agent: kubernetes
     labels:
+      preset-service-account: true
       libvirt-socket: true
+      minikube-support: true
+      minikube-size: small
     spec:
       nodeSelector:
         node-role.kubernetes.io/libvirt: ""
@@ -613,39 +497,9 @@ presubmits:
         - "--root=/go/src"
         - "--upload=gs://jetstack-logs/pr-logs"
         - "--clean"
-        env:
-        - name: GOOGLE_APPLICATION_CREDENTIALS
-          value: /etc/service-account/service-account.json
-        - name: MINIKUBE_HOME
-          value: /var/lib/libvirt/caches/minikube
-        - name: MINIKUBE_CPUS
-          value: "2"
-        - name: MINIKUBE_MEMORY
-          value: "4096"
-        resources:
-          requests:
-            cpu: 1800m
-            memory: 4Gi
+        <<: *minikube_small
         securityContext:
           privileged: true
-        volumeMounts:
-        - name: service
-          mountPath: /etc/service-account
-          readOnly: true
-        - name: var-lib-libvirt
-          mountPath: /var/lib/libvirt
-        - name: minikube-certs
-          mountPath: /var/lib/libvirt/caches/minikube/.minikube/certs
-      volumes:
-      - name: service
-        secret:
-          secretName: service-account
-      - name: var-lib-libvirt
-        hostPath:
-          path: /var/lib/libvirt
-          type: Directory
-      - name: minikube-certs
-        emptyDir: {}
 
   jetstack/puppet-module-aws_ebs:
   - <<: *puppet_module_verify
@@ -747,6 +601,8 @@ presubmits:
     context: tarmak-quick-verify
     max_concurrency: 2
     agent: kubernetes
+    labels:
+      preset-service-account: true
     spec:
       containers:
       - image: gcr.io/jetstack-build-infra/gcloud-in-go:0.7
@@ -755,29 +611,21 @@ presubmits:
         - "--root=/go/src"
         - "--upload=gs://jetstack-logs/pr-logs"
         - "--clean"
-        env:
-        - name: GOOGLE_APPLICATION_CREDENTIALS
-          value: /etc/service-account/service-account.json
         resources:
           requests:
             cpu: 750m
             memory: 1Gi
-        volumeMounts:
-        - name: service
-          mountPath: /etc/service-account
-          readOnly: true
-      volumes:
-      - name: service
-        secret:
-          secretName: service-account
     trigger: "(?m)^/test( all| verify( quick)?|)( \\[.+\\])?$"
     rerun_command: "/test verify quick"
+
   - name: tarmak-docs-verify
     always_run: true
     skip_report: false
     context: tarmak-docs-verify
     max_concurrency: 2
     agent: kubernetes
+    labels:
+      preset-service-account: true
     spec:
       containers:
       - image: gcr.io/jetstack-build-infra/sphinx-docs:0.1
@@ -786,21 +634,10 @@ presubmits:
         - "--root=/workspace"
         - "--upload=gs://jetstack-logs/pr-logs"
         - "--clean"
-        env:
-        - name: GOOGLE_APPLICATION_CREDENTIALS
-          value: /etc/service-account/service-account.json
         resources:
           requests:
             cpu: 750m
             memory: 1Gi
-        volumeMounts:
-        - name: service
-          mountPath: /etc/service-account
-          readOnly: true
-      volumes:
-      - name: service
-        secret:
-          secretName: service-account
     trigger: "(?m)^/test( all| verify( docs)?|)( \\[.+\\])?$"
     rerun_command: "/test verify docs"
 
@@ -854,6 +691,8 @@ postsubmits:
     - release-0.2
     context: tarmak-docs-push
     agent: kubernetes
+    labels:
+      preset-service-account: true
     spec:
       containers:
       - image: gcr.io/jetstack-build-infra/sphinx-docs:0.1
@@ -865,23 +704,15 @@ postsubmits:
         env:
         - name: DOCS_GOOGLE_APPLICATION_CREDENTIALS
           value: /etc/docs-service-account/service-account.json
-        - name: GOOGLE_APPLICATION_CREDENTIALS
-          value: /etc/service-account/service-account.json
         resources:
           requests:
             cpu: 200m
             memory: 1Gi
         volumeMounts:
-        - name: service
-          mountPath: /etc/service-account
-          readOnly: true
         - name: docs-service
           mountPath: /etc/docs-service-account
           readOnly: true
       volumes:
-      - name: service
-        secret:
-          secretName: service-account
       - name: docs-service
         secret:
           secretName: tarmak-docs-push-service-account
