@@ -53,9 +53,6 @@ spec:
         - name: plugins
           mountPath: /etc/plugins
           readOnly: true
-        - name: cat-api
-          mountPath: /etc/cat-api
-          readOnly: true
       volumes:
       - name: hmac
         secret:
@@ -69,6 +66,3 @@ spec:
       - name: plugins
         configMap:
           name: plugins
-      - name: cat-api
-        configMap:
-          name: cat-api-key
