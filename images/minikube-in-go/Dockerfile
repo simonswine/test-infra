@@ -79,6 +79,13 @@ RUN curl -L https://github.com/golang/dep/releases/download/v0.3.2/dep-linux-amd
 RUN curl -L "https://get.docker.com/builds/Linux/x86_64/docker-1.9.1.tgz" \
     | tar -C /usr/bin -xvzf- --strip-components=3 usr/local/bin/docker
 
+ARG BAZEL_VERSION
+
+RUN INSTALLER="bazel-${BAZEL_VERSION}-installer-linux-x86_64.sh"; \
+    DOWNLOAD_URL="https://github.com/bazelbuild/bazel/releases/download/${BAZEL_VERSION}/${INSTALLER}"; \
+    wget -q "${DOWNLOAD_URL}" && \
+    chmod +x "${INSTALLER}" && "./${INSTALLER}" && rm "${INSTALLER}"
+
 WORKDIR /workspace
 ADD runner /
 ENTRYPOINT ["/bin/bash", "/runner"]
