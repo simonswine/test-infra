@@ -80,6 +80,19 @@ presets:
   - name: MINIKUBE_MEMORY
     value: "4096"
 
+# storage / caching presets
+- labels:
+    preset-bazel-scratch-dir: true
+  env:
+  - name: TEST_TMPDIR
+    value: /bazel-scratch/.cache/bazel
+  volumes:
+  - name: bazel-scratch
+    emptyDir: {}
+  volumeMounts:
+  - name: bazel-scratch
+    mountPath: /bazel-scratch/.cache
+
 # minikube size job templates
 .minikube_medium: &minikube_medium
   requests:
@@ -210,6 +223,37 @@ tide:
 
 presubmits:
   jetstack/navigator:
+  - name: pull-navigator-bazel-verify
+    agent: kubernetes
+    context: pull-navigator-bazel-verify
+    always_run: false
+    rerun_command: "/test pull-navigator-bazel-verify"
+    trigger: "(?m)^/test pull-navigator-bazel-verify,?(\\s+|$)"
+    labels:
+      preset-service-account: true
+      preset-bazel-scratch-dir: true
+    spec:
+      containers:
+      - image: gcr.io/k8s-testimages/bazelbuild:v20180201-0184a54dc-0.10.0
+        imagePullPolicy: IfNotPresent
+        args:
+        - "--clean"
+        - "--git-cache=/root/.cache/git"
+        - "--job=$(JOB_NAME)"
+        - "--repo=github.com/$(REPO_OWNER)/$(REPO_NAME)=$(PULL_REFS)"
+        - "--service-account=/etc/service-account/service-account.json"
+        - "--upload=gs://jetstack-logs/pr-logs"
+        - "--scenario=kubernetes_execute_bazel"
+        - "--" # end bootstrap args, scenario args below
+        - make
+        - verify
+        # Bazel needs privileged mode in order to sandbox builds.
+        securityContext:
+          privileged: true
+        resources:
+          requests:
+            memory: "2Gi"
+
   - name: navigator-quick-verify
     always_run: true
     skip_report: false
