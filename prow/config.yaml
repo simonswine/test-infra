@@ -80,6 +80,19 @@ presets:
   - name: MINIKUBE_MEMORY
     value: "4096"
 
+# storage / caching presets
+- labels:
+    preset-bazel-scratch-dir: true
+  env:
+  - name: TEST_TMPDIR
+    value: /bazel-scratch/.cache/bazel
+  volumes:
+  - name: bazel-scratch
+    emptyDir: {}
+  volumeMounts:
+  - name: bazel-scratch
+    mountPath: /bazel-scratch/.cache
+
 # minikube size job templates
 .minikube_medium: &minikube_medium
   requests:
@@ -210,6 +223,73 @@ tide:
 
 presubmits:
   jetstack/navigator:
+  - name: pull-navigator-bazel-verify
+    agent: kubernetes
+    context: pull-navigator-bazel-verify
+    always_run: false
+    rerun_command: "/test pull-navigator-bazel-verify"
+    trigger: "(?m)^/test pull-navigator-bazel-verify,?(\\s+|$)"
+    labels:
+      preset-service-account: true
+      preset-bazel-scratch-dir: true
+    spec:
+      containers:
+      - image: gcr.io/jetstack-build-infra/bazelbuild:v20180321-d7679e93b-0.11.1
+        imagePullPolicy: IfNotPresent
+        args:
+        - "--clean"
+        - "--git-cache=/root/.cache/git"
+        - "--job=$(JOB_NAME)"
+        - "--repo=github.com/$(REPO_OWNER)/$(REPO_NAME)=$(PULL_REFS)"
+        - "--upload=gs://jetstack-logs/pr-logs"
+        - "--scenario=kubernetes_bazel"
+        - "--" # end bootstrap args, scenario args below
+        - --test=//cmd/... //pkg/... //internal/... //plugin/...
+        # Bazel needs privileged mode in order to sandbox builds.
+        securityContext:
+          privileged: true
+        resources:
+          requests:
+            memory: "2Gi"
+
+  - name: pull-navigator-e2e-v1-9
+    context: pull-navigator-e2e-v1-9
+    always_run: false
+    trigger: "(?m)^/test( bazel-e2e( v?1.9)?|)( \\[.+\\])?$"
+    rerun_command: "/test bazel-e2e v1.9"
+    skip_report: false
+    max_concurrency: 4
+    agent: kubernetes
+    labels:
+      preset-service-account: true
+      libvirt-socket: true
+      minikube-support: true
+      minikube-size: medium
+    spec:
+      nodeSelector:
+        node-role.kubernetes.io/libvirt: ""
+      # Note: this is not supported yet by prow PodSpec, taint temporary removed
+      tolerations:
+      - effect: NoSchedule
+        key: dedicated
+        operator: Equal
+      containers:
+      - image: gcr.io/jetstack-build-infra/minikube-in-go-v1.9.1:0.10
+        args:
+        - "--repo=github.com/$(REPO_OWNER)/$(REPO_NAME)=$(PULL_REFS)"
+        - "--root=/go/src"
+        - "--upload=gs://jetstack-logs/pr-logs"
+        - "--clean"
+        - "--job=$(JOB_NAME)"
+        - "--scenario=minikube"
+        - "--"
+        - make
+        - e2e-test
+        env:
+        <<: *minikube_medium
+        securityContext:
+          privileged: true
+
   - name: navigator-quick-verify
     always_run: true
     skip_report: false
