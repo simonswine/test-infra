@@ -95,14 +95,16 @@ presets:
 
 # minikube size job templates
 .minikube_medium: &minikube_medium
-  requests:
-    cpu: 3800m
-    memory: 12Gi
+  resources:
+    requests:
+      cpu: 3800m
+      memory: 12Gi
 
 .minikube_small: &minikube_small
-  requests:
-    cpu: 1800m
-    memory: 4Gi
+  resources:
+    requests:
+      cpu: 1800m
+      memory: 4Gi
 
 tide:
   target_url: https://prow.build-infra.jetstack.net/tide.html
@@ -285,7 +287,6 @@ presubmits:
         - "--"
         - make
         - e2e-test
-        env:
         <<: *minikube_medium
         securityContext:
           privileged: true
@@ -405,7 +406,6 @@ presubmits:
         - "--root=/go/src"
         - "--upload=gs://jetstack-logs/pr-logs"
         - "--clean"
-        env:
         <<: *minikube_medium
         securityContext:
           privileged: true
