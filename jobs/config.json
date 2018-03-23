@@ -109,6 +109,26 @@
       "UNKNOWN"
     ]
   },
+  "puppet-module-tarmak-acceptance-1-10-centos": {
+    "args": [
+      "make",
+      "acceptance-1-10-centos"
+    ],
+    "scenario": "execute",
+    "sigOwners": [
+      "UNKNOWN"
+    ]
+  },
+  "puppet-module-tarmak-acceptance-1-9-centos": {
+    "args": [
+      "make",
+      "acceptance-1-9-centos"
+    ],
+    "scenario": "execute",
+    "sigOwners": [
+      "UNKNOWN"
+    ]
+  },
   "puppet-module-tarmak-acceptance-1-8-centos": {
     "args": [
       "make",
