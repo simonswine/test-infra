@@ -276,7 +276,7 @@ presubmits:
         key: dedicated
         operator: Equal
       containers:
-      - image: gcr.io/jetstack-build-infra/minikube-in-go-v1.9.1:0.10
+      - image: gcr.io/jetstack-build-infra/minikube-in-go-v1.9.6:0.11
         args:
         - "--repo=github.com/$(REPO_OWNER)/$(REPO_NAME)=$(PULL_REFS)"
         - "--root=/go/src"
@@ -336,7 +336,7 @@ presubmits:
         key: dedicated
         operator: Equal
       containers:
-      - image: gcr.io/jetstack-build-infra/minikube-in-go-v1.7.10:0.8
+      - image: gcr.io/jetstack-build-infra/minikube-in-go-v1.7.15:0.11
         args:
         - "--repo=github.com/$(REPO_OWNER)/$(REPO_NAME)=$(PULL_REFS)"
         - "--root=/go/src"
@@ -368,7 +368,7 @@ presubmits:
         key: dedicated
         operator: Equal
       containers:
-      - image: gcr.io/jetstack-build-infra/minikube-in-go-v1.8.3:0.8
+      - image: gcr.io/jetstack-build-infra/minikube-in-go-v1.8.10:0.11
         args:
         - "--repo=github.com/$(REPO_OWNER)/$(REPO_NAME)=$(PULL_REFS)"
         - "--root=/go/src"
@@ -400,7 +400,39 @@ presubmits:
         key: dedicated
         operator: Equal
       containers:
-      - image: gcr.io/jetstack-build-infra/minikube-in-go-v1.9.1:0.8
+      - image: gcr.io/jetstack-build-infra/minikube-in-go-v1.9.6:0.11
+        args:
+        - "--repo=github.com/$(REPO_OWNER)/$(REPO_NAME)=$(PULL_REFS)"
+        - "--root=/go/src"
+        - "--upload=gs://jetstack-logs/pr-logs"
+        - "--clean"
+        <<: *minikube_medium
+        securityContext:
+          privileged: true
+
+  - name: navigator-e2e-v1-10
+    context: navigator-e2e-v1-10
+    always_run: true
+    trigger: "(?m)^/test( all| e2e( v?1.10)?|)( \\[.+\\])?$"
+    rerun_command: "/test e2e v1.10"
+    skip_report: false
+    max_concurrency: 4
+    agent: kubernetes
+    labels:
+      preset-service-account: true
+      libvirt-socket: true
+      minikube-support: true
+      minikube-size: medium
+    spec:
+      nodeSelector:
+        node-role.kubernetes.io/libvirt: ""
+      # Note: this is not supported yet by prow PodSpec, taint temporary removed
+      tolerations:
+      - effect: NoSchedule
+        key: dedicated
+        operator: Equal
+      containers:
+      - image: gcr.io/jetstack-build-infra/minikube-in-go-v1.10.0:0.11
         args:
         - "--repo=github.com/$(REPO_OWNER)/$(REPO_NAME)=$(PULL_REFS)"
         - "--root=/go/src"
@@ -508,7 +540,7 @@ presubmits:
         key: dedicated
         operator: Equal
       containers:
-      - image: gcr.io/jetstack-build-infra/minikube-in-go-v1.7.10:0.8
+      - image: gcr.io/jetstack-build-infra/minikube-in-go-v1.7.15:0.11
         args:
         - "--repo=github.com/$(REPO_OWNER)/$(REPO_NAME)=$(PULL_REFS)"
         - "--root=/go/src"
@@ -540,7 +572,7 @@ presubmits:
         key: dedicated
         operator: Equal
       containers:
-      - image: gcr.io/jetstack-build-infra/minikube-in-go-v1.8.3:0.8
+      - image: gcr.io/jetstack-build-infra/minikube-in-go-v1.8.10:0.11
         args:
         - "--repo=github.com/$(REPO_OWNER)/$(REPO_NAME)=$(PULL_REFS)"
         - "--root=/go/src"
@@ -572,7 +604,39 @@ presubmits:
         key: dedicated
         operator: Equal
       containers:
-      - image: gcr.io/jetstack-build-infra/minikube-in-go-v1.9.1:0.8
+      - image: gcr.io/jetstack-build-infra/minikube-in-go-v1.9.6:0.11
+        args:
+        - "--repo=github.com/$(REPO_OWNER)/$(REPO_NAME)=$(PULL_REFS)"
+        - "--root=/go/src"
+        - "--upload=gs://jetstack-logs/pr-logs"
+        - "--clean"
+        <<: *minikube_small
+        securityContext:
+          privileged: true
+
+  - name: cert-manager-e2e-v1-10
+    context: cert-manager-e2e-v1-10
+    always_run: true
+    trigger: "(?m)^/test( all| e2e( v?1.10)?|)( \\[.+\\])?$"
+    rerun_command: "/test e2e v1.10"
+    skip_report: false
+    max_concurrency: 4
+    agent: kubernetes
+    labels:
+      preset-service-account: true
+      libvirt-socket: true
+      minikube-support: true
+      minikube-size: small
+    spec:
+      nodeSelector:
+        node-role.kubernetes.io/libvirt: ""
+      # Note: this is not supported yet by prow PodSpec, taint temporary removed
+      tolerations:
+      - effect: NoSchedule
+        key: dedicated
+        operator: Equal
+      containers:
+      - image: gcr.io/jetstack-build-infra/minikube-in-go-v1.10.0:0.11
         args:
         - "--repo=github.com/$(REPO_OWNER)/$(REPO_NAME)=$(PULL_REFS)"
         - "--root=/go/src"
