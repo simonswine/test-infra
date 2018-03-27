@@ -12,8 +12,8 @@
 # See the License for the specific language governing permissions and
 # limitations under the License.
 
-VERSION = 0.10
-KUBERNETES_VERSIONS = v1.8.3 v1.7.10 v1.9.1 v1.10.0
+VERSION = 0.11
+KUBERNETES_VERSIONS = v1.8.10 v1.7.15 v1.9.6 v1.10.0
 BAZEL_VERSION = 0.11.1
 
 $(KUBERNETES_VERSIONS):
