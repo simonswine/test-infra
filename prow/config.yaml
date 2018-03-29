@@ -753,6 +753,15 @@ presubmits:
     always_run: true
 
   jetstack/tarmak:
+  - <<: *puppet_module_verify
+    name: tarmak-puppet-module-kubernetes-quick-verify
+    context: tarmak-puppet-module-kubernetes-quick-verify
+    run_if_changed: "^(puppet/modules/kubernetes).*$"
+  - <<: *puppet_module_acceptance
+    name: tarmak-puppet-module-kubernetes-acceptance
+    context: tarmak-puppet-module-kubernetes-acceptance
+    run_if_changed: "^(puppet/modules/kubernetes).*$"
+
   - name: tarmak-quick-verify
     always_run: true
     skip_report: false
