@@ -221,7 +221,9 @@
   },
   "tarmak-puppet-module-kubernetes-quick-verify": {
     "args": [
+      "--env",
       "FIXTURES_YML=.fixtures.yml.local",
+      "--",
       "make",
       "-C",
       "puppet/modules/kubernetes",
@@ -234,7 +236,9 @@
   },
   "tarmak-puppet-module-kubernetes-acceptance": {
     "args": [
+      "--env",
       "FIXTURES_YML=.fixtures.yml.local",
+      "--",
       "make",
       "-C",
       "puppet/modules/kubernetes",
