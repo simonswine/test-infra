@@ -219,6 +219,32 @@
       "UNKNOWN"
     ]
   },
+  "tarmak-puppet-module-kubernetes-quick-verify": {
+    "args": [
+      "FIXTURES_YML=.fixtures.yml.local",
+      "make",
+      "-C",
+      "puppet/modules/kubernetes",
+      "all"
+    ],
+    "scenario": "execute",
+    "sigOwners": [
+      "UNKNOWN"
+    ]
+  },
+  "tarmak-puppet-module-kubernetes-acceptance": {
+    "args": [
+      "FIXTURES_YML=.fixtures.yml.local",
+      "make",
+      "-C",
+      "puppet/modules/kubernetes",
+      "acceptance"
+    ],
+    "scenario": "execute",
+    "sigOwners": [
+      "UNKNOWN"
+    ]
+  },
   "tarmak-docs-verify": {
     "args": [
       "--",
