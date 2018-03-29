@@ -227,7 +227,7 @@
       "make",
       "-C",
       "puppet/modules/kubernetes",
-      "all"
+      "verify"
     ],
     "scenario": "execute",
     "sigOwners": [
