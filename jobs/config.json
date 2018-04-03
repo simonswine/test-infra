@@ -249,6 +249,51 @@
       "UNKNOWN"
     ]
   },
+  "tarmak-puppet-module-tarmak-quick-verify": {
+    "args": [
+      "--env",
+      "FIXTURES_YML=.fixtures.yml.local",
+      "--",
+      "make",
+      "-C",
+      "puppet/modules/tarmak",
+      "acceptance"
+    ],
+    "scenario": "execute",
+    "sigOwners": [
+      "UNKNOWN"
+    ]
+  },
+  "tarmak-puppet-module-kubernetes-acceptance-1-10-centos": {
+    "args": [
+      "--env",
+      "FIXTURES_YML=.fixtures.yml.local",
+      "--",
+      "make",
+      "-C",
+      "puppet/modules/tarmak",
+      "acceptance-1-10-centos"
+    ],
+    "scenario": "execute",
+    "sigOwners": [
+      "UNKNOWN"
+    ]
+  },
+  "tarmak-puppet-module-kubernetes-acceptance-1-9-centos": {
+    "args": [
+      "--env",
+      "FIXTURES_YML=.fixtures.yml.local",
+      "--",
+      "make",
+      "-C",
+      "puppet/modules/tarmak",
+      "acceptance-1-9-centos"
+    ],
+    "scenario": "execute",
+    "sigOwners": [
+      "UNKNOWN"
+    ]
+  },
   "tarmak-docs-verify": {
     "args": [
       "--",

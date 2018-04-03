@@ -757,10 +757,26 @@ presubmits:
     name: tarmak-puppet-module-kubernetes-quick-verify
     context: tarmak-puppet-module-kubernetes-quick-verify
     run_if_changed: "^(puppet/modules/kubernetes).*$"
+    trigger: "(?m)^/test( all| puppet| puppet-kubernetes| puppet-kubernetes-verify( \\[.+\\])?$"
+    rerun_command: "/test puppet-kubernetes-verify"
   - <<: *puppet_module_acceptance
     name: tarmak-puppet-module-kubernetes-acceptance
     context: tarmak-puppet-module-kubernetes-acceptance
     run_if_changed: "^(puppet/modules/kubernetes).*$"
+    trigger: "(?m)^/test( all| puppet| puppet-tarmak| puppet-kubernetes-acceptance( \\[.+\\])?$"
+    rerun_command: "/test puppet-kubernetes-acceptance"
+  - <<: *puppet_module_verify
+    name: tarmak-puppet-module-tarmak-quick-verify
+    context: tarmak-puppet-module-tarmak-quick-verify
+    run_if_changed: "^(puppet/modules).*$"
+    trigger: "(?m)^/test( all| puppet| puppet-tarmak| puppet-tarmak-verify( \\[.+\\])?$"
+    rerun_command: "/test puppet-tarmak-verify"
+  - <<: *puppet_module_acceptance
+    name: tarmak-puppet-module-tarmak-acceptance-1-9-centos
+    context: tarmak-puppet-module-tarmak-acceptance-1-9-centos
+    run_if_changed: "^(puppet/modules).*$"
+    trigger: "(?m)^/test( all| puppet| puppet-tarmak| puppet-tarmak-acceptance-centos( v?1.9)?|)( \\[.+\\])?$"
+    rerun_command: "/test puppet-tarmak-acceptance-centos v1.9"
 
   - name: tarmak-quick-verify
     always_run: true
