@@ -257,7 +257,7 @@
       "make",
       "-C",
       "puppet/modules/tarmak",
-      "acceptance"
+      "verify"
     ],
     "scenario": "execute",
     "sigOwners": [
