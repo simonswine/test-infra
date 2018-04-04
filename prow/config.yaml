@@ -76,9 +76,9 @@ presets:
     minikube-size: small
   env:
   - name: MINIKUBE_CPUS
-    value: "2"
+    value: "3"
   - name: MINIKUBE_MEMORY
-    value: "4096"
+    value: "8192"
 
 # storage / caching presets
 - labels:
@@ -103,8 +103,8 @@ presets:
 .minikube_small: &minikube_small
   resources:
     requests:
-      cpu: 1800m
-      memory: 4Gi
+      cpu: 2900m
+      memory: 8Gi
 
 tide:
   target_url: https://prow.build-infra.jetstack.net/tide.html
