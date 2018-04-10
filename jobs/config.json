@@ -493,5 +493,25 @@
     "sigOwners": [
       "UNKNOWN"
     ]
+  },
+  "vault-helper-quick-verify": {
+    "args": [
+      "make",
+      "all"
+    ],
+    "scenario": "execute",
+    "sigOwners": [
+      "UNKNOWN"
+    ]
+  },
+  "vault-unsealer-quick-verify": {
+    "args": [
+      "make",
+      "all"
+    ],
+    "scenario": "execute",
+    "sigOwners": [
+      "UNKNOWN"
+    ]
   }
 }
