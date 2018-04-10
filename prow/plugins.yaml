@@ -17,6 +17,8 @@ triggers:
   - jetstack/puppet-module-prometheus
   - jetstack/puppet-module-vault_client
   - jetstack/puppet-module-tarmak
+  - jetstack/vault-helper
+  - jetstack/vault-unsealer
   trusted_org: jetstack
 
 blunderbuss:
@@ -262,6 +264,44 @@ plugins:
   - hold
   - label
   - lgtm
+  - size
+  - yuks
+  - wip
+  - shrug
+
+  jetstack/vault-helper:
+  - docs-no-retest
+  - trigger
+  - release-note
+  - assign
+  - blunderbuss
+  - lifecycle
+  - reopen
+  - golint
+  - heart
+  - hold
+  - label
+  - lgtm
+  - approve
+  - size
+  - yuks
+  - wip
+  - shrug
+
+  jetstack/vault-unsealer:
+  - docs-no-retest
+  - trigger
+  - release-note
+  - assign
+  - blunderbuss
+  - lifecycle
+  - reopen
+  - golint
+  - heart
+  - hold
+  - label
+  - lgtm
+  - approve
   - size
   - yuks
   - wip
