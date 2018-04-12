@@ -93,6 +93,25 @@ presets:
   - name: bazel-scratch
     mountPath: /bazel-scratch/.cache
 
+- labels:
+    cert-manager-cloudflare-svc-acct: true
+  env:
+  - name: CLOUDFLARE_E2E_API_TOKEN
+    valueFrom:
+      secretKeyRef:
+        name: cloudflare-api-key
+        key: api-token
+  - name: CLOUDFLARE_E2E_EMAIL
+    valueFrom:
+      secretKeyRef:
+        name: cloudflare-api-key
+        key: email
+  - name: CLOUDFLARE_E2E_DOMAIN
+    valueFrom:
+      secretKeyRef:
+        name: cloudflare-api-key
+        key: domain
+
 # minikube size job templates
 .minikube_medium: &minikube_medium
   resources:
@@ -529,6 +548,7 @@ presubmits:
     max_concurrency: 4
     agent: kubernetes
     labels:
+      cert-manager-cloudflare-svc-acct: true
       preset-service-account: true
       libvirt-socket: true
       minikube-support: true
@@ -561,6 +581,7 @@ presubmits:
     max_concurrency: 4
     agent: kubernetes
     labels:
+      cert-manager-cloudflare-svc-acct: true
       preset-service-account: true
       libvirt-socket: true
       minikube-support: true
@@ -593,6 +614,7 @@ presubmits:
     max_concurrency: 4
     agent: kubernetes
     labels:
+      cert-manager-cloudflare-svc-acct: true
       preset-service-account: true
       libvirt-socket: true
       minikube-support: true
@@ -625,6 +647,7 @@ presubmits:
     max_concurrency: 4
     agent: kubernetes
     labels:
+      cert-manager-cloudflare-svc-acct: true
       preset-service-account: true
       libvirt-socket: true
       minikube-support: true
