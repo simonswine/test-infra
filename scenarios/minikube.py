@@ -38,6 +38,7 @@ minikube_start_cmd = [
     "--memory=%s" % os.environ["MINIKUBE_MEMORY"],
     "--cpus=%s" % os.environ["MINIKUBE_CPUS"],
     "--profile=%s" % hostname,
+    "--feature-gates=PersistentLocalVolumes=true",
 ]
 
 minikube_ingress_cmd = [
