@@ -541,9 +541,10 @@ presubmits:
 
   - name: cert-manager-e2e-v1-7
     context: cert-manager-e2e-v1-7
-    always_run: true
     trigger: "(?m)^/test( all| e2e( v?1.7)?|)( \\[.+\\])?$"
     rerun_command: "/test e2e v1.7"
+    # Match everything except PRs that only touch docs/
+    run_if_changed: (^[^d].*$)|(^.[^o].*$)|(^..[^c].*$)|(^...[^s].*$)|(^....[^/].*$)
     skip_report: false
     max_concurrency: 4
     agent: kubernetes
@@ -574,9 +575,10 @@ presubmits:
 
   - name: cert-manager-e2e-v1-8
     context: cert-manager-e2e-v1-8
-    always_run: true
     trigger: "(?m)^/test( all| e2e( v?1.8)?|)( \\[.+\\])?$"
     rerun_command: "/test e2e v1.8"
+    # Match everything except PRs that only touch docs/
+    run_if_changed: (^[^d].*$)|(^.[^o].*$)|(^..[^c].*$)|(^...[^s].*$)|(^....[^/].*$)
     skip_report: false
     max_concurrency: 4
     agent: kubernetes
@@ -607,9 +609,10 @@ presubmits:
 
   - name: cert-manager-e2e-v1-9
     context: cert-manager-e2e-v1-9
-    always_run: true
     trigger: "(?m)^/test( all| e2e( v?1.9)?|)( \\[.+\\])?$"
     rerun_command: "/test e2e v1.9"
+    # Match everything except PRs that only touch docs/
+    run_if_changed: (^[^d].*$)|(^.[^o].*$)|(^..[^c].*$)|(^...[^s].*$)|(^....[^/].*$)
     skip_report: false
     max_concurrency: 4
     agent: kubernetes
@@ -643,7 +646,9 @@ presubmits:
     always_run: false
     trigger: "(?m)^/test( all| e2e( v?1.10)?|)( \\[.+\\])?$"
     rerun_command: "/test e2e v1.10"
-    skip_report: false
+    # Match everything except PRs that only touch docs/
+    run_if_changed: (^[^d].*$)|(^.[^o].*$)|(^..[^c].*$)|(^...[^s].*$)|(^....[^/].*$)
+    skip_report: true
     max_concurrency: 4
     agent: kubernetes
     labels:
