@@ -13,8 +13,8 @@
 # See the License for the specific language governing permissions and
 # limitations under the License.
 
-CACHE_HOST="bazel-cache.default"
-CACHE_PORT="8080"
+CACHE_BUCKET="jetstack-bazel-cache"
+CACHE_CREDENTIALS="${GOOGLE_APPLICATION_CREDENTIALS:-}"
 
 # get the installed version of a debian package
 package_to_version () {
@@ -69,8 +69,9 @@ make_bazel_rc () {
     # NOTE our caches are versioned by all path segments up until the last two
     # IE PUT /foo/bar/baz/cas/asdf -> is in cache "/foo/bar/baz"
     local cache_id="$(get_workspace),$(hash_toolchains)"
-    local cache_url="http://${CACHE_HOST}:${CACHE_PORT}/${cache_id}"
+    local cache_url="https://storage.googleapis.com/${CACHE_BUCKET}/${cache_id}"
     echo "build --remote_http_cache=${cache_url}"
+    echo "build --google_credentials=${CACHE_CREDENTIALS}"
 }
 
 # https://docs.bazel.build/versions/master/user-manual.html#bazelrc
