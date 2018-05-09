@@ -46,9 +46,13 @@ RUN apt-get -o Acquire::Check-Valid-Until=false update && apt-get install -y \
 RUN curl -L https://github.com/golang/dep/releases/download/v0.3.2/dep-linux-amd64 >/tmp/dep \
     && curl -L https://github.com/mikefarah/yaml/releases/download/1.13.1/yaml_linux_amd64 >/tmp/yaml \
     && curl -L vert https://github.com/Masterminds/vert/releases/download/v0.1.0/vert-v0.1.0-linux-amd64 >/tmp/vert \
+    && curl -Lo helm.tar.gz https://storage.googleapis.com/kubernetes-helm/helm-v2.8.2-linux-amd64.tar.gz \
+    && tar xvf helm.tar.gz \
     && chmod +x /tmp/dep \
     && chmod +x /tmp/yaml \
     && chmod +x /tmp/vert \
-    && mv /tmp/dep /tmp/yaml /tmp/vert /usr/local/bin/
+    && mv /tmp/dep /tmp/yaml /tmp/vert /usr/local/bin/ \
+    && mv linux-amd64/helm /usr/local/bin
+
 RUN go get -v golang.org/x/tools/cmd/goimports \
     && go get -v github.com/golang/lint/golint
