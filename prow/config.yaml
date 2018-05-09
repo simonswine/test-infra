@@ -792,6 +792,47 @@ presubmits:
     always_run: true
 
   jetstack/tarmak:
+  # puppet module aws_ebs
+  - <<: *puppet_module_verify
+    name: tarmak-puppet-module-aws_ebs-quick-verify
+    context: tarmak-puppet-module-aws_ebs-quick-verify
+    run_if_changed: "^(puppet/modules/aws_ebs).*$"
+    trigger: "(?m)^/test( all| puppet| puppet-aws_ebs| puppet-verify| puppet-aws_ebs-verify|)( \\[.+\\])?$"
+    rerun_command: "/test puppet-aws_ebs-verify"
+  # puppet module calico
+  - <<: *puppet_module_verify
+    name: tarmak-puppet-module-calico-quick-verify
+    context: tarmak-puppet-module-calico-quick-verify
+    run_if_changed: "^(puppet/modules/calico).*$"
+    trigger: "(?m)^/test( all| puppet| puppet-calico| puppet-verify| puppet-calico-verify|)( \\[.+\\])?$"
+    rerun_command: "/test puppet-calico-verify"
+  - <<: *puppet_module_acceptance
+    name: tarmak-puppet-module-calico-acceptance
+    context: tarmak-puppet-module-calico-acceptance
+    run_if_changed: "^(puppet/modules/calico).*$"
+    trigger: "(?m)^/test( all| puppet| puppet-calico| puppet-calico-acceptance|)( \\[.+\\])?$"
+    rerun_command: "/test puppet-calico-acceptance"
+  # puppet module etcd
+  - <<: *puppet_module_verify
+    name: tarmak-puppet-module-etcd-quick-verify
+    context: tarmak-puppet-module-etcd-quick-verify
+    run_if_changed: "^(puppet/modules/etcd).*$"
+    trigger: "(?m)^/test( all| puppet| puppet-etcd| puppet-verify| puppet-etcd-verify|)( \\[.+\\])?$"
+    rerun_command: "/test puppet-etcd-verify"
+  - <<: *puppet_module_acceptance
+    name: tarmak-puppet-module-etcd-acceptance-single-node
+    context: tarmak-puppet-module-etcd-acceptance-single-node
+    run_if_changed: "^(puppet/modules/etcd).*$"
+    trigger: "(?m)^/test( all| puppet| puppet-etcd| puppet-etcd-single-node|)( \\[.+\\])?$"
+    rerun_command: "/test puppet-etcd-acceptance-single-node"
+    run_after_success:
+    - <<: *puppet_module_acceptance
+      name: tarmak-puppet-module-etcd-acceptance-three-node
+      context: tarmak-puppet-module-etcd-acceptance-three-node
+      run_if_changed: "^(puppet/modules/etcd).*$"
+      trigger: "(?m)^/test( all| puppet| puppet-etcd| puppet-etcd-acceptance-three-node|)( \\[.+\\])?$"
+      rerun_command: "/test puppet-etcd-acceptance-three-node"
+  # puppet module kubernetes
   - <<: *puppet_module_verify
     name: tarmak-puppet-module-kubernetes-quick-verify
     context: tarmak-puppet-module-kubernetes-quick-verify
@@ -804,6 +845,21 @@ presubmits:
     run_if_changed: "^(puppet/modules/kubernetes).*$"
     trigger: "(?m)^/test( all| puppet| puppet-tarmak| puppet-kubernetes-acceptance|)( \\[.+\\])?$"
     rerun_command: "/test puppet-kubernetes-acceptance"
+  # puppet module kubernetes_addons
+  - <<: *puppet_module_verify
+    name: tarmak-puppet-module-kubernetes_addons-quick-verify
+    context: tarmak-puppet-module-kubernetes_addons-quick-verify
+    run_if_changed: "^(puppet/modules/kubernetes_addons).*$"
+    trigger: "(?m)^/test( all| puppet| puppet-kubernetes_addons| puppet-verify| puppet-kubernetes_addons-verify|)( \\[.+\\])?$"
+    rerun_command: "/test puppet-kubernetes_addons-verify"
+  # puppet module prometheus
+  - <<: *puppet_module_verify
+    name: tarmak-puppet-module-prometheus-quick-verify
+    context: tarmak-puppet-module-prometheus-quick-verify
+    run_if_changed: "^(puppet/modules/prometheus).*$"
+    trigger: "(?m)^/test( all| puppet| puppet-prometheus| puppet-verify| puppet-prometheus-verify|)( \\[.+\\])?$"
+    rerun_command: "/test puppet-prometheus-verify"
+  # puppet module tarmak
   - <<: *puppet_module_verify
     name: tarmak-puppet-module-tarmak-quick-verify
     context: tarmak-puppet-module-tarmak-quick-verify
@@ -853,6 +909,26 @@ presubmits:
       run_if_changed: "^(puppet/modules).*$"
       trigger: "(?m)^/test( all| puppet| puppet-tarmak| puppet-tarmak-acceptance-centos( v?1.10)?|)( \\[.+\\])?$"
       rerun_command: "/test puppet-tarmak-acceptance-centos v1.10"
+  # puppet module vault_client
+  - <<: *puppet_module_verify
+    name: tarmak-puppet-module-vault_client-quick-verify
+    context: tarmak-puppet-module-vault_client-quick-verify
+    run_if_changed: "^(puppet/modules/vault_client).*$"
+    trigger: "(?m)^/test( all| puppet| puppet-vault_client| puppet-verify| puppet-vault_client-verify|)( \\[.+\\])?$"
+    rerun_command: "/test puppet-vault_client-verify"
+  - <<: *puppet_module_acceptance
+    name: tarmak-puppet-module-vault_client-acceptance-centos
+    context: tarmak-puppet-module-vault_client-acceptance-centos
+    run_if_changed: "^(puppet/modules/vault_client).*$"
+    trigger: "(?m)^/test( all| puppet| puppet-vault_client| puppet-vault_client-centos|)( \\[.+\\])?$"
+    rerun_command: "/test puppet-vault_client-acceptance-centos"
+    run_after_success:
+    - <<: *puppet_module_acceptance
+      name: tarmak-puppet-module-vault_client-acceptance-ubuntu
+      context: tarmak-puppet-module-vault_client-acceptance-ubuntu
+      run_if_changed: "^(puppet/modules/vault_client).*$"
+      trigger: "(?m)^/test( all| puppet| puppet-vault_client| puppet-vault_client-acceptance-ubuntu|)( \\[.+\\])?$"
+      rerun_command: "/test puppet-vault_client-acceptance-ubuntu"
 
   - name: tarmak-quick-verify
     always_run: true
