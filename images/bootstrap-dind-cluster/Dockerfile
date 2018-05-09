@@ -67,6 +67,9 @@ RUN wget -q https://dl.google.com/dl/cloudsdk/channels/rapid/google-cloud-sdk.ta
     gcloud info | tee /workspace/gcloud-info.txt
 ######### End installing Prow utilities
 
+ADD ["runner", \
+    "/workspace/"]
+
 # add env we can debug with the image name:tag
 ARG IMAGE_ARG
 ENV IMAGE=${IMAGE_ARG}
