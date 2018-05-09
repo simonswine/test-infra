@@ -12,7 +12,7 @@
 # See the License for the specific language governing permissions and
 # limitations under the License.
 
-IMG = gcr.io/jetstack-build-infra/bootstrap-dind-cluster
+IMG = eu.gcr.io/jetstack-build-infra/bootstrap-dind-cluster
 TAG = $(shell date +v%Y%m%d)-$(shell git describe --tags --always --dirty)
 KUBERNETES_VERSIONS = 1.8.12 1.7.15 1.9.7 1.10.2
 
