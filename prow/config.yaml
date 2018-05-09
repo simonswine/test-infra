@@ -561,6 +561,49 @@ presubmits:
     trigger: "(?m)^/test( all| verify),?(\\s+|$)"
     rerun_command: "/test verify"
 
+  - name: pull-cert-manager-e2e-v1-10
+    always_run: false
+    skip_report: true
+    context: pull-cert-manager-e2e-v1-10
+    max_concurrency: 2
+    agent: kubernetes
+    labels:
+      preset-service-account: true
+    spec:
+      containers:
+      - image: eu.gcr.io/jetstack-build-infra/bootstrap-dind-cluster-1.10.2:v20180509-b509e2611
+        args:
+        - "--repo=github.com/$(REPO_OWNER)/$(REPO_NAME)=$(PULL_REFS)"
+        - "--root=/go/src"
+        - "--upload=gs://jetstack-logs/pr-logs"
+        - "--clean"
+        resources:
+          requests:
+            cpu: 4
+            memory: 8Gi
+        env:
+        securityContext:
+          privileged: true
+        volumeMounts:
+        - name: docker-graph
+          mountPath: /var/lib/docker
+        - name: libmodules
+          mountPath: /lib/modules
+        - name: sysfscgroup
+          mountPath: /sys/fs/cgroup
+          readOnly: true
+      volumes:
+      - name: docker-graph
+        emptyDir: {}
+      - name: libmodules
+        hostPath:
+          path: /lib/modules
+      - name: sysfscgroup
+        hostPath:
+          path: /sys/fs/cgroup
+    trigger: "(?m)^/test( dind-e2e),?(\\s+|$)"
+    rerun_command: "/test dind-e2e"
+
   - name: cert-manager-quick-verify
     always_run: true
     skip_report: false
