@@ -131,4 +131,4 @@ if __name__ == '__main__':
         default='./hack/ci/test-dockerized.sh',
         help='Script in jetstack/cert-manager that runs checks')
     ARGS = PARSER.parse_args()
-    main(ARGS.branch, ARGS.script, ARGS.forces)
+    main(ARGS.branch, ARGS.script, ARGS.force)
