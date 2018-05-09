@@ -15,7 +15,7 @@
 .PHONY:	build push
 
 # TAG is the version to build and push to.
-PREFIX = gcr.io/google-containers
+PREFIX = eu.gcr.io/jetstack-build-infra
 NAME = dind-node
 ARCH = amd64
 K8S_VERSION = 0.1
@@ -24,7 +24,7 @@ IMAGE_NO_TAG = ${PREFIX}/${NAME}-${ARCH}
 IMAGE = ${IMAGE_NO_TAG}:$(K8S_VERSION)
 
 build:
-	docker build -t ${IMAGE} .
+	docker build --build-arg KUBE_VERSION=${K8S_VERSION} -t ${IMAGE} .
 
 push: build
 	gcloud docker -- push ${IMAGE}
