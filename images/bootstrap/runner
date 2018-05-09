@@ -18,7 +18,7 @@ set -o nounset
 set -o pipefail
 
 # get test-infra for latest bootstrap etc
-git clone https://github.com/kubernetes/test-infra
+git clone https://github.com/jetstack/test-infra
 
 
 # Check if the job has opted-in to bazel remote caching and if so generate 
@@ -75,7 +75,7 @@ set +o errexit
 ./test-infra/jenkins/bootstrap.py \
     --job=${JOB_NAME} \
     --service-account=${GOOGLE_APPLICATION_CREDENTIALS} \
-    --upload='gs://kubernetes-jenkins/logs' \
+    --upload='gs://jetstack-logs/pr-logs' \
     "$@"
 EXIT_VALUE=$?
 

@@ -599,6 +599,16 @@
       "UNKNOWN"
     ]
   },
+  "pull-cert-manager-verify": {
+    "args": [
+      "--branch=${PULL_BASE_REF}",
+      "--script=./hack/ci/test-dockerized.sh"
+    ],
+    "scenario": "cert-manager_verify",
+    "sigOwners": [
+      "UNKNOWN"
+    ]
+  },
   "navigator-quick-verify": {
     "args": [
       "make",
