@@ -19,48 +19,11 @@ set -o nounset
 set -o pipefail
 
 TOOL_ROOT=${TOOL_ROOT:-"$(pwd)"}
-KUBE_ROOT=${KUBE_ROOT:-"../../kubernetes"}
 echo $TOOL_ROOT
-echo $KUBE_ROOT
 
 # Create a tmpdir to build the docker images from.
 NODE_DIR=$(mktemp -d)
 echo "Building node docker image from ${NODE_DIR}"
-
-# make bazel-release doesn't produce everything we need, and it does a lot we don't need.
-cd ${KUBE_ROOT}
-
-# Build the debs
-bazel build //build/debs:debs
-
-# Build the docker containers
-bazel build //build:docker-artifacts
-
-# Build the addons configs.
-bazel build //cluster/addons:addon-srcs
-
-cd -
-
-# Get debs needed for kubernetes node. Docker's build context rejects symlinks.
-cp ${KUBE_ROOT}/bazel-bin/build/debs/kubernetes-cni.deb ${NODE_DIR}
-cp ${KUBE_ROOT}/bazel-bin/build/debs/kubelet.deb ${NODE_DIR}
-cp ${KUBE_ROOT}/bazel-bin/build/debs/kubeadm.deb ${NODE_DIR}
-cp ${KUBE_ROOT}/bazel-bin/build/debs/kubectl.deb ${NODE_DIR}
-
-# Get the docker images for components. Docker's build context rejects symlinks.
-cp ${KUBE_ROOT}/bazel-bin/build/kube-proxy.tar ${NODE_DIR}
-cp ${KUBE_ROOT}/bazel-bin/build/kube-controller-manager.tar ${NODE_DIR}
-cp ${KUBE_ROOT}/bazel-bin/build/kube-scheduler.tar ${NODE_DIR}
-cp ${KUBE_ROOT}/bazel-bin/build//kube-apiserver.tar ${NODE_DIR}
-
-# Get version info in a file. Kubeadm version and docker tags might vary slightly.
-cat ${KUBE_ROOT}/bazel-out/stable-status.txt | grep STABLE_BUILD_SCM_REVISION | awk '{print $2}' > ${NODE_DIR}/source_version
-cat ${KUBE_ROOT}/bazel-out/stable-status.txt | grep STABLE_DOCKER_TAG | awk '{print $2}' > ${NODE_DIR}/docker_version
-
-# Get the metrics-server addon config. This is needed for HPA tests.
-mkdir -p ${NODE_DIR}/cluster/addons/metrics-server/
-cp ${KUBE_ROOT}/bazel-kubernetes/cluster/addons/metrics-server/* ${NODE_DIR}/cluster/addons/metrics-server/
-rm ${NODE_DIR}/cluster/addons/metrics-server/OWNERS
 
 # Get the startup scripts.
 cp ${TOOL_ROOT}/init-wrapper.sh ${NODE_DIR}
@@ -68,7 +31,19 @@ cp ${TOOL_ROOT}/start.sh ${NODE_DIR}
 cp ${TOOL_ROOT}/node/Dockerfile ${NODE_DIR}/Dockerfile
 cp ${TOOL_ROOT}/node/Makefile ${NODE_DIR}/Makefile
 
+K8S_VERSION=$1
+
+docker pull k8s.gcr.io/kube-apiserver:v${K8S_VERSION}
+docker pull k8s.gcr.io/kube-controller-manager:v${K8S_VERSION}
+docker pull k8s.gcr.io/kube-scheduler:v${K8S_VERSION}
+docker pull k8s.gcr.io/kube-proxy:v${K8S_VERSION}
+
+docker save k8s.gcr.io/kube-apiserver:v${K8S_VERSION} > ${NODE_DIR}/kube-apiserver.tar
+docker save k8s.gcr.io/kube-controller-manager:v${K8S_VERSION} > ${NODE_DIR}/kube-controller-manager.tar
+docker save k8s.gcr.io/kube-scheduler:v${K8S_VERSION} > ${NODE_DIR}/kube-scheduler.tar
+docker save k8s.gcr.io/kube-proxy:v${K8S_VERSION} > ${NODE_DIR}/kube-proxy.tar
+
 # Create the dind-node container
 cd ${NODE_DIR}
-make build K8S_VERSION=$(cat docker_version)
+make build K8S_VERSION=$1
 cd -

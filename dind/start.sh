@@ -45,7 +45,7 @@ start_worker ()
   docker load -i /kube-proxy.tar
 
   # Kubeadm expects kube-proxy-amd64, but bazel names it kube-proxy
-  docker tag k8s.gcr.io/kube-proxy:$(cat /docker_version) k8s.gcr.io/kube-proxy-amd64:$(cat /docker_version)
+  docker tag k8s.gcr.io/kube-proxy:v$(cat /kube_version) k8s.gcr.io/kube-proxy-amd64:v$(cat /kube_version)
 
   # Start kubeadm.
   /usr/bin/kubeadm join --token=abcdef.abcdefghijklmnop --discovery-token-unsafe-skip-ca-verification=true --ignore-preflight-errors=all 172.18.0.2:6443 2>&1
@@ -63,13 +63,13 @@ start_master ()
   docker load -i /kube-scheduler.tar
   # kubeadm expects all image names to be tagged as amd64, but bazel doesn't
   # build with that suffix yet.
-  docker tag k8s.gcr.io/kube-apiserver:$(cat /docker_version) k8s.gcr.io/kube-apiserver-amd64:$(cat /docker_version)
-  docker tag k8s.gcr.io/kube-controller-manager:$(cat /docker_version) k8s.gcr.io/kube-controller-manager-amd64:$(cat /docker_version)
-  docker tag k8s.gcr.io/kube-proxy:$(cat /docker_version) k8s.gcr.io/kube-proxy-amd64:$(cat /docker_version)
-  docker tag k8s.gcr.io/kube-scheduler:$(cat /docker_version) k8s.gcr.io/kube-scheduler-amd64:$(cat /docker_version)
+  docker tag k8s.gcr.io/kube-apiserver:v$(cat /kube_version) k8s.gcr.io/kube-apiserver-amd64:v$(cat /kube_version)
+  docker tag k8s.gcr.io/kube-controller-manager:v$(cat /kube_version) k8s.gcr.io/kube-controller-manager-amd64:v$(cat /kube_version)
+  docker tag k8s.gcr.io/kube-proxy:v$(cat /kube_version) k8s.gcr.io/kube-proxy-amd64:v$(cat /kube_version)
+  docker tag k8s.gcr.io/kube-scheduler:v$(cat /kube_version) k8s.gcr.io/kube-scheduler-amd64:v$(cat /kube_version)
 
   # Run kubeadm init to config a master.
-  /usr/bin/kubeadm init --token=abcdef.abcdefghijklmnop --ignore-preflight-errors=all --kubernetes-version=$(cat source_version | sed 's/^.//') --pod-network-cidr=192.168.0.0/16 --apiserver-cert-extra-sans $1 2>&1
+  /usr/bin/kubeadm init --token=abcdef.abcdefghijklmnop --ignore-preflight-errors=all --kubernetes-version=$(cat kube_version) --pod-network-cidr=192.168.0.0/16 --apiserver-cert-extra-sans $1 2>&1
 
   # We'll want to read the kube-config from outside the container, so open read
   # permissions on admin.conf.
@@ -99,10 +99,10 @@ start_cluster ()
   docker network ls
   echo "Creating virtual nodes"
   docker load -i /dind-node-bundle.tar
-  docker run -d --privileged --net testnet --ip 172.18.0.2 -p 443:6443 -v /var/kubernetes:/etc/kubernetes -v /lib/modules:/lib/modules gcr.io/google-containers/dind-node-amd64:$(cat /docker_version) master $(hostname --ip-address)
-  docker run -d --privileged --net testnet --ip 172.18.0.3 -v /lib/modules:/lib/modules gcr.io/google-containers/dind-node-amd64:$(cat /docker_version) worker
-  docker run -d --privileged --net testnet --ip 172.18.0.4 -v /lib/modules:/lib/modules gcr.io/google-containers/dind-node-amd64:$(cat /docker_version) worker
-  docker run -d --privileged --net testnet --ip 172.18.0.5 -v /lib/modules:/lib/modules gcr.io/google-containers/dind-node-amd64:$(cat /docker_version) worker
+  docker run -d --privileged --net testnet --ip 172.18.0.2 -p 443:6443 -v /var/kubernetes:/etc/kubernetes -v /lib/modules:/lib/modules eu.gcr.io/jetstack-build-infra/dind-node-amd64:$(cat /kube_version) master $(hostname --ip-address)
+  docker run -d --privileged --net testnet --ip 172.18.0.3 -v /lib/modules:/lib/modules eu.gcr.io/jetstack-build-infra/dind-node-amd64:$(cat /kube_version) worker
+  docker run -d --privileged --net testnet --ip 172.18.0.4 -v /lib/modules:/lib/modules eu.gcr.io/jetstack-build-infra/dind-node-amd64:$(cat /kube_version) worker
+  docker run -d --privileged --net testnet --ip 172.18.0.5 -v /lib/modules:/lib/modules eu.gcr.io/jetstack-build-infra/dind-node-amd64:$(cat /kube_version) worker
 }
 
 # kube-proxy attempts to write some values into sysfs for performance. But these

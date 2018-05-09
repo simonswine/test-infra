@@ -14,10 +14,9 @@
 # See the License for the specific language governing permissions and
 # limitations under the License.
 
-KUBE_ROOT=${KUBE_ROOT:-"../../kubernetes"}
-K8S_VERSION=$(cat ${KUBE_ROOT}/bazel-out/stable-status.txt | grep STABLE_DOCKER_TAG | awk '{print $2}')
+K8S_VERSION=$1
 
 CONTAINER=$(docker run -d --privileged=true --security-opt seccomp:unconfined --cap-add=SYS_ADMIN \
   -v /lib/modules:/lib/modules -v /sys/fs/cgroup:/sys/fs/cgroup:ro \
-  gcr.io/google-containers/dind-cluster-amd64:${K8S_VERSION})
+  eu.gcr.io/jetstack-build-infra/dind-cluster-amd64:${K8S_VERSION})
 echo "The cluster lives in container ${CONTAINER}"

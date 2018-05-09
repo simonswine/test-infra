@@ -12,24 +12,25 @@
 # See the License for the specific language governing permissions and
 # limitations under the License.
 
-FROM gcr.io/k8s-testimages/dind-test-base-amd64:0.1
-
-# Get our short startup scripts first, because they're least likely to change.
-COPY init-wrapper.sh /init-wrapper.sh
-COPY start.sh /start.sh
+FROM eu.gcr.io/jetstack-build-infra/dind-test-base-amd64:0.1
 
 # Addon config changes infrequently, so get them next.
-COPY cluster /
+# COPY cluster /
 
-# Get the debs
-COPY kubectl.deb /
-COPY kubelet.deb /
-COPY kubernetes-cni.deb /
-COPY kubeadm.deb /
+RUN curl -fsSL https://packages.cloud.google.com/apt/doc/apt-key.gpg | apt-key add - && add-apt-repository \
+    "deb [arch=amd64] http://apt.kubernetes.io \
+    kubernetes-xenial \
+    main"
 
-# Grab a file with the version info (one for kubeadm, one for docker).
-COPY source_version /
-COPY docker_version /
+ARG KUBE_VERSION
+ENV KUBE_VERSION $KUBE_VERSION
+
+RUN apt-get update \
+    && apt-get install -y \
+        kubelet=${KUBE_VERSION}-00 \
+        kubeadm=${KUBE_VERSION}-00 \
+        kubectl=${KUBE_VERSION}-00 \
+        kubernetes-cni=0.6.0-00
 
 # Install the binaries before getting the component images, because if they've
 # changed, we're already redoing everything.
@@ -37,16 +38,15 @@ COPY docker_version /
 # kubernetes-cni.deb needs this dir
 RUN mkdir -p /opt/cni/bin
 
-# kubeadm depends on kubelet depends on kubernetes-cni
-RUN dpkg -i kubectl.deb
-RUN dpkg -i kubernetes-cni.deb
-RUN dpkg -i kubelet.deb
-RUN dpkg -i kubeadm.deb
-
 # Get the component docker images last, because they're most likely to change.
 COPY kube-proxy.tar /
 COPY kube-controller-manager.tar /
 COPY kube-scheduler.tar /
 COPY kube-apiserver.tar /
+RUN echo "$KUBE_VERSION" > /kube_version
+
+# Get our short startup scripts first, because they're least likely to change.
+COPY init-wrapper.sh /init-wrapper.sh
+COPY start.sh /start.sh
 
 ENTRYPOINT ["/init-wrapper.sh"]
