@@ -609,6 +609,16 @@
       "UNKNOWN"
     ]
   },
+  "pull-cert-manager-e2e-v1-10": {
+    "args": [
+      "--branch=${PULL_BASE_REF}",
+      "--script=./hack/ci/test-dockerized.sh"
+    ],
+    "scenario": "cert-manager_e2e",
+    "sigOwners": [
+      "UNKNOWN"
+    ]
+  },
   "navigator-quick-verify": {
     "args": [
       "make",
