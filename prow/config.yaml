@@ -823,7 +823,7 @@ presubmits:
     name: tarmak-puppet-module-etcd-acceptance-single-node
     context: tarmak-puppet-module-etcd-acceptance-single-node
     run_if_changed: "^(puppet/modules/etcd).*$"
-    trigger: "(?m)^/test( all| puppet| puppet-etcd| puppet-etcd-single-node|)( \\[.+\\])?$"
+    trigger: "(?m)^/test( all| puppet| puppet-etcd| puppet-etcd-acceptance-single-node|)( \\[.+\\])?$"
     rerun_command: "/test puppet-etcd-acceptance-single-node"
     run_after_success:
     - <<: *puppet_module_acceptance
@@ -920,7 +920,7 @@ presubmits:
     name: tarmak-puppet-module-vault_client-acceptance-centos
     context: tarmak-puppet-module-vault_client-acceptance-centos
     run_if_changed: "^(puppet/modules/vault_client).*$"
-    trigger: "(?m)^/test( all| puppet| puppet-vault_client| puppet-vault_client-centos|)( \\[.+\\])?$"
+    trigger: "(?m)^/test( all| puppet| puppet-vault_client| puppet-vault_client-acceptance-centos|)( \\[.+\\])?$"
     rerun_command: "/test puppet-vault_client-acceptance-centos"
     run_after_success:
     - <<: *puppet_module_acceptance
