@@ -19,6 +19,7 @@ triggers:
   - jetstack/puppet-module-tarmak
   - jetstack/vault-helper
   - jetstack/vault-unsealer
+  - jetstack/vault-plugin-auth-templated-aws
   trusted_org: jetstack
 
 blunderbuss:
@@ -289,6 +290,25 @@ plugins:
   - shrug
 
   jetstack/vault-unsealer:
+  - docs-no-retest
+  - trigger
+  - release-note
+  - assign
+  - blunderbuss
+  - lifecycle
+  - reopen
+  - golint
+  - heart
+  - hold
+  - label
+  - lgtm
+  - approve
+  - size
+  - yuks
+  - wip
+  - shrug
+
+  jetstack/vault-plugin-auth-templated-aws:
   - docs-no-retest
   - trigger
   - release-note
