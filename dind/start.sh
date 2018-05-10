@@ -48,7 +48,7 @@ start_worker ()
   docker tag k8s.gcr.io/kube-proxy:v$(cat /kube_version) k8s.gcr.io/kube-proxy-amd64:v$(cat /kube_version)
 
   # Start kubeadm.
-  /usr/bin/kubeadm join --token=abcdef.abcdefghijklmnop --discovery-token-unsafe-skip-ca-verification=true --ignore-preflight-errors=all 172.18.0.2:6443 2>&1
+  /usr/bin/kubeadm join --token=abcdef.abcdefghijklmnop --discovery-token-unsafe-skip-ca-verification=true --ignore-preflight-errors=all 172.18.20.2:6443 2>&1
 }
 
 start_master ()
@@ -69,7 +69,7 @@ start_master ()
   docker tag k8s.gcr.io/kube-scheduler:v$(cat /kube_version) k8s.gcr.io/kube-scheduler-amd64:v$(cat /kube_version)
 
   # Run kubeadm init to config a master.
-  /usr/bin/kubeadm init --token=abcdef.abcdefghijklmnop --ignore-preflight-errors=all --kubernetes-version=$(cat kube_version) --pod-network-cidr=192.168.0.0/16 --apiserver-cert-extra-sans $1 2>&1
+  /usr/bin/kubeadm init --token=abcdef.abcdefghijklmnop --ignore-preflight-errors=all --kubernetes-version=$(cat kube_version) --service-cidr=10.80.0.0/12 --pod-network-cidr=192.168.0.0/16 --apiserver-cert-extra-sans $1 2>&1
 
   # We'll want to read the kube-config from outside the container, so open read
   # permissions on admin.conf.
@@ -95,14 +95,14 @@ start_cluster ()
 
   # Start some workers.
   echo "Creating testnet"
-  docker network create --subnet=172.18.0.0/16 testnet
+  docker network create --subnet=172.18.20.0/24 testnet
   docker network ls
   echo "Creating virtual nodes"
   docker load -i /dind-node-bundle.tar
-  docker run -d --privileged --net testnet --ip 172.18.0.2 -p 443:6443 -v /var/kubernetes:/etc/kubernetes -v /lib/modules:/lib/modules eu.gcr.io/jetstack-build-infra/dind-node-amd64:$(cat /kube_version) master $(hostname --ip-address)
-  docker run -d --privileged --net testnet --ip 172.18.0.3 -v /lib/modules:/lib/modules eu.gcr.io/jetstack-build-infra/dind-node-amd64:$(cat /kube_version) worker
-  docker run -d --privileged --net testnet --ip 172.18.0.4 -v /lib/modules:/lib/modules eu.gcr.io/jetstack-build-infra/dind-node-amd64:$(cat /kube_version) worker
-  docker run -d --privileged --net testnet --ip 172.18.0.5 -v /lib/modules:/lib/modules eu.gcr.io/jetstack-build-infra/dind-node-amd64:$(cat /kube_version) worker
+  docker run -d --privileged --net testnet --ip 172.18.20.2 -p 443:6443 -v /var/kubernetes:/etc/kubernetes -v /lib/modules:/lib/modules eu.gcr.io/jetstack-build-infra/dind-node-amd64:$(cat /kube_version) master $(hostname --ip-address)
+  docker run -d --privileged --net testnet --ip 172.18.20.3 -v /lib/modules:/lib/modules eu.gcr.io/jetstack-build-infra/dind-node-amd64:$(cat /kube_version) worker
+  docker run -d --privileged --net testnet --ip 172.18.20.4 -v /lib/modules:/lib/modules eu.gcr.io/jetstack-build-infra/dind-node-amd64:$(cat /kube_version) worker
+  docker run -d --privileged --net testnet --ip 172.18.20.5 -v /lib/modules:/lib/modules eu.gcr.io/jetstack-build-infra/dind-node-amd64:$(cat /kube_version) worker
 }
 
 # kube-proxy attempts to write some values into sysfs for performance. But these
