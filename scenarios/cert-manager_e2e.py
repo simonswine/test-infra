@@ -137,6 +137,7 @@ def main(branch, script, force):
 
     cmd = [
         'docker', 'run', '--rm=true', '--privileged=true',
+        '--net', 'testnet',
         '-v', '/var/run/docker.sock:/var/run/docker.sock',
         '-v', '/etc/localtime:/etc/localtime:ro',
         '-v', '/etc/kubernetes:/etc/kubernetes',
