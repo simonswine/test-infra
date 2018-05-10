@@ -98,7 +98,7 @@ def main(branch, script, force):
         os.makedirs(artifacts)
 
     ###### Start dind cluster
-    check("%s/test-infra/dind/start.sh" % os.environ['WORKSPACE'])
+    check("/init-wrapper.sh")
     ###### End dind cluster
 
     check("sleep", "7200")
