@@ -23,7 +23,7 @@ import os
 import re
 import subprocess
 import sys
-
+import socket
 
 BRANCH_VERSION = {
     'master': '0.3',
@@ -66,6 +66,41 @@ def try_call(cmds):
     except:
         return False
 
+def start_node(master, ip):
+    node_image="eu.gcr.io/jetstack-build-infra/dind-node-amd64:1.10.2"
+    cmd = [
+        'docker', 'run', '-d', '--privileged',
+        '--net', 'testnet',
+        '--ip', ip,
+        '-v', '/image-loader:/image-loader',
+        '-v', '/lib/modules:/lib/modules',
+    ]
+    if master:
+        cmd.extend([
+            '-p', '443:6443',
+            '-v', '/etc/kubernetes:/etc/kubernetes',
+        ])
+    cmd.extend([node_image])
+    if master:
+        hostname = socket.gethostbyname(socket.gethostname())
+        cmd.extend(['master', hostname])
+    else:
+        cmd.extend(['worker'])
+    check(*cmd)
+
+def start_cluster():
+    check('mount', '-o', 'remount,ro', '/sys')
+    check('mount', '--make-rshared', '/lib/modules')
+    check('mount', '--make-rshared', '/')
+    check('mkdir', '-p', '/etc/kubernetes')
+    check('docker', 'network', 'create', '--subnet=10.14.0.0/24', 'testnet')
+    check('docker', 'network', 'ls')
+    start_node(True, '10.14.0.20')
+    start_node(False, '10.14.0.21')
+    start_node(False, '10.14.0.22')
+    start_node(False, '10.14.0.23')
+
+
 def main(branch, script, force):
     """Test branch using script, optionally forcing verify checks."""
     # If branch has 3-part version, only take first 2 parts.
@@ -97,17 +132,7 @@ def main(branch, script, force):
         os.makedirs(artifacts)
 
     ###### Start dind cluster
-    start_cluster_cmd = [
-        'docker', 'run', '-d', '--privileged=true',
-        '--security-opt', 'seccomp:unconfined',
-        '--cap-add=SYS_ADMIN',
-        '-v', '/etc/kubernetes:/var/kubernetes',
-        '-v', '/image-loader:/image-loader',
-        '-v', '/lib/modules:/lib/modules',
-        '-v', '/sys/fs/cgroup:/sys/fs/cgroup:ro',
-        'eu.gcr.io/jetstack-build-infra/dind-cluster-amd64:1.10.2',
-    ]
-    check(*start_cluster_cmd)
+    start_cluster()
     ###### End dind cluster
 
     cmd = [
