@@ -698,5 +698,15 @@
     "sigOwners": [
       "UNKNOWN"
     ]
+  },
+  "tarmak-vault-auth-plugin-quick-verify": {
+    "args": [
+      "make",
+      "all"
+    ],
+    "scenario": "execute",
+    "sigOwners": [
+      "UNKNOWN"
+    ]
   }
 }
