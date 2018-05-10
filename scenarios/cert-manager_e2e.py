@@ -111,7 +111,6 @@ def main(branch, script, force):
     check(*start_cluster_cmd)
     ###### End dind cluster
 
-    check("sleep", "7200")
     cmd = [
         'docker', 'run', '--rm=true', '--privileged=true',
         '-v', '/var/run/docker.sock:/var/run/docker.sock',
