@@ -149,7 +149,7 @@ tide:
     - jetstack/cert-manager
     - jetstack/vault-unsealer
     - jetstack/vault-helper
-    - jetstack/tarmak-vault-auth-plugin
+    - jetstack/vault-plugin-auth-templated-aws
     labels:
     - lgtm
     - approved
@@ -1105,11 +1105,11 @@ presubmits:
     trigger: "(?m)^/test( all| verify|)( \\[.+\\])?$"
     rerun_command: "/test verify"
 
-  jetstack/tarmak-vault-auth-plugin:
-  - name: tarmak-vault-auth-plugin-quick-verify
+  jetstack/vault-plugin-auth-templated-aws:
+  - name: vault-plugin-auth-templated-aws-quick-verify
     always_run: true
     skip_report: false
-    context: tarmak-vault-auth-plugin-quick-verify
+    context: vault-plugin-auth-templated-aws-quick-verify
     max_concurrency: 2
     agent: kubernetes
     labels:

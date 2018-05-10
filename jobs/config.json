@@ -699,7 +699,7 @@
       "UNKNOWN"
     ]
   },
-  "tarmak-vault-auth-plugin-quick-verify": {
+  "vault-plugin-auth-templated-aws-quick-verify": {
     "args": [
       "make",
       "all"
