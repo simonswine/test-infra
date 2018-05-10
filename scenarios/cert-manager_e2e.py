@@ -30,7 +30,7 @@ BRANCH_VERSION = {
 }
 
 VERSION_TAG = {
-    '0.3': '0.3-v20180510-302a3158c',
+    '0.3': '0.3-v20180510-6dc7d4e5d',
 }
 
 def check_output(*cmd):
