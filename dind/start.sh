@@ -80,7 +80,7 @@ start_master ()
   # Apply a pod network.
   # Calico is an ip-over-ip overlay network. This saves us from many of the
   # difficulties from configuring an L2 network.
-  kubectl --kubeconfig=/etc/kubernetes/admin.conf apply -f http://docs.projectcalico.org/v2.4/getting-started/kubernetes/installation/hosted/kubeadm/1.6/calico.yaml
+  kubectl --kubeconfig=/etc/kubernetes/admin.conf apply -f https://gist.githubusercontent.com/munnerz/a7bfd9126fff558f5c373d95bfc81cd4/raw/3aca70acb90954d9b55395f567be26ffa7127126/calico-dind.yaml
 
   # Install the metrics server, and the HPA.
   kubectl --kubeconfig=/etc/kubernetes/admin.conf apply -f /addons/metrics-server/
