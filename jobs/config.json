@@ -698,5 +698,15 @@
     "sigOwners": [
       "UNKNOWN"
     ]
+  },
+  "vault-plugin-auth-templated-aws-quick-verify": {
+    "args": [
+      "make",
+      "all"
+    ],
+    "scenario": "execute",
+    "sigOwners": [
+      "UNKNOWN"
+    ]
   }
 }

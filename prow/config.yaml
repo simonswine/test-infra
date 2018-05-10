@@ -149,6 +149,7 @@ tide:
     - jetstack/cert-manager
     - jetstack/vault-unsealer
     - jetstack/vault-helper
+    - jetstack/vault-plugin-auth-templated-aws
     labels:
     - lgtm
     - approved
@@ -1091,6 +1092,30 @@ presubmits:
     always_run: true
     skip_report: false
     context: vault-unsealer-quick-verify
+    max_concurrency: 2
+    agent: kubernetes
+    labels:
+      preset-service-account: true
+    spec:
+      containers:
+      - image: gcr.io/jetstack-build-infra/gcloud-in-go:0.10
+        args:
+        - "--repo=github.com/$(REPO_OWNER)/$(REPO_NAME)=$(PULL_REFS)"
+        - "--root=/go/src"
+        - "--upload=gs://jetstack-logs/pr-logs"
+        - "--clean"
+        resources:
+          requests:
+            cpu: 750m
+            memory: 1Gi
+    trigger: "(?m)^/test( all| verify|)( \\[.+\\])?$"
+    rerun_command: "/test verify"
+
+  jetstack/vault-plugin-auth-templated-aws:
+  - name: vault-plugin-auth-templated-aws-quick-verify
+    always_run: true
+    skip_report: false
+    context: vault-plugin-auth-templated-aws-quick-verify
     max_concurrency: 2
     agent: kubernetes
     labels:
