@@ -99,10 +99,10 @@ start_cluster ()
   docker network ls
   echo "Creating virtual nodes"
   docker load -i /dind-node-bundle.tar
-  docker run -d --privileged --net testnet --ip 10.14.0.20 -p 443:6443 -v /var/kubernetes:/etc/kubernetes -v /lib/modules:/lib/modules eu.gcr.io/jetstack-build-infra/dind-node-amd64:1.10.2 master $(hostname --ip-address)
-  docker run -d --privileged --net testnet --ip 10.14.0.21 -v /lib/modules:/lib/modules eu.gcr.io/jetstack-build-infra/dind-node-amd64:1.10.2 worker
-  docker run -d --privileged --net testnet --ip 10.14.0.22 -v /lib/modules:/lib/modules eu.gcr.io/jetstack-build-infra/dind-node-amd64:1.10.2 worker
-  docker run -d --privileged --net testnet --ip 10.14.0.23 -v /lib/modules:/lib/modules eu.gcr.io/jetstack-build-infra/dind-node-amd64:1.10.2 worker
+  docker run -d --privileged --net testnet --ip 10.14.0.20 -p 443:6443 -v /image-loader:/image-loader -v /var/kubernetes:/etc/kubernetes -v /lib/modules:/lib/modules eu.gcr.io/jetstack-build-infra/dind-node-amd64:1.10.2 master $(hostname --ip-address)
+  docker run -d --privileged --net testnet --ip 10.14.0.21 -v /image-loader:/image-loader -v /lib/modules:/lib/modules eu.gcr.io/jetstack-build-infra/dind-node-amd64:1.10.2 worker
+  docker run -d --privileged --net testnet --ip 10.14.0.22 -v /image-loader:/image-loader -v /lib/modules:/lib/modules eu.gcr.io/jetstack-build-infra/dind-node-amd64:1.10.2 worker
+  docker run -d --privileged --net testnet --ip 10.14.0.23 -v /image-loader:/image-loader -v /lib/modules:/lib/modules eu.gcr.io/jetstack-build-infra/dind-node-amd64:1.10.2 worker
 }
 
 # kube-proxy attempts to write some values into sysfs for performance. But these

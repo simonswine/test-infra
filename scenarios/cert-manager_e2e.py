@@ -102,6 +102,8 @@ def main(branch, script, force):
         'docker', 'run', '-d', '--privileged=true',
         '--security-opt', 'seccomp:unconfined',
         '--cap-add=SYS_ADMIN',
+        '-v', '/etc/kubernetes:/var/kubernetes',
+        '-v', '/image-loader:/image-loader',
         '-v', '/lib/modules:/lib/modules',
         '-v', '/sys/fs/cgroup:/sys/fs/cgroup:ro',
         'eu.gcr.io/jetstack-build-infra/dind-cluster-amd64:1.10.2',
@@ -110,15 +112,16 @@ def main(branch, script, force):
     ###### End dind cluster
 
     check("sleep", "7200")
-    # TODO(bentheelder): on prow REPO_DIR should be /go/src/k8s.io/kubernetes
-    # however these paths are brittle enough as is...
     cmd = [
         'docker', 'run', '--rm=true', '--privileged=true',
         '-v', '/var/run/docker.sock:/var/run/docker.sock',
         '-v', '/etc/localtime:/etc/localtime:ro',
+        '-v', '/etc/kubernetes:/etc/kubernetes',
+        '-v', '/image-loader:/image-loader',
         '-v', '%s:/go/src/github.com/jetstack/cert-manager' % k8s,
         '-v', '%s:/workspace/artifacts' % artifacts,
         '-e', 'KUBE_FORCE_VERIFY_CHECKS=%s' % force,
+        '-e', 'KUBECONFIG=/etc/kubernetes/admin.conf',
         '--tmpfs', '/tmp:exec,mode=1777',
         'eu.gcr.io/jetstack-build-infra/cert-manager-test:%s' % tag,
         'bash', '-c', 'cd cert-manager && %s' % script,
