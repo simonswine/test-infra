@@ -48,7 +48,7 @@ start_worker ()
   docker tag k8s.gcr.io/kube-proxy:v$(cat /kube_version) k8s.gcr.io/kube-proxy-amd64:v$(cat /kube_version)
 
   # Start kubeadm.
-  /usr/bin/kubeadm join --token=abcdef.abcdefghijklmnop --discovery-token-unsafe-skip-ca-verification=true --ignore-preflight-errors=all 172.18.20.2:6443 2>&1
+  /usr/bin/kubeadm join --token=abcdef.abcdefghijklmnop --discovery-token-unsafe-skip-ca-verification=true --ignore-preflight-errors=all 10.14.0.20:6443 2>&1
 }
 
 start_master ()
@@ -95,14 +95,14 @@ start_cluster ()
 
   # Start some workers.
   echo "Creating testnet"
-  docker network create --subnet=172.18.20.0/24 testnet
+  docker network create --subnet=10.14.0.0/24 testnet
   docker network ls
   echo "Creating virtual nodes"
   docker load -i /dind-node-bundle.tar
-  docker run -d --privileged --net testnet --ip 172.18.20.2 -p 443:6443 -v /var/kubernetes:/etc/kubernetes -v /lib/modules:/lib/modules eu.gcr.io/jetstack-build-infra/dind-node-amd64:$(cat /kube_version) master $(hostname --ip-address)
-  docker run -d --privileged --net testnet --ip 172.18.20.3 -v /lib/modules:/lib/modules eu.gcr.io/jetstack-build-infra/dind-node-amd64:$(cat /kube_version) worker
-  docker run -d --privileged --net testnet --ip 172.18.20.4 -v /lib/modules:/lib/modules eu.gcr.io/jetstack-build-infra/dind-node-amd64:$(cat /kube_version) worker
-  docker run -d --privileged --net testnet --ip 172.18.20.5 -v /lib/modules:/lib/modules eu.gcr.io/jetstack-build-infra/dind-node-amd64:$(cat /kube_version) worker
+  docker run -d --privileged --net testnet --ip 10.14.0.20 -p 443:6443 -v /var/kubernetes:/etc/kubernetes -v /lib/modules:/lib/modules eu.gcr.io/jetstack-build-infra/dind-node-amd64:1.10.2 master $(hostname --ip-address)
+  docker run -d --privileged --net testnet --ip 10.14.0.21 -v /lib/modules:/lib/modules eu.gcr.io/jetstack-build-infra/dind-node-amd64:1.10.2 worker
+  docker run -d --privileged --net testnet --ip 10.14.0.22 -v /lib/modules:/lib/modules eu.gcr.io/jetstack-build-infra/dind-node-amd64:1.10.2 worker
+  docker run -d --privileged --net testnet --ip 10.14.0.23 -v /lib/modules:/lib/modules eu.gcr.io/jetstack-build-infra/dind-node-amd64:1.10.2 worker
 }
 
 # kube-proxy attempts to write some values into sysfs for performance. But these
