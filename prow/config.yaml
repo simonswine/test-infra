@@ -571,7 +571,8 @@ presubmits:
       preset-service-account: true
     spec:
       containers:
-      - image: eu.gcr.io/jetstack-build-infra/bootstrap-dind-cluster-1.10.2:v20180509-0faaabe54
+      - image: gcr.io/jetstack-build-infra/bootstrap:v20180509-54804d71a
+        #      - image: eu.gcr.io/jetstack-build-infra/bootstrap-dind-cluster-1.10.2:v20180509-0faaabe54
         args:
         - "--repo=github.com/$(REPO_OWNER)/$(REPO_NAME)=$(PULL_REFS)"
         - "--root=/go/src"
@@ -582,11 +583,16 @@ presubmits:
             cpu: 4
             memory: 8Gi
         env:
+        - name: DOCKER_IN_DOCKER_ENABLED
+          value: "true"
         securityContext:
           privileged: true
+          capabilities:
+            add:
+            - SYS_ADMIN
         volumeMounts:
         - name: docker-graph
-          mountPath: /var/lib/docker
+          mountPath: /docker-graph
         - name: libmodules
           mountPath: /lib/modules
         - name: sysfscgroup

@@ -98,7 +98,15 @@ def main(branch, script, force):
         os.makedirs(artifacts)
 
     ###### Start dind cluster
-    check("/init-wrapper.sh")
+    start_cluster_cmd = [
+        'docker', 'run', '-d', '--privileged=true',
+        '--security-opt', 'seccomp:unconfined',
+        '--cap-add=SYS_ADMIN',
+        '-v', '/lib/modules:/lib/modules',
+        '-v', '/sys/fs/cgroup:/sys/fs/cgroup:ro',
+        'eu.gcr.io/jetstack-build-infra/dind-cluster-amd64:1.10.2',
+    )
+    check(*start_cluster_cmd)
     ###### End dind cluster
 
     check("sleep", "7200")
