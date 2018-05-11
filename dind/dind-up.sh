@@ -17,6 +17,6 @@
 K8S_VERSION=$1
 
 CONTAINER=$(docker run -d --privileged=true --security-opt seccomp:unconfined --cap-add=SYS_ADMIN \
-  -v /lib/modules:/lib/modules -v /sys/fs/cgroup:/sys/fs/cgroup:ro \
+  -p 6443:443 -v $(pwd)/kubedir:/var/kubernetes -v /lib/modules:/lib/modules -v /sys/fs/cgroup:/sys/fs/cgroup:ro \
   eu.gcr.io/jetstack-build-infra/dind-cluster-amd64:${K8S_VERSION})
 echo "The cluster lives in container ${CONTAINER}"
