@@ -234,6 +234,19 @@
       "UNKNOWN"
     ]
   },
+  "tarmak-puppet-module-aws_es_proxy-quick-verify": {
+    "args": [
+      "--",
+      "make",
+      "-C",
+      "puppet/modules/aws_es_proxy",
+      "verify"
+    ],
+    "scenario": "execute",
+    "sigOwners": [
+      "UNKNOWN"
+    ]
+  },
   "tarmak-puppet-module-calico-quick-verify": {
     "args": [
       "--env",
@@ -257,6 +270,32 @@
       "make",
       "-C",
       "puppet/modules/calico",
+      "acceptance"
+    ],
+    "scenario": "execute",
+    "sigOwners": [
+      "UNKNOWN"
+    ]
+  },
+  "tarmak-puppet-module-fluent_bit-quick-verify": {
+    "args": [
+      "--",
+      "make",
+      "-C",
+      "puppet/modules/fluent_bit",
+      "verify"
+    ],
+    "scenario": "execute",
+    "sigOwners": [
+      "UNKNOWN"
+    ]
+  },
+  "tarmak-puppet-module-fluent_bit-acceptance": {
+    "args": [
+      "--",
+      "make",
+      "-C",
+      "puppet/modules/fluent_bit",
       "acceptance"
     ],
     "scenario": "execute",
