@@ -885,6 +885,13 @@ presubmits:
     run_if_changed: "^(puppet/modules/aws_ebs).*$"
     trigger: "(?m)^/test( all| puppet| puppet-aws_ebs| puppet-verify| puppet-aws_ebs-verify|)( \\[.+\\])?$"
     rerun_command: "/test puppet-aws_ebs-verify"
+  # puppet module aws_es_proxy
+  - <<: *puppet_module_verify
+    name: tarmak-puppet-module-aws_es_proxy-quick-verify
+    context: tarmak-puppet-module-aws_es_proxy-quick-verify
+    run_if_changed: "^(puppet/modules/aws_es_proxy).*$"
+    trigger: "(?m)^/test( all| puppet| puppet-aws_es_proxy| puppet-verify| puppet-aws_es_proxy-verify|)( \\[.+\\])?$"
+    rerun_command: "/test puppet-aws_es_proxy-verify"
   # puppet module calico
   - <<: *puppet_module_verify
     name: tarmak-puppet-module-calico-quick-verify
@@ -918,6 +925,19 @@ presubmits:
       run_if_changed: "^(puppet/modules/etcd).*$"
       trigger: "(?m)^/test( all| puppet| puppet-etcd| puppet-etcd-acceptance-three-node|)( \\[.+\\])?$"
       rerun_command: "/test puppet-etcd-acceptance-three-node"
+  # puppet module fluent_bit
+  - <<: *puppet_module_verify
+    name: tarmak-puppet-module-fluent_bit-quick-verify
+    context: tarmak-puppet-module-fluent_bit-quick-verify
+    run_if_changed: "^(puppet/modules/fluent_bit).*$"
+    trigger: "(?m)^/test( all| puppet| puppet-fluent_bit| puppet-verify| puppet-fluent_bit-verify|)( \\[.+\\])?$"
+    rerun_command: "/test puppet-fluent_bit-verify"
+  - <<: *puppet_module_acceptance
+    name: tarmak-puppet-module-fluent_bit-acceptance
+    context: tarmak-puppet-module-fluent_bit-acceptance
+    run_if_changed: "^(puppet/modules/fluent_bit).*$"
+    trigger: "(?m)^/test( all| puppet| puppet-fluent_bit| puppet-fluent_bit-acceptance|)( \\[.+\\])?$"
+    rerun_command: "/test puppet-fluent_bit-acceptance"
   # puppet module kubernetes
   - <<: *puppet_module_verify
     name: tarmak-puppet-module-kubernetes-quick-verify
