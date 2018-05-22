@@ -7,12 +7,6 @@ metadata:
     kubernetes.io/tls-acme: "true"
 spec:
   rules:
-  - host: cert-manager.cherrypick.build-infra.jetstack.net
-    http:
-      paths:
-        - backend:
-            serviceName: cert-manager-cp-status
-            servicePort: 80
   - host: tarmak.cherrypick.build-infra.jetstack.net
     http:
       paths:
@@ -21,6 +15,5 @@ spec:
             servicePort: 80
   tls:
   - hosts:
-    - cert-manager.cherrypick.build-infra.jetstack.net
     - tarmak.cherrypick.build-infra.jetstack.net
     secretName: cherrypick-tls
