@@ -6,14 +6,4 @@ metadata:
     kubernetes.io/ingress.class: nginx
     kubernetes.io/tls-acme: "true"
 spec:
-  rules:
-  - host: tarmak.submit-queue.build-infra.jetstack.net
-    http:
-      paths:
-        - backend:
-            serviceName: tarmak-sq-status
-            servicePort: 80
-  tls:
-  - hosts:
-    - tarmak.submit-queue.build-infra.jetstack.net
-    secretName: submit-queue-tls
+  rules: []

@@ -33,6 +33,8 @@ external_plugins:
   - name: needs-rebase
   jetstack/cert-manager:
   - name: needs-rebase
+  jetstack/tarmak:
+  - name: needs-rebase
 
 # heart:
 #   adorees:
