@@ -136,6 +136,7 @@ tide:
   target_url: https://prow.build-infra.jetstack.net/tide.html
   queries:
   - repos:
+    - jetstack/okta-kubectl-auth
     - jetstack/puppet-module-aws_ebs
     - jetstack/puppet-module-calico
     - jetstack/puppet-module-etcd
@@ -1137,6 +1138,30 @@ presubmits:
     always_run: true
     skip_report: false
     context: vault-plugin-auth-templated-aws-quick-verify
+    max_concurrency: 2
+    agent: kubernetes
+    labels:
+      preset-service-account: true
+    spec:
+      containers:
+      - image: gcr.io/jetstack-build-infra/gcloud-in-go:0.10
+        args:
+        - "--repo=github.com/$(REPO_OWNER)/$(REPO_NAME)=$(PULL_REFS)"
+        - "--root=/go/src"
+        - "--upload=gs://jetstack-logs/pr-logs"
+        - "--clean"
+        resources:
+          requests:
+            cpu: 750m
+            memory: 1Gi
+    trigger: "(?m)^/test( all| verify|)( \\[.+\\])?$"
+    rerun_command: "/test verify"
+
+  jetstack/okta-kubectl-auth:
+  - name: okta-kubectl-auth-quick-verify
+    always_run: true
+    skip_report: false
+    context: okta-kubectl-auth-quick-verify
     max_concurrency: 2
     agent: kubernetes
     labels:

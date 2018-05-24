@@ -738,6 +738,16 @@
       "UNKNOWN"
     ]
   },
+  "okta-kubectl-auth-quick-verify": {
+    "args": [
+      "make",
+      "verify"
+    ],
+    "scenario": "execute",
+    "sigOwners": [
+      "UNKNOWN"
+    ]
+  },
   "vault-plugin-auth-templated-aws-quick-verify": {
     "args": [
       "make",
