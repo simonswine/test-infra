@@ -56,8 +56,13 @@ milestonestatus:
   maintainers_id: 2462700
 
 config_updater:
-  config_file: prow/config.yaml
-  plugin_file: prow/plugins.yaml
+  maps:
+    # label_sync/labels.yaml:
+    #   name: label-config
+    prow/config.yaml:
+      name: config
+    prow/plugins.yaml:
+      name: plugins
 
 plugins:
 
