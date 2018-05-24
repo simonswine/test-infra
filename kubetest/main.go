@@ -34,6 +34,7 @@ import (
 	"time"
 
 	"k8s.io/test-infra/boskos/client"
+	"k8s.io/test-infra/kubetest/conformance"
 	"k8s.io/test-infra/kubetest/dind"
 	"k8s.io/test-infra/kubetest/process"
 	"k8s.io/test-infra/kubetest/util"
@@ -71,13 +72,16 @@ type options struct {
 	extractSource       bool
 	federation          bool
 	flushMemAfterBuild  bool
+	focusRegex          string
 	gcpCloudSdk         string
 	gcpMasterImage      string
+	gcpMasterSize       string
 	gcpNetwork          string
 	gcpNodeImage        string
 	gcpImageFamily      string
 	gcpImageProject     string
 	gcpNodes            string
+	gcpNodeSize         string
 	gcpProject          string
 	gcpProjectType      string
 	gcpServiceAccount   string
@@ -92,6 +96,7 @@ type options struct {
 	metadataSources     string
 	multiClusters       multiClusterDeployment
 	multipleFederations bool
+	noAllowDup          bool
 	nodeArgs            string
 	nodeTestArgs        string
 	nodeTests           bool
@@ -101,6 +106,7 @@ type options struct {
 	runtimeConfig       string
 	save                string
 	skew                bool
+	skipRegex           string
 	soak                bool
 	soakDuration        time.Duration
 	sshUser             string
@@ -124,7 +130,7 @@ func defineFlags() *options {
 	flag.BoolVar(&o.checkLeaks, "check-leaked-resources", false, "Ensure project ends with the same resources")
 	flag.StringVar(&o.cluster, "cluster", "", "Cluster name. Must be set for --deployment=gke (TODO: other deployments).")
 	flag.StringVar(&o.clusterIPRange, "cluster-ip-range", "", "Specifies CLUSTER_IP_RANGE value during --up and --test (only relevant for --deployment=bash). Auto-calculated if empty.")
-	flag.StringVar(&o.deployment, "deployment", "bash", "Choices: none/bash/dind/gke/kops/kubernetes-anywhere/node/local")
+	flag.StringVar(&o.deployment, "deployment", "bash", "Choices: none/bash/conformance/dind/gke/kops/kubernetes-anywhere/node/local")
 	flag.StringVar(&o.dindImage, "dind-image", "", "The dind image to use to start a cluster. Defaults to the docker tag produced by bazel.")
 	flag.BoolVar(&o.down, "down", false, "If true, tear down the cluster before exiting.")
 	flag.StringVar(&o.dump, "dump", "", "If set, dump cluster logs to this location on test or cluster-up failure")
@@ -142,11 +148,15 @@ func defineFlags() *options {
 	flag.StringVar(&o.gcpRegion, "gcp-region", "", "For use with gcloud commands")
 	flag.StringVar(&o.gcpNetwork, "gcp-network", "", "Cluster network. Must be set for --deployment=gke (TODO: other deployments).")
 	flag.StringVar(&o.gcpMasterImage, "gcp-master-image", "", "Master image type (cos|debian on GCE, n/a on GKE)")
+	flag.StringVar(&o.gcpMasterSize, "gcp-master-size", "", "(--provider=gce only) Size of master to create (e.g n1-standard-1). Auto-calculated if left empty.")
 	flag.StringVar(&o.gcpNodeImage, "gcp-node-image", "", "Node image type (cos|container_vm on GKE, cos|debian on GCE)")
 	flag.StringVar(&o.gcpImageFamily, "image-family", "", "Node image family from which to use the latest image, required when --gcp-node-image=CUSTOM")
 	flag.StringVar(&o.gcpImageProject, "image-project", "", "Project containing node image family, required when --gcp-node-image=CUSTOM")
 	flag.StringVar(&o.gcpNodes, "gcp-nodes", "", "(--provider=gce only) Number of nodes to create.")
+	flag.StringVar(&o.gcpNodeSize, "gcp-node-size", "", "(--provider=gce only) Size of nodes to create (e.g n1-standard-1).")
 	flag.StringVar(&o.kubecfg, "kubeconfig", "", "The location of a kubeconfig file.")
+	flag.StringVar(&o.focusRegex, "ginkgo-focus", "", "The ginkgo regex to focus. Currently only respected for (dind).")
+	flag.StringVar(&o.skipRegex, "ginkgo-skip", "", "The ginkgo regex to skip. Currently only respected for (dind).")
 	flag.BoolVar(&o.kubemark, "kubemark", false, "If true, run kubemark tests.")
 	flag.StringVar(&o.kubemarkMasterSize, "kubemark-master-size", "", "Kubemark master size (only relevant if --kubemark=true). Auto-calculated based on '--kubemark-nodes' if left empty.")
 	flag.StringVar(&o.kubemarkNodes, "kubemark-nodes", "5", "Number of kubemark nodes to start (only relevant if --kubemark=true).")
@@ -156,6 +166,7 @@ func defineFlags() *options {
 	flag.BoolVar(&o.multipleFederations, "multiple-federations", false, "If true, enable running multiple federation control planes in parallel")
 	flag.StringVar(&o.nodeArgs, "node-args", "", "Args for node e2e tests.")
 	flag.StringVar(&o.nodeTestArgs, "node-test-args", "", "Test args specifically for node e2e tests.")
+	flag.BoolVar(&o.noAllowDup, "no-allow-dup", false, "if set --allow-dup will not be passed to push-build and --stage will error if the build already exists on the gcs path")
 	flag.BoolVar(&o.nodeTests, "node-tests", false, "If true, run node-e2e tests.")
 	flag.BoolVar(&o.perfTests, "perf-tests", false, "If true, run tests from perf-tests repo.")
 	flag.StringVar(&o.provider, "provider", "", "Kubernetes provider such as gce, gke, aws, etc")
@@ -228,6 +239,8 @@ func getDeployer(o *options) (deployer, error) {
 	switch o.deployment {
 	case "bash":
 		return newBash(&o.clusterIPRange), nil
+	case "conformance":
+		return conformance.NewDeployer(o.kubecfg, &o.testArgs, control)
 	case "dind":
 		return dind.NewDeployer(o.kubecfg, o.dindImage, &o.testArgs, control)
 	case "gke":
@@ -279,7 +292,7 @@ func main() {
 
 	control = process.NewControl(timeout, interrupt, terminate, verbose)
 
-	// do things when we know we are running in the CI (see the kubetest image)
+	// do things when we know we are running in the kubetest image
 	if os.Getenv("KUBETEST_IN_DOCKER") == "true" {
 		o.flushMemAfterBuild = true
 	}
@@ -337,7 +350,7 @@ func complete(o *options) error {
 			log.Printf("deploy %v, GetClusterCreated failed: %v", o.deployment, err)
 		} else {
 			if time.Now().After(created.Add(o.soakDuration)) {
-				// flip up on - which will tear down previous custer and start a new one
+				// flip up on - which will tear down previous cluster and start a new one
 				log.Printf("Previous soak cluster created at %v, will recreate the cluster", created)
 				o.up = true
 			}
@@ -381,6 +394,8 @@ func complete(o *options) error {
 				if fedErr != nil || err != nil {
 					os.Exit(1)
 				}
+
+				os.Exit(2)
 			}
 		}()
 	}
@@ -416,7 +431,7 @@ func acquireKubernetes(o *options) error {
 			return fmt.Errorf("staging dind images isn't supported yet")
 		}
 		if err := control.XmlWrap(&suite, "Stage", func() error {
-			return o.stage.Stage(o.federation)
+			return o.stage.Stage(o.federation, o.noAllowDup)
 		}); err != nil {
 			return err
 		}
@@ -636,6 +651,16 @@ func migrateGcpEnvAndOptions(o *options) error {
 			Name:   "--gcp-nodes",
 		},
 		{
+			Env:    "NODE_SIZE",
+			Option: &o.gcpNodeSize,
+			Name:   "--gcp-node-size",
+		},
+		{
+			Env:    "MASTER_SIZE",
+			Option: &o.gcpMasterSize,
+			Name:   "--gcp-master-size",
+		},
+		{
 			Env:      "CLOUDSDK_BUCKET",
 			Option:   &o.gcpCloudSdk,
 			Name:     "--gcp-cloud-sdk",
@@ -686,24 +711,34 @@ func prepareGcp(o *options) error {
 			if len(latestImage) == 0 {
 				return fmt.Errorf("failed to get latest image from family %q in project %q", o.gcpImageFamily, o.gcpImageProject)
 			}
-			os.Setenv("KUBE_GCE_NODE_IMAGE", latestImage)
-			os.Setenv("KUBE_GCE_NODE_PROJECT", o.gcpImageProject)
+			if o.deployment == "node" {
+				o.nodeArgs += fmt.Sprintf(" --images=%s --image-project=%s", latestImage, o.gcpImageProject)
+			} else {
+				os.Setenv("KUBE_GCE_NODE_IMAGE", latestImage)
+				os.Setenv("KUBE_GCE_NODE_PROJECT", o.gcpImageProject)
+			}
 		}
 	} else if o.provider == "gke" {
 		if o.deployment == "" {
 			o.deployment = "gke"
 		}
 		if o.deployment != "gke" {
-			return fmt.Errorf("--provider=gke implies --deployment=gke")
+			return fmt.Errorf("expected --deployment=gke for --provider=gke, found --deployment=%s", o.deployment)
 		}
 		if o.gcpNodeImage == "" {
 			return fmt.Errorf("--gcp-node-image must be set for GKE")
 		}
 		if o.gcpMasterImage != "" {
-			return fmt.Errorf("--gcp-master-image cannot be set on GKE")
+			return fmt.Errorf("expected --gcp-master-image to be empty for --provider=gke, found --gcp-master-image=%s", o.gcpMasterImage)
 		}
 		if o.gcpNodes != "" {
 			return fmt.Errorf("--gcp-nodes cannot be set on GKE, use --gke-shape instead")
+		}
+		if o.gcpNodeSize != "" {
+			return fmt.Errorf("--gcp-node-size cannot be set on GKE, use --gke-shape instead")
+		}
+		if o.gcpMasterSize != "" {
+			return fmt.Errorf("--gcp-master-size cannot be set on GKE, where it's auto-computed")
 		}
 
 		// TODO(kubernetes/test-infra#3536): This is used by the
@@ -713,6 +748,12 @@ func prepareGcp(o *options) error {
 			// gcloud container clusters create understands
 			// "container_vm", e2es understand "debian".
 			nod = "debian"
+		}
+		if nod == "cos_containerd" {
+			// gcloud container clusters create understands
+			// "cos_containerd", e2es only understand
+			// "gci"/"cos",
+			nod = "gci"
 		}
 		os.Setenv("NODE_OS_DISTRIBUTION", nod)
 	}
@@ -736,18 +777,18 @@ func prepareGcp(o *options) error {
 			return fmt.Errorf("--provider=%s boskos failed to acquire project: %v", o.provider, err)
 		}
 
-		if p == "" {
+		if p == nil {
 			return fmt.Errorf("boskos does not have a free %s at the moment", resType)
 		}
 
 		go func(c *client.Client, proj string) {
 			for range time.Tick(time.Minute * 5) {
-				if err := c.UpdateOne(p, "busy"); err != nil {
+				if err := c.UpdateOne(p.Name, "busy", nil); err != nil {
 					log.Printf("[Boskos] Update %s failed with %v", p, err)
 				}
 			}
-		}(boskos, p)
-		o.gcpProject = p
+		}(boskos, p.Name)
+		o.gcpProject = p.Name
 	}
 
 	if err := os.Setenv("CLOUDSDK_CORE_PRINT_UNHANDLED_TRACEBACKS", "1"); err != nil {

@@ -8,10 +8,10 @@ load("@bazel_skylib//:lib.bzl", "versions")
 
 versions.check(minimum_bazel_version = "0.10.0")
 
-git_repository(
+http_archive(
     name = "io_bazel_rules_go",
-    commit = "6b39964af66c98580be4c5ac6cf1d243332f78e4",
-    remote = "https://github.com/bazelbuild/rules_go.git",
+    sha256 = "1868ff68d6079e31b2f09b828b58d62e57ca8e9636edff699247c9108518570b",
+    url = "https://github.com/bazelbuild/rules_go/releases/download/0.11.1/rules_go-0.11.1.tar.gz",
 )
 
 load("@io_bazel_rules_go//go:def.bzl", "go_rules_dependencies", "go_register_toolchains")
@@ -19,7 +19,7 @@ load("@io_bazel_rules_go//go:def.bzl", "go_rules_dependencies", "go_register_too
 go_rules_dependencies()
 
 go_register_toolchains(
-    go_version = "1.9.3",
+    go_version = "1.10.2",
 )
 
 git_repository(
@@ -70,8 +70,8 @@ docker_pull(
 
 docker_pull(
     name = "git-base",
-    # 0.1 as of 2017/11/29
-    digest = "sha256:92423bd3b24b0274198bb90c00e91b70d81c32e1d6bd26af30c00ca9f5faeb74",
+    # 0.2 as of 2018/05/10
+    digest = "sha256:3eaeff9a2c35a50c3a0af7ef7cf26ea73e6fd966f54ef3dfe79d4ffb45805112",
     registry = "gcr.io",
     repository = "k8s-prow/git",
 )
@@ -425,3 +425,32 @@ git_repository(
 load("@io_bazel_rules_appengine//appengine:py_appengine.bzl", "py_appengine_repositories")
 
 py_appengine_repositories()
+
+git_repository(
+    name = "io_bazel_rules_python",
+    commit = "f414af5ed85e451908b3fb873211e8f2939ea4e8",
+    remote = "https://github.com/bazelbuild/rules_python.git",
+)
+
+# Only needed for PIP support:
+load("@io_bazel_rules_python//python:pip.bzl", "pip_import")
+
+pip_import(
+    name = "kettle_deps",
+    requirements = "//kettle:requirements.txt",
+)
+
+load("@kettle_deps//:requirements.bzl", "pip_install")
+
+pip_install()
+
+load("//autogo:deps.bzl", "autogo_dependencies")
+
+autogo_dependencies()
+
+load("//autogo:def.bzl", "autogo_generate")
+
+autogo_generate(
+    name = "autogo",
+    prefix = "k8s.io/test-infra",
+)

@@ -20,23 +20,28 @@ import (
 	"bytes"
 	"encoding/json"
 	"errors"
+	"flag"
 	"fmt"
 	"io/ioutil"
 	"os"
+	"reflect"
 	"regexp"
 	"strings"
 	"testing"
+	"time"
 
 	"k8s.io/api/core/v1"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"k8s.io/apimachinery/pkg/util/sets"
 
-	"k8s.io/test-infra/prow/github"
 	"k8s.io/test-infra/prow/kube"
 )
 
 // config.json is the worst but contains useful information :-(
 type configJSON map[string]map[string]interface{}
+
+var configPath = flag.String("config", "../config.yaml", "Path to prow job config")
+var configJsonPath = flag.String("config-json", "../../jobs/config.json", "Path to prow job config")
 
 func (c configJSON) ScenarioForJob(jobName string) string {
 	if scenario, ok := c[jobName]["scenario"]; ok {
@@ -44,6 +49,7 @@ func (c configJSON) ScenarioForJob(jobName string) string {
 	}
 	return ""
 }
+
 func readConfigJSON(path string) (config configJSON, err error) {
 	raw, err := ioutil.ReadFile(path)
 	if err != nil {
@@ -62,23 +68,30 @@ var c *Config
 var cj configJSON
 
 func TestMain(m *testing.M) {
-	conf, err := Load("../config.yaml")
+	if *configPath == "" {
+		fmt.Println("--config must set")
+		os.Exit(1)
+	}
+
+	conf, err := Load(*configPath)
 	if err != nil {
 		fmt.Printf("Could not load config: %v", err)
 		os.Exit(1)
 	}
 	c = conf
 
-	cj, err = readConfigJSON("../../jobs/config.json")
-	if err != nil {
-		fmt.Printf("Could not load jobs config: %v", err)
-		os.Exit(1)
+	if *configJsonPath != "" {
+		cj, err = readConfigJSON(*configJsonPath)
+		if err != nil {
+			fmt.Printf("Could not load jobs config: %v", err)
+			os.Exit(1)
+		}
 	}
 
 	os.Exit(m.Run())
 }
 
-func volumesAndMountsMatch(mounts []v1.VolumeMount, volumes []v1.Volume) bool {
+func missingVolumesForContainer(mounts []v1.VolumeMount, volumes []v1.Volume) sets.String {
 	mountNames := sets.NewString()
 	volumeNames := sets.NewString()
 	for _, m := range mounts {
@@ -87,34 +100,66 @@ func volumesAndMountsMatch(mounts []v1.VolumeMount, volumes []v1.Volume) bool {
 	for _, v := range volumes {
 		volumeNames.Insert(v.Name)
 	}
-	return volumeNames.Equal(mountNames)
+	return mountNames.Difference(volumeNames)
 }
 
-func specHasMatchingVolumesAndMounts(spec *v1.PodSpec) bool {
+func missingVolumesForSpec(spec *v1.PodSpec) map[string]sets.String {
+	malformed := map[string]sets.String{}
+	for _, container := range spec.InitContainers {
+		malformed[container.Name] = missingVolumesForContainer(container.VolumeMounts, spec.Volumes)
+	}
 	for _, container := range spec.Containers {
-		if !volumesAndMountsMatch(container.VolumeMounts, spec.Volumes) {
-			return false
+		malformed[container.Name] = missingVolumesForContainer(container.VolumeMounts, spec.Volumes)
+	}
+	return malformed
+}
+
+func missingMountsForSpec(spec *v1.PodSpec) sets.String {
+	mountNames := sets.NewString()
+	volumeNames := sets.NewString()
+	for _, container := range spec.Containers {
+		for _, m := range container.VolumeMounts {
+			mountNames.Insert(m.Name)
 		}
 	}
-	return true
+	for _, container := range spec.InitContainers {
+		for _, m := range container.VolumeMounts {
+			mountNames.Insert(m.Name)
+		}
+	}
+	for _, v := range spec.Volumes {
+		volumeNames.Insert(v.Name)
+	}
+	return volumeNames.Difference(mountNames)
 }
 
 // verify that all volume mounts reference volumes that exist
 func TestMountsHaveVolumes(t *testing.T) {
 	for _, job := range c.AllPresubmits(nil) {
-		if job.Spec != nil && !specHasMatchingVolumesAndMounts(job.Spec) {
-			t.Errorf("volumes and mounts do not match for: %v", job.Name)
+		if job.Spec != nil {
+			validateVolumesAndMounts(job.Name, job.Spec, t)
 		}
 	}
 	for _, job := range c.AllPostsubmits(nil) {
-		if job.Spec != nil && !specHasMatchingVolumesAndMounts(job.Spec) {
-			t.Errorf("volumes and mounts do not match for: %v", job.Name)
+		if job.Spec != nil {
+			validateVolumesAndMounts(job.Name, job.Spec, t)
 		}
 	}
 	for _, job := range c.AllPeriodics() {
-		if job.Spec != nil && !specHasMatchingVolumesAndMounts(job.Spec) {
-			t.Errorf("volumes and mounts do not match for: %v", job.Name)
+		if job.Spec != nil {
+			validateVolumesAndMounts(job.Name, job.Spec, t)
 		}
+	}
+}
+
+func validateVolumesAndMounts(name string, spec *v1.PodSpec, t *testing.T) {
+	for container, missingVolumes := range missingVolumesForSpec(spec) {
+		if len(missingVolumes) > 0 {
+			t.Errorf("job %s in container %s has mounts that are missing volumes: %v", name, container, missingVolumes.List())
+		}
+	}
+	if missingMounts := missingMountsForSpec(spec); len(missingMounts) > 0 {
+		t.Errorf("job %s has volumes that are not mounted: %v", name, missingMounts.List())
 	}
 }
 
@@ -148,16 +193,6 @@ func checkRetest(t *testing.T, repo string, presubmits []Presubmit) {
 func TestRetestMatchJobsName(t *testing.T) {
 	for repo, presubmits := range c.Presubmits {
 		checkRetest(t, repo, presubmits)
-	}
-}
-
-func TestTideMergeMethod(t *testing.T) {
-	for name, method := range c.Tide.MergeType {
-		if method != github.MergeMerge &&
-			method != github.MergeRebase &&
-			method != github.MergeSquash {
-			t.Errorf("Merge type %q for %s is not a valid type", method, name)
-		}
 	}
 }
 
@@ -514,7 +549,6 @@ func checkBazelbuildSpec(t *testing.T, name string, spec *v1.PodSpec, periodic b
 			"--service-account",
 			"--upload",
 			"--job",
-			"--clean",
 		} {
 			if _, ok := found[f]; !ok {
 				t.Errorf("%s: missing %s flag", name, f)
@@ -685,8 +719,6 @@ func TestURLTemplate(t *testing.T) {
 		{
 			name:    "k8s periodic",
 			jobType: kube.PeriodicJob,
-			org:     "kubernetes",
-			repo:    "kubernetes",
 			job:     "k8s-peri-1",
 			build:   "1",
 			expect:  "https://k8s-gubernator.appspot.com/build/kubernetes-jenkins/logs/k8s-peri-1/1/",
@@ -694,8 +726,6 @@ func TestURLTemplate(t *testing.T) {
 		{
 			name:    "empty periodic",
 			jobType: kube.PeriodicJob,
-			org:     "",
-			repo:    "",
 			job:     "nan-peri-1",
 			build:   "1",
 			expect:  "https://k8s-gubernator.appspot.com/build/kubernetes-jenkins/logs/nan-peri-1/1/",
@@ -717,15 +747,17 @@ func TestURLTemplate(t *testing.T) {
 			Spec: kube.ProwJobSpec{
 				Type: tc.jobType,
 				Job:  tc.job,
-				Refs: kube.Refs{
-					Pulls: []kube.Pull{{}},
-					Org:   tc.org,
-					Repo:  tc.repo,
-				},
 			},
 			Status: kube.ProwJobStatus{
 				BuildID: tc.build,
 			},
+		}
+		if tc.jobType != kube.PeriodicJob {
+			pj.Spec.Refs = &kube.Refs{
+				Pulls: []kube.Pull{{}},
+				Org:   tc.org,
+				Repo:  tc.repo,
+			}
 		}
 
 		var b bytes.Buffer
@@ -775,7 +807,7 @@ func TestReportTemplate(t *testing.T) {
 		var b bytes.Buffer
 		if err := c.Plank.ReportTemplate.Execute(&b, &kube.ProwJob{
 			Spec: kube.ProwJobSpec{
-				Refs: kube.Refs{
+				Refs: &kube.Refs{
 					Org:  tc.org,
 					Repo: tc.repo,
 					Pulls: []kube.Pull{
@@ -803,7 +835,7 @@ func checkLatestUsesImagePullPolicy(spec *v1.PodSpec) error {
 		if strings.Contains(container.Image, ":latest-") {
 			// If the job doesn't specify imagePullPolicy: Always,
 			// we aren't guaranteed to check for the latest version of the image.
-			if container.ImagePullPolicy == "" || container.ImagePullPolicy != "Always" {
+			if container.ImagePullPolicy != "Always" {
 				return errors.New("job uses latest- tag, but does not specify imagePullPolicy: Always")
 			}
 		}
@@ -855,11 +887,12 @@ func TestLatestUsesImagePullPolicy(t *testing.T) {
 func checkKubekinsPresets(jobName string, spec *v1.PodSpec, labels, validLabels map[string]string) error {
 	service := true
 	ssh := true
+
 	for _, container := range spec.Containers {
 		if strings.Contains(container.Image, "kubekins-e2e") || strings.Contains(container.Image, "bootstrap") {
 			service = false
 			for key, val := range labels {
-				if (key == "preset-gke-alpha-service" || key == "preset-service-account") && val == "true" {
+				if (key == "preset-gke-alpha-service" || key == "preset-service-account" || key == "preset-istio-service") && val == "true" {
 					service = true
 				}
 			}
@@ -915,7 +948,7 @@ func TestValidPresets(t *testing.T) {
 	}
 
 	for _, presubmit := range c.AllPresubmits(nil) {
-		if presubmit.Spec != nil {
+		if presubmit.Spec != nil && !presubmit.Decorate {
 			if err := checkKubekinsPresets(presubmit.Name, presubmit.Spec, presubmit.Labels, validLabels); err != nil {
 				t.Errorf("Error in presubmit %q: %v", presubmit.Name, err)
 			}
@@ -924,7 +957,7 @@ func TestValidPresets(t *testing.T) {
 
 	for _, posts := range c.Postsubmits {
 		for _, postsubmit := range posts {
-			if postsubmit.Spec != nil {
+			if postsubmit.Spec != nil && !postsubmit.Decorate {
 				if err := checkKubekinsPresets(postsubmit.Name, postsubmit.Spec, postsubmit.Labels, validLabels); err != nil {
 					t.Errorf("Error in postsubmit %q: %v", postsubmit.Name, err)
 				}
@@ -933,10 +966,256 @@ func TestValidPresets(t *testing.T) {
 	}
 
 	for _, periodic := range c.Periodics {
-		if periodic.Spec != nil {
+		if periodic.Spec != nil && !periodic.Decorate {
 			if err := checkKubekinsPresets(periodic.Name, periodic.Spec, periodic.Labels, validLabels); err != nil {
 				t.Errorf("Error in periodic %q: %v", periodic.Name, err)
 			}
+		}
+	}
+}
+
+func TestDecorationDefaulting(t *testing.T) {
+	defaults := &kube.DecorationConfig{
+		Timeout:     1 * time.Minute,
+		GracePeriod: 10 * time.Second,
+		UtilityImages: &kube.UtilityImages{
+			CloneRefs:  "clonerefs",
+			InitUpload: "iniupload",
+			Entrypoint: "entrypoint",
+			Sidecar:    "sidecar",
+		},
+		GCSConfiguration: &kube.GCSConfiguration{
+			Bucket:       "bucket",
+			PathPrefix:   "prefix",
+			PathStrategy: kube.PathStrategyLegacy,
+			DefaultOrg:   "org",
+			DefaultRepo:  "repo",
+		},
+		GCSCredentialsSecret: "secretName",
+		SshKeySecrets:        []string{"first", "second"},
+	}
+
+	var testCases = []struct {
+		name     string
+		provided *kube.DecorationConfig
+		expected *kube.DecorationConfig
+	}{
+		{
+			name:     "nothing provided",
+			provided: &kube.DecorationConfig{},
+			expected: &kube.DecorationConfig{
+				Timeout:     1 * time.Minute,
+				GracePeriod: 10 * time.Second,
+				UtilityImages: &kube.UtilityImages{
+					CloneRefs:  "clonerefs",
+					InitUpload: "iniupload",
+					Entrypoint: "entrypoint",
+					Sidecar:    "sidecar",
+				},
+				GCSConfiguration: &kube.GCSConfiguration{
+					Bucket:       "bucket",
+					PathPrefix:   "prefix",
+					PathStrategy: kube.PathStrategyLegacy,
+					DefaultOrg:   "org",
+					DefaultRepo:  "repo",
+				},
+				GCSCredentialsSecret: "secretName",
+				SshKeySecrets:        []string{"first", "second"},
+			},
+		},
+		{
+			name: "timeout provided",
+			provided: &kube.DecorationConfig{
+				Timeout: 10 * time.Minute,
+			},
+			expected: &kube.DecorationConfig{
+				Timeout:     10 * time.Minute,
+				GracePeriod: 10 * time.Second,
+				UtilityImages: &kube.UtilityImages{
+					CloneRefs:  "clonerefs",
+					InitUpload: "iniupload",
+					Entrypoint: "entrypoint",
+					Sidecar:    "sidecar",
+				},
+				GCSConfiguration: &kube.GCSConfiguration{
+					Bucket:       "bucket",
+					PathPrefix:   "prefix",
+					PathStrategy: kube.PathStrategyLegacy,
+					DefaultOrg:   "org",
+					DefaultRepo:  "repo",
+				},
+				GCSCredentialsSecret: "secretName",
+				SshKeySecrets:        []string{"first", "second"},
+			},
+		},
+		{
+			name: "grace period provided",
+			provided: &kube.DecorationConfig{
+				GracePeriod: 10 * time.Hour,
+			},
+			expected: &kube.DecorationConfig{
+				Timeout:     1 * time.Minute,
+				GracePeriod: 10 * time.Hour,
+				UtilityImages: &kube.UtilityImages{
+					CloneRefs:  "clonerefs",
+					InitUpload: "iniupload",
+					Entrypoint: "entrypoint",
+					Sidecar:    "sidecar",
+				},
+				GCSConfiguration: &kube.GCSConfiguration{
+					Bucket:       "bucket",
+					PathPrefix:   "prefix",
+					PathStrategy: kube.PathStrategyLegacy,
+					DefaultOrg:   "org",
+					DefaultRepo:  "repo",
+				},
+				GCSCredentialsSecret: "secretName",
+				SshKeySecrets:        []string{"first", "second"},
+			},
+		},
+		{
+			name: "utility images provided",
+			provided: &kube.DecorationConfig{
+				UtilityImages: &kube.UtilityImages{
+					CloneRefs:  "clonerefs-special",
+					InitUpload: "iniupload-special",
+					Entrypoint: "entrypoint-special",
+					Sidecar:    "sidecar-special",
+				},
+			},
+			expected: &kube.DecorationConfig{
+				Timeout:     1 * time.Minute,
+				GracePeriod: 10 * time.Second,
+				UtilityImages: &kube.UtilityImages{
+					CloneRefs:  "clonerefs-special",
+					InitUpload: "iniupload-special",
+					Entrypoint: "entrypoint-special",
+					Sidecar:    "sidecar-special",
+				},
+				GCSConfiguration: &kube.GCSConfiguration{
+					Bucket:       "bucket",
+					PathPrefix:   "prefix",
+					PathStrategy: kube.PathStrategyLegacy,
+					DefaultOrg:   "org",
+					DefaultRepo:  "repo",
+				},
+				GCSCredentialsSecret: "secretName",
+				SshKeySecrets:        []string{"first", "second"},
+			},
+		},
+		{
+			name: "gcs configuration provided",
+			provided: &kube.DecorationConfig{
+				GCSConfiguration: &kube.GCSConfiguration{
+					Bucket:       "bucket-1",
+					PathPrefix:   "prefix-2",
+					PathStrategy: kube.PathStrategyExplicit,
+				},
+			},
+			expected: &kube.DecorationConfig{
+				Timeout:     1 * time.Minute,
+				GracePeriod: 10 * time.Second,
+				UtilityImages: &kube.UtilityImages{
+					CloneRefs:  "clonerefs",
+					InitUpload: "iniupload",
+					Entrypoint: "entrypoint",
+					Sidecar:    "sidecar",
+				},
+				GCSConfiguration: &kube.GCSConfiguration{
+					Bucket:       "bucket-1",
+					PathPrefix:   "prefix-2",
+					PathStrategy: kube.PathStrategyExplicit,
+				},
+				GCSCredentialsSecret: "secretName",
+				SshKeySecrets:        []string{"first", "second"},
+			},
+		},
+		{
+			name: "secret name provided",
+			provided: &kube.DecorationConfig{
+				GCSCredentialsSecret: "somethingSecret",
+			},
+			expected: &kube.DecorationConfig{
+				Timeout:     1 * time.Minute,
+				GracePeriod: 10 * time.Second,
+				UtilityImages: &kube.UtilityImages{
+					CloneRefs:  "clonerefs",
+					InitUpload: "iniupload",
+					Entrypoint: "entrypoint",
+					Sidecar:    "sidecar",
+				},
+				GCSConfiguration: &kube.GCSConfiguration{
+					Bucket:       "bucket",
+					PathPrefix:   "prefix",
+					PathStrategy: kube.PathStrategyLegacy,
+					DefaultOrg:   "org",
+					DefaultRepo:  "repo",
+				},
+				GCSCredentialsSecret: "somethingSecret",
+				SshKeySecrets:        []string{"first", "second"},
+			},
+		},
+		{
+			name: "ssh secrets provided",
+			provided: &kube.DecorationConfig{
+				SshKeySecrets: []string{"my", "special"},
+			},
+			expected: &kube.DecorationConfig{
+				Timeout:     1 * time.Minute,
+				GracePeriod: 10 * time.Second,
+				UtilityImages: &kube.UtilityImages{
+					CloneRefs:  "clonerefs",
+					InitUpload: "iniupload",
+					Entrypoint: "entrypoint",
+					Sidecar:    "sidecar",
+				},
+				GCSConfiguration: &kube.GCSConfiguration{
+					Bucket:       "bucket",
+					PathPrefix:   "prefix",
+					PathStrategy: kube.PathStrategyLegacy,
+					DefaultOrg:   "org",
+					DefaultRepo:  "repo",
+				},
+				GCSCredentialsSecret: "secretName",
+				SshKeySecrets:        []string{"my", "special"},
+			},
+		},
+	}
+
+	for _, testCase := range testCases {
+		if actual, expected := setDecorationDefaults(testCase.provided, defaults), testCase.expected; !reflect.DeepEqual(actual, expected) {
+			t.Errorf("%s: expected defaulted config %v but got %v", testCase.name, expected, actual)
+		}
+	}
+}
+
+func TestBranchProtection(t *testing.T) {
+	cases := []struct {
+		org    string
+		repo   string
+		branch string
+	}{
+		{
+			org:    "kubernetes",
+			repo:   "test-infra",
+			branch: "all-branches",
+		},
+		{
+			org:    "kubernetes-sigs",
+			repo:   "any-repo",
+			branch: "any-branch",
+		},
+	}
+	for _, tc := range cases {
+		policy, err := c.GetBranchProtection(tc.org, tc.repo, tc.branch)
+		if err != nil {
+			t.Errorf("%s/%s=%s: unexpected error: %v", tc.org, tc.repo, tc.branch, err)
+		}
+		if policy.Protect == nil || !*policy.Protect {
+			t.Errorf("%s/%s=%s: unprotected: %v", tc.org, tc.repo, tc.branch, policy.Protect)
+		}
+		if !sets.NewString(policy.RequiredStatusChecks.Contexts...).Has("cla/linuxfoundation") {
+			t.Errorf("%s/%s=%s: missing cla/linuxfoundation", tc.org, tc.repo, tc.branch)
 		}
 	}
 }

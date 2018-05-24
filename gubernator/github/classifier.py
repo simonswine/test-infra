@@ -292,6 +292,10 @@ def get_reviewers(events, reviewers=None):
                 reviewers.add(body['requested_reviewer']['login'])
             elif action == 'review_request_removed':
                 reviewers -= {body['requested_reviewer']['login']}
+        elif event == 'pull_request_review':
+            if action == 'submitted':
+                reviewers.add(body['sender']['login'])
+
     return reviewers
 
 
@@ -429,7 +433,7 @@ def calculate_attention(distilled_events, payload):
 
     if payload.get('needs_rebase'):
         notify(author, 'needs rebase')
-    if 'release-note-label-needed' in payload['labels']:
+    if 'do-not-merge/release-note-label-needed' in payload['labels']:
         notify(author, 'needs release-note label')
 
     return attn

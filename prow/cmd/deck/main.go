@@ -17,20 +17,17 @@ limitations under the License.
 package main
 
 import (
-	"bufio"
 	"bytes"
 	"encoding/base64"
 	"encoding/json"
 	"errors"
 	"flag"
 	"fmt"
-	"io"
 	"io/ioutil"
 	"net/http"
 	"net/url"
 	"path"
 	"regexp"
-	"strconv"
 	"time"
 
 	"github.com/NYTimes/gziphandler"
@@ -165,6 +162,7 @@ func prodOnlyMain(o options, mux *http.ServeMux) *http.ServeMux {
 	// setup prod only handlers
 	mux.Handle("/data.js", gziphandler.GzipHandler(handleData(ja)))
 	mux.Handle("/prowjobs.js", gziphandler.GzipHandler(handleProwJobs(ja)))
+	mux.Handle("/badge.svg", gziphandler.GzipHandler(handleBadge(ja)))
 	mux.Handle("/log", gziphandler.GzipHandler(handleLog(ja)))
 	mux.Handle("/rerun", gziphandler.GzipHandler(handleRerun(kc)))
 	mux.Handle("/config", gziphandler.GzipHandler(handleConfig(configAgent)))
@@ -300,7 +298,7 @@ func dupeRequest(original *http.Request) *http.Request {
 	return r2
 }
 
-// serve with handler but map extensionless URLs to to the default
+// serve with handler but map extensionless URLs to the default
 func defaultExtension(extension string, h http.Handler) http.Handler {
 	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		if len(r.URL.Path) > 0 &&
@@ -349,6 +347,11 @@ func handleProwJobs(ja *JobAgent) http.HandlerFunc {
 	return func(w http.ResponseWriter, r *http.Request) {
 		setHeadersNoCaching(w)
 		jobs := ja.ProwJobs()
+		if v := r.URL.Query().Get("omit"); v == "pod_spec" {
+			for i := range jobs {
+				jobs[i].Spec.PodSpec = nil
+			}
+		}
 		jd, err := json.Marshal(struct {
 			Items []kube.ProwJob `json:"items"`
 		}{jobs})
@@ -382,6 +385,22 @@ func handleData(ja *JobAgent) http.HandlerFunc {
 		} else {
 			fmt.Fprint(w, string(jd))
 		}
+	}
+}
+
+func handleBadge(ja *JobAgent) http.HandlerFunc {
+	return func(w http.ResponseWriter, r *http.Request) {
+		setHeadersNoCaching(w)
+		wantJobs := r.URL.Query().Get("jobs")
+		if wantJobs == "" {
+			http.Error(w, "missing jobs query parameter", http.StatusBadRequest)
+			return
+		}
+		w.Header().Set("Content-Type", "image/svg+xml")
+
+		allJobs := ja.ProwJobs()
+		_, _, svg := renderBadge(pickLatestJobs(allJobs, wantJobs))
+		w.Write(svg)
 	}
 }
 
@@ -445,41 +464,6 @@ func handlePluginHelp(ha *helpAgent) http.HandlerFunc {
 
 type logClient interface {
 	GetJobLog(job, id string) ([]byte, error)
-	// Add ability to stream logs with options enabled. This call is used to follow logs
-	// using kubernetes client API. All other options on the Kubernetes log api can
-	// also be enabled.
-	GetJobLogStream(job, id string, options map[string]string) (io.ReadCloser, error)
-}
-
-func httpChunking(log io.ReadCloser, w http.ResponseWriter) {
-	flusher, ok := w.(http.Flusher)
-	if !ok {
-		logrus.Warning("Error getting flusher.")
-	}
-	reader := bufio.NewReader(log)
-	for {
-		line, err := reader.ReadBytes('\n')
-		if err != nil {
-			// TODO(rmmh): The log stops streaming after 30s.
-			// This seems to be an apiserver limitation-- investigate?
-			// logrus.WithError(err).Error("chunk failed to read!")
-			break
-		}
-		w.Write(line)
-		if flusher != nil {
-			flusher.Flush()
-		}
-	}
-}
-
-func getOptions(values url.Values) map[string]string {
-	options := make(map[string]string)
-	for k, v := range values {
-		if k != "pod" && k != "job" && k != "id" {
-			options[k] = v[0]
-		}
-	}
-	return options
 }
 
 // TODO(spxtr): Cache, rate limit.
@@ -489,38 +473,18 @@ func handleLog(lc logClient) http.HandlerFunc {
 		w.Header().Set("Access-Control-Allow-Origin", "*")
 		job := r.URL.Query().Get("job")
 		id := r.URL.Query().Get("id")
-		stream := r.URL.Query().Get("follow")
-		var logStreamRequested bool
-		if ok, _ := strconv.ParseBool(stream); ok {
-			// get http chunked responses to the client
-			w.Header().Set("Connection", "Keep-Alive")
-			w.Header().Set("Transfer-Encoding", "chunked")
-			logStreamRequested = true
-		}
 		if err := validateLogRequest(r); err != nil {
 			http.Error(w, err.Error(), http.StatusBadRequest)
 			return
 		}
-		if !logStreamRequested {
-			log, err := lc.GetJobLog(job, id)
-			if err != nil {
-				http.Error(w, fmt.Sprintf("Log not found: %v", err), http.StatusNotFound)
-				logrus.WithError(err).Warning("Error returned.")
-				return
-			}
-			if _, err = w.Write(log); err != nil {
-				logrus.WithError(err).Warning("Error writing log.")
-			}
-		} else {
-			//run http chunking
-			options := getOptions(r.URL.Query())
-			log, err := lc.GetJobLogStream(job, id, options)
-			if err != nil {
-				http.Error(w, fmt.Sprintf("Log stream caused: %v", err), http.StatusNotFound)
-				logrus.WithError(err).Warning("Error returned.")
-				return
-			}
-			httpChunking(log, w)
+		log, err := lc.GetJobLog(job, id)
+		if err != nil {
+			http.Error(w, fmt.Sprintf("Log not found: %v", err), http.StatusNotFound)
+			logrus.WithError(err).Warning("Error returned.")
+			return
+		}
+		if _, err = w.Write(log); err != nil {
+			logrus.WithError(err).Warning("Error writing log.")
 		}
 	}
 }

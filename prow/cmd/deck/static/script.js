@@ -16,6 +16,10 @@ function updateQueryStringParameter(uri, key, value) {
     }
 }
 
+function shortenBuildRefs(buildRef) {
+    return buildRef && buildRef.replace(/:[0-9a-f]*/g, '');
+}
+
 function optionsForRepo(repo) {
     var opts = {
         types: {},
@@ -23,6 +27,7 @@ function optionsForRepo(repo) {
         jobs: {},
         authors: {},
         pulls: {},
+        batches: {},
         states: {},
     };
 
@@ -32,10 +37,12 @@ function optionsForRepo(repo) {
         opts.repos[build.repo] = true;
         if (!repo || repo === build.repo) {
             opts.jobs[build.job] = true;
+            opts.states[build.state] = true;
             if (build.type === "presubmit") {
                 opts.authors[build.author] = true;
                 opts.pulls[build.number] = true;
-                opts.states[build.state] = true;
+            } else if (build.type === "batch") {
+                opts.batches[shortenBuildRefs(build.refs)] = true;
             }
         }
     }
@@ -45,7 +52,7 @@ function optionsForRepo(repo) {
 
 function redrawOptions(fz, opts) {
     var ts = Object.keys(opts.types).sort();
-    addOptions(ts, "type");
+    var selectedType = addOptions(ts, "type");
     var rs = Object.keys(opts.repos).filter(function (r) {
         return r !== "/";
     }).sort();
@@ -58,10 +65,17 @@ function redrawOptions(fz, opts) {
         return a.toLowerCase().localeCompare(b.toLowerCase());
     });
     addOptions(as, "author");
-    var ps = Object.keys(opts.pulls).sort(function (a, b) {
-        return parseInt(a) - parseInt(b);
-    });
-    addOptions(ps, "pull");
+    if (selectedType === "batch") {
+        opts.pulls = opts.batches;
+    }
+    if (selectedType !== "periodic" && selectedType !== "postsubmit") {
+        var ps = Object.keys(opts.pulls).sort(function (a, b) {
+            return parseInt(a) - parseInt(b);
+        });
+        addOptions(ps, "pull");
+    } else {
+        addOptions([], "pull");
+    }
     var ss = Object.keys(opts.states).sort();
     addOptions(ss, "state");
 };
@@ -177,6 +191,26 @@ window.onload = function () {
             handleUpKey();
         }
     });
+    // Register selection on change functions
+    var filterBox = document.querySelector("#filter-box");
+    var options = filterBox.querySelectorAll("select");
+    options.forEach(opt => {
+        opt.onchange = () => {
+            redraw(fz);
+        };
+    });
+    // Attach job status bar on click
+    var stateFilter = document.querySelector("#state");
+    document.querySelectorAll(".job-bar-state").forEach(jb => {
+        var state = jb.id.slice("job-bar-".length);
+        if (state === "unknown") {
+            return;
+        }
+        jb.addEventListener("click", () => {
+            stateFilter.value = state;
+            stateFilter.onchange();
+        });
+    });
     // set dropdown based on options from query string
     var opts = optionsForRepo("");
     var fz = initFuzzySearch(
@@ -186,14 +220,6 @@ window.onload = function () {
         Object.keys(opts["jobs"]).sort());
     redrawOptions(fz, opts);
     redraw(fz);
-    // Register on change functions
-    var filterBox = document.querySelector("#filter-box");
-    var options = filterBox.querySelectorAll("select");
-    options.forEach(opt => {
-        opt.addEventListener("change", () => {
-            redraw(fz);
-        });
-    });
 };
 
 document.addEventListener("DOMContentLoaded", function (event) {
@@ -342,6 +368,7 @@ function addOptions(s, p) {
         }
         sel.appendChild(o);
     }
+    return param;
 }
 
 function selectionText(sel, t) {
@@ -402,6 +429,9 @@ function redraw(fz) {
     opts = optionsForRepo(repoSel);
 
     var typeSel = getSelection("type");
+    if (typeSel === "batch") {
+        opts.pulls = opts.batches;
+    }
     var pullSel = getSelection("pull");
     var authorSel = getSelection("author");
     var jobSel = getSelectionFuzzySearch("job", "job-input");
@@ -414,7 +444,7 @@ function redraw(fz) {
             history.replaceState(null, "", "/")
         }
     }
-    fz.setDict(Object.keys(opts.jobs).sort());
+    fz.setDict(Object.keys(opts.jobs));
     redrawOptions(fz, opts);
 
     var lastKey = '';
@@ -439,6 +469,10 @@ function redraw(fz) {
                 continue;
             }
             if (!equalSelected(authorSel, build.author)) {
+                continue;
+            }
+        } else if (build.type === "batch" && !authorSel) {
+            if (!equalSelected(pullSel, shortenBuildRefs(build.refs))) {
                 continue;
             }
         } else if (pullSel || authorSel) {
@@ -474,6 +508,8 @@ function redraw(fz) {
 
             if (build.type === "periodic") {
                 r.appendChild(createTextCell(""));
+            } else if (build.repo.startsWith("http://") || build.repo.startsWith("https://") ) {
+                r.appendChild(createLinkCell(build.repo, build.repo, ""));
             } else {
                 r.appendChild(createLinkCell(build.repo, "https://github.com/"
                     + build.repo, ""));
@@ -551,12 +587,52 @@ function createRerunCell(modal, rerun_command, prowjob) {
     const icon = createIcon("refresh", "Show instructions for rerunning this job");
     icon.onclick = function () {
         modal.style.display = "block";
-        rerun_command.innerHTML = "kubectl create -f \"<a href='" + url + "'>"
-            + url + "</a>\"";
+        const rerun_html = "kubectl create -f \"<a href='" + url + "'>"
+        + url + "</a>\" " 
+        + "<a class='mdl-button mdl-js-button mdl-button--icon' onclick=\""+
+        "copyToClipboardWithToast('kubectl create -f " + url + "')\">"
+        + "<i class='material-icons state triggered' style='color: gray'>file_copy</i></a>";
+        rerun_command.innerHTML = rerun_html;
     };
     c.appendChild(icon);
     c.classList.add("icon-cell");
     return c;
+}
+
+// copyToClipboard is from https://stackoverflow.com/a/33928558
+// Copies a string to the clipboard. Must be called from within an 
+// event handler such as click. May return false if it failed, but
+// this is not always possible. Browser support for Chrome 43+, 
+// Firefox 42+, Safari 10+, Edge and IE 10+.
+// IE: The clipboard feature may be disabled by an administrator. By
+// default a prompt is shown the first time the clipboard is 
+// used (per session).
+function copyToClipboard(text) {
+    if (window.clipboardData && window.clipboardData.setData) {
+        // IE specific code path to prevent textarea being shown while dialog is visible.
+        return clipboardData.setData("Text", text); 
+
+    } else if (document.queryCommandSupported && document.queryCommandSupported("copy")) {
+        var textarea = document.createElement("textarea");
+        textarea.textContent = text;
+        textarea.style.position = "fixed";  // Prevent scrolling to bottom of page in MS Edge.
+        document.body.appendChild(textarea);
+        textarea.select();
+        try {
+            return document.execCommand("copy");  // Security exception may be thrown by some browsers.
+        } catch (ex) {
+            console.warn("Copy to clipboard failed.", ex);
+            return false;
+        } finally {
+            document.body.removeChild(textarea);
+        }
+    }
+}
+
+function copyToClipboardWithToast(text) {
+    copyToClipboard(text);
+    const toast = document.body.querySelector("#toast");
+    toast.MaterialSnackbar.showSnackbar({message: "Copied to clipboard"});
 }
 
 function stateCell(state) {
@@ -678,20 +754,13 @@ function drawJobBar(total, jobCountMap) {
 
 function stateToAdj(state) {
     switch (state) {
-        case "triggered":
-            return "triggered";
-        case "pending":
-            return "pending";
         case "success":
-            return "succeded";
+            return "succeeded";
         case "failure":
             return "failed";
-        case "aborted":
-            return "aborted";
-        case "error":
-            return "error";
+        default:
+            return state;
     }
-    return "unknown";
 }
 
 /**

@@ -45,6 +45,7 @@ const (
 
 var (
 	gkeAdditionalZones             = flag.String("gke-additional-zones", "", "(gke only) List of additional Google Compute Engine zones to use. Clusters are created symmetrically across zones by default, see --gke-shape for details.")
+	gkeNodeLocations               = flag.String("gke-node-locations", "", "(gke only) List of Google Compute Engine zones to use.")
 	gkeEnvironment                 = flag.String("gke-environment", "", "(gke only) Container API endpoint to use, one of 'test', 'staging', 'prod', or a custom https:// URL")
 	gkeShape                       = flag.String("gke-shape", `{"default":{"Nodes":3,"MachineType":"n1-standard-2"}}`, `(gke only) A JSON description of node pools to create. The node pool 'default' is required and used for initial cluster creation. All node pools are symmetric across zones, so the cluster total node count is {total nodes in --gke-shape} * {1 + (length of --gke-additional-zones)}. Example: '{"default":{"Nodes":999,"MachineType:":"n1-standard-1"},"heapster":{"Nodes":1, "MachineType":"n1-standard-8"}}`)
 	gkeCreateArgs                  = flag.String("gke-create-args", "", "(gke only) (deprecated, use a modified --gke-create-command') Additional arguments passed directly to 'gcloud container clusters create'")
@@ -74,6 +75,7 @@ type gkeDeployer struct {
 	region                      string
 	location                    string
 	additionalZones             string
+	nodeLocations               string
 	cluster                     string
 	shape                       map[string]gkeNodePool
 	network                     string
@@ -147,6 +149,7 @@ func newGKE(provider, project, zone, region, network, image, imageFamily, imageP
 	g.image = image
 
 	g.additionalZones = *gkeAdditionalZones
+	g.nodeLocations = *gkeNodeLocations
 
 	err := json.Unmarshal([]byte(*gkeShape), &g.shape)
 	if err != nil {
@@ -272,10 +275,11 @@ func newGKE(provider, project, zone, region, network, image, imageFamily, imageP
 
 func (g *gkeDeployer) Up() error {
 	// Create network if it doesn't exist.
-	if err := control.FinishRunning(exec.Command("gcloud", "compute", "networks", "describe", g.network,
+	if control.NoOutput(exec.Command("gcloud", "compute", "networks", "describe", g.network,
 		"--project="+g.project,
-		"--format=value(name)")); err != nil {
+		"--format=value(name)")) != nil {
 		// Assume error implies non-existent.
+		log.Printf("Couldn't describe network '%s', assuming it doesn't exist and creating it", g.network)
 		if err := control.FinishRunning(exec.Command("gcloud", "compute", "networks", "create", g.network,
 			"--project="+g.project,
 			"--subnet-mode=auto")); err != nil {
@@ -319,6 +323,15 @@ func (g *gkeDeployer) Up() error {
 			return fmt.Errorf("error setting MULTIZONE env variable: %v", err)
 		}
 
+	}
+	if g.nodeLocations != "" {
+		args = append(args, "--node-locations="+g.nodeLocations)
+		numNodeLocations := strings.Split(g.nodeLocations, ",")
+		if len(numNodeLocations) > 1 {
+			if err := os.Setenv("MULTIZONE", "true"); err != nil {
+				return fmt.Errorf("error setting MULTIZONE env variable: %v", err)
+			}
+		}
 	}
 	// TODO(zmerlynn): The version should be plumbed through Extract
 	// or a separate flag rather than magic env variables.
@@ -474,12 +487,13 @@ func (g *gkeDeployer) ensureFirewall() error {
 	if err != nil {
 		return fmt.Errorf("error getting unique firewall: %v", err)
 	}
-	if control.FinishRunning(exec.Command("gcloud", "compute", "firewall-rules", "describe", firewall,
+	if control.NoOutput(exec.Command("gcloud", "compute", "firewall-rules", "describe", firewall,
 		"--project="+g.project,
 		"--format=value(name)")) == nil {
 		// Assume that if this unique firewall exists, it's good to go.
 		return nil
 	}
+	log.Printf("Couldn't describe firewall '%s', assuming it doesn't exist and creating it", firewall)
 
 	tagOut, err := exec.Command("gcloud", "compute", "instances", "list",
 		"--project="+g.project,
@@ -541,6 +555,31 @@ func (g *gkeDeployer) getClusterFirewall() (string, error) {
 	return "e2e-ports-" + g.instanceGroups[0].uniq, nil
 }
 
+// This function ensures that all firewall-rules are deleted from specific network.
+// We also want to keep in logs that there were some resources leaking.
+func (g *gkeDeployer) cleanupNetworkFirewalls() (int, error) {
+	fws, err := exec.Command("gcloud", "compute", "firewall-rules", "list",
+		"--format=value(name)",
+		"--project="+g.project,
+		"--filter=network:"+g.network).Output()
+	if err != nil {
+		return 0, fmt.Errorf("firewall rules list failed: %s", util.ExecError(err))
+	}
+	if len(fws) > 0 {
+		fwList := strings.Split(strings.TrimSpace(string(fws)), "\n")
+		log.Printf("Network %s has %v undeleted firewall rules %v", g.network, len(fwList), fwList)
+		commandArgs := []string{"compute", "firewall-rules", "delete", "-q"}
+		commandArgs = append(commandArgs, fwList...)
+		commandArgs = append(commandArgs, "--project="+g.project)
+		errFirewall := control.FinishRunning(exec.Command("gcloud", commandArgs...))
+		if errFirewall != nil {
+			return 0, fmt.Errorf("error deleting firewall: %v", errFirewall)
+		}
+		return len(fwList), nil
+	}
+	return 0, nil
+}
+
 func (g *gkeDeployer) Down() error {
 	firewall, err := g.getClusterFirewall()
 	if err != nil {
@@ -554,8 +593,17 @@ func (g *gkeDeployer) Down() error {
 		"gcloud", g.containerArgs("clusters", "delete", "-q", g.cluster,
 			"--project="+g.project,
 			g.location)...))
-	errFirewall := control.FinishRunning(exec.Command("gcloud", "compute", "firewall-rules", "delete", "-q", firewall,
-		"--project="+g.project))
+	var errFirewall error
+	if control.NoOutput(exec.Command("gcloud", "compute", "firewall-rules", "describe", firewall,
+		"--project="+g.project,
+		"--format=value(name)")) == nil {
+		log.Printf("Found rules for firewall '%s', deleting them", firewall)
+		errFirewall = control.FinishRunning(exec.Command("gcloud", "compute", "firewall-rules", "delete", "-q", firewall,
+			"--project="+g.project))
+	} else {
+		log.Printf("Found no rules for firewall '%s', assuming resources are clean", firewall)
+	}
+	numLeakedFWRules, errCleanFirewalls := g.cleanupNetworkFirewalls()
 	var errSubnet error
 	if g.subnetwork != "" {
 		errSubnet = control.FinishRunning(exec.Command("gcloud", "compute", "networks", "subnets", "delete", "-q", g.subnetwork,
@@ -569,11 +617,17 @@ func (g *gkeDeployer) Down() error {
 	if errFirewall != nil {
 		return fmt.Errorf("error deleting firewall: %v", errFirewall)
 	}
+	if errCleanFirewalls != nil {
+		return fmt.Errorf("error cleaning-up firewalls: %v", errCleanFirewalls)
+	}
 	if errSubnet != nil {
 		return fmt.Errorf("error deleting subnetwork: %v", errSubnet)
 	}
 	if errNetwork != nil {
 		return fmt.Errorf("error deleting network: %v", errNetwork)
+	}
+	if numLeakedFWRules > 0 {
+		return fmt.Errorf("leaked firewall rules!")
 	}
 	return nil
 }

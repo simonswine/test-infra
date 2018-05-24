@@ -26,28 +26,35 @@ import sys
 
 
 # A resource that need to be cleared.
-Resource = collections.namedtuple('Resource', 'name group condition managed tolerate')
+Resource = collections.namedtuple('Resource', 'group name subgroup condition managed tolerate')
 DEMOLISH_ORDER = [
     # [WARNING FROM KRZYZACY] : TOUCH THIS WITH CARE!
     # ORDER REALLY MATTERS HERE!
-    Resource('instances', None, 'zone', None, False),
-    Resource('addresses', None, 'region', None, False),
-    Resource('disks', None, 'zone', None, False),
-    Resource('firewall-rules', None, None, None, False),
-    Resource('routes', None, None, None, False),
-    Resource('forwarding-rules', None, 'region', None, False),
-    Resource('target-http-proxies', None, None, None, False),
-    Resource('target-https-proxies', None, None, None, False),
-    Resource('url-maps', None, None, None, False),
-    Resource('backend-services', None, 'region', None, False),
-    Resource('target-pools', None, 'region', None, False),
-    Resource('health-checks', None, None, None, False),
-    Resource('http-health-checks', None, None, None, False),
-    Resource('instance-groups', None, 'zone', 'Yes', False),
-    Resource('instance-groups', None, 'zone', 'No', False),
-    Resource('instance-templates', None, None, None, False),
-    Resource('networks', 'subnets', 'region', None, True),
-    Resource('networks', None, '', None, False),
+
+    # compute resources
+    Resource('compute', 'instances', None, 'zone', None, False),
+    Resource('compute', 'addresses', None, 'region', None, False),
+    Resource('compute', 'disks', None, 'zone', None, False),
+    Resource('compute', 'firewall-rules', None, None, None, False),
+    Resource('compute', 'routes', None, None, None, False),
+    Resource('compute', 'forwarding-rules', None, 'region', None, False),
+    Resource('compute', 'target-http-proxies', None, None, None, False),
+    Resource('compute', 'target-https-proxies', None, None, None, False),
+    Resource('compute', 'url-maps', None, None, None, False),
+    Resource('compute', 'backend-services', None, 'region', None, False),
+    Resource('compute', 'target-pools', None, 'region', None, False),
+    Resource('compute', 'health-checks', None, None, None, False),
+    Resource('compute', 'http-health-checks', None, None, None, False),
+    Resource('compute', 'instance-groups', None, 'zone', 'Yes', False),
+    Resource('compute', 'instance-groups', None, 'zone', 'No', False),
+    Resource('compute', 'instance-templates', None, None, None, False),
+    Resource('compute', 'networks', 'subnets', 'region', None, True),
+    Resource('compute', 'networks', None, '', None, False),
+    Resource('compute', 'routes', None, None, None, False),
+
+    # logging resources
+    # sinks does not have creationTimestamp yet
+    #Resource('logging', 'sinks', None, None, None, False),
 ]
 
 
@@ -67,9 +74,9 @@ def collect(project, age, resource, filt):
 
     col = collections.defaultdict(list)
 
-    cmd = ['gcloud', 'compute', '-q', resource.name]
-    if resource.group:
-        cmd.append(resource.group)
+    cmd = ['gcloud', resource.group, '-q', resource.name]
+    if resource.subgroup:
+        cmd.append(resource.subgroup)
     cmd.extend([
         'list',
         '--format=json(name,creationTimestamp.date(tz=UTC),zone,region,isManaged)',
@@ -98,21 +105,22 @@ def collect(project, age, resource, filt):
         # Unify datetime to use utc timezone.
         created = datetime.datetime.strptime(item['creationTimestamp'], '%Y-%m-%dT%H:%M:%S')
         print ('Found %r(%r), %r in %r, created time = %r' %
-               (resource.name, resource.group, item['name'], colname, item['creationTimestamp']))
+               (resource.name, resource.subgroup, item['name'], colname, item['creationTimestamp']))
         if created < age:
             print ('Added to janitor list: %r(%r), %r' %
-                   (resource.name, resource.group, item['name']))
+                   (resource.name, resource.subgroup, item['name']))
             col[colname].append(item['name'])
     return col
 
 
-def clear_resources(project, cols, resource):
+def clear_resources(project, cols, resource, rate_limit):
     """Clear a collection of resource, from collect func above.
 
     Args:
         project: The name of a gcp project.
         cols: A dict of collection of resource.
         resource: Definition of a type of gcloud resource.
+        rate_limit: how many resources to delete per gcloud delete call
     Returns:
         0 if no error
         1 if deletion command fails
@@ -121,15 +129,15 @@ def clear_resources(project, cols, resource):
     for col, items in cols.items():
         if ARGS.dryrun:
             print ('Resource type %r(%r) to be deleted: %r' %
-                   (resource.name, resource.group, list(items)))
+                   (resource.name, resource.subgroup, list(items)))
             continue
 
         manage_key = {'Yes':'managed', 'No':'unmanaged'}
 
-        # construct the customized gcloud commend
-        base = ['gcloud', 'compute', '-q', resource.name]
-        if resource.group:
-            base.append(resource.group)
+        # construct the customized gcloud command
+        base = ['gcloud', resource.group, '-q', resource.name]
+        if resource.subgroup:
+            base.append(resource.subgroup)
         if resource.managed:
             base.append(manage_key[resource.managed])
         base.append('delete')
@@ -141,13 +149,17 @@ def clear_resources(project, cols, resource):
             else:
                 base.append('--global')
 
-        print 'Call %r' % base
-        try:
-            subprocess.check_call(base + list(items))
-        except subprocess.CalledProcessError as exc:
-            if not resource.tolerate:
-                err = 1
-            print >>sys.stderr, 'Error try to delete resources: %r' % exc
+        print 'going to delete %d %s' % (len(items), resource.name)
+        # try to delete at most $rate_limit items at a time
+        for idx in xrange(0, len(items), rate_limit):
+            clean = items[idx:idx+rate_limit]
+            print 'Call %r' % (base + list(clean))
+            try:
+                subprocess.check_call(base + list(clean))
+            except subprocess.CalledProcessError as exc:
+                if not resource.tolerate:
+                    err = 1
+                print >>sys.stderr, 'Error try to delete resources: %r' % exc
     return err
 
 
@@ -212,7 +224,7 @@ def clean_gke_cluster(project, age, filt):
     return err
 
 
-def main(project, days, hours, filt):
+def main(project, days, hours, filt, rate_limit):
     """ Clean up resources from a gcp project based on it's creation time
 
     Args:
@@ -232,18 +244,17 @@ def main(project, days, hours, filt):
         try:
             col = collect(project, age, res, filt)
             if col:
-                err |= clear_resources(project, col, res)
+                err |= clear_resources(project, col, res, rate_limit)
         except (subprocess.CalledProcessError, ValueError):
             err |= 1 # keep clean the other resource
             print >>sys.stderr, 'Fail to list resource %r from project %r' % (res.name, project)
 
     # try to clean leaking gke cluster
-    if 'gke' in project:
-        try:
-            err |= clean_gke_cluster(project, age, filt)
-        except ValueError:
-            err |= 1 # keep clean the other resource
-            print >>sys.stderr, 'Fail to clean up cluster from project %r' % project
+    try:
+        err |= clean_gke_cluster(project, age, filt)
+    except ValueError:
+        err |= 1 # keep clean the other resource
+        print >>sys.stderr, 'Fail to clean up cluster from project %r' % project
 
     print '[=== Finish Janitor on project %r with status %r ===]' % (project, err)
     sys.exit(err)
@@ -261,13 +272,16 @@ if __name__ == '__main__':
         help='Clean items more than --hours old (added to --days)')
     PARSER.add_argument(
         '--filter',
-        default='NOT tags.items:do-not-delete AND NOT name ~ ^default',
+        default='name !~ ^default',
         help='Filter down to these instances')
     PARSER.add_argument(
         '--dryrun',
         default=False,
         action='store_true',
         help='list but not delete resources')
+    PARSER.add_argument(
+        '--ratelimit', type=int, default=50,
+        help='Max number of resources to bulk clear in one gcloud delete call')
     ARGS = PARSER.parse_args()
 
     # We want to allow --days=0 and --hours=0, so check against None instead.
@@ -275,4 +289,4 @@ if __name__ == '__main__':
         print >>sys.stderr, 'must specify --days and/or --hours'
         sys.exit(1)
 
-    main(ARGS.project, ARGS.days or 0, ARGS.hours or 0, ARGS.filter)
+    main(ARGS.project, ARGS.days or 0, ARGS.hours or 0, ARGS.filter, ARGS.ratelimit)

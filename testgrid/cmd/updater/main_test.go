@@ -17,8 +17,10 @@ limitations under the License.
 package main
 
 import (
+	"reflect"
 	"testing"
 
+	"github.com/golang/protobuf/proto"
 	"k8s.io/test-infra/testgrid/state"
 )
 
@@ -311,7 +313,7 @@ func Test_ExtractRows(t *testing.T) {
 	for _, tc := range cases {
 		rows := map[string][]Row{}
 
-		err := extractRows([]byte(tc.content), rows, tc.metadata)
+		rows, err := extractRows([]byte(tc.content), tc.metadata)
 		switch {
 		case err == nil && tc.err:
 			t.Errorf("%s: failed to raise an error", tc.name)
@@ -361,5 +363,37 @@ func Test_ExtractRows(t *testing.T) {
 				}
 			}
 		}
+	}
+}
+
+func Test_MarshalGrid(t *testing.T) {
+	g1 := state.Grid{
+		Columns: []*state.Column{
+			{Build: "alpha"},
+			{Build: "second"},
+		},
+	}
+	g2 := state.Grid{
+		Columns: []*state.Column{
+			{Build: "first"},
+			{Build: "second"},
+		},
+	}
+
+	b1, e1 := marshalGrid(g1)
+	b2, e2 := marshalGrid(g2)
+	uncompressed, e1a := proto.Marshal(&g1)
+
+	switch {
+	case e1 != nil, e2 != nil:
+		t.Errorf("unexpected error %v %v %v", e1, e2, e1a)
+	}
+
+	if reflect.DeepEqual(b1, b2) {
+		t.Errorf("unexpected equality %v == %v", b1, b2)
+	}
+
+	if reflect.DeepEqual(b1, uncompressed) {
+		t.Errorf("should be compressed but is not: %v", b1)
 	}
 }

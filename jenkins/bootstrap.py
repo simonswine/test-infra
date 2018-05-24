@@ -53,6 +53,7 @@ import subprocess
 import sys
 import tempfile
 import time
+import urllib2
 
 ORIG_CWD = os.getcwd()  # Checkout changes cwd
 
@@ -94,7 +95,7 @@ def terminate(end, proc, kill):
     return True
 
 
-def _call(end, cmd, stdin=None, check=True, output=None, log_failures=True):
+def _call(end, cmd, stdin=None, check=True, output=None, log_failures=True, env=None):  # pylint: disable=too-many-locals
     """Start a subprocess."""
     logging.info('Call:  %s', ' '.join(pipes.quote(c) for c in cmd))
     begin = time.time()
@@ -106,6 +107,7 @@ def _call(end, cmd, stdin=None, check=True, output=None, log_failures=True):
         stdout=subprocess.PIPE,
         stderr=subprocess.PIPE,
         preexec_fn=os.setsid,
+        env=env,
     )
     if stdin:
         proc.stdin.write(stdin)
@@ -168,8 +170,13 @@ def pull_ref(pull):
     refs = []
     checkouts = []
     for ref in pulls:
-        if ':' in ref:  # master:abcd or 1234:abcd
-            name, sha = ref.split(':')
+        change_ref = None
+        if ':' in ref:  # master:abcd or 1234:abcd or 1234:abcd:ref/for/pr
+            res = ref.split(':')
+            name = res[0]
+            sha = res[1]
+            if len(res) > 2:
+                change_ref = res[2]
         elif not refs:  # master
             name, sha = ref, 'FETCH_HEAD'
         else:
@@ -179,7 +186,9 @@ def pull_ref(pull):
         checkouts.append(sha)
         if not refs:  # First ref should be branch to merge into
             refs.append(name)
-        else:  # Subsequent refs should be PR numbers
+        elif change_ref: # explicit change refs
+            refs.append(change_ref)
+        else: # PR numbers
             num = int(name)
             refs.append('+refs/pull/%d/head:refs/pr/%d' % (num, num))
     return refs, checkouts
@@ -197,6 +206,10 @@ def repository(repo, ssh):
     """Return the url associated with the repo."""
     if repo.startswith('k8s.io/'):
         repo = 'github.com/kubernetes/%s' % (repo[len('k8s.io/'):])
+    elif repo.startswith('sigs.k8s.io/'):
+        repo = 'github.com/kubernetes-sigs/%s' % (repo[len('sigs.k8s.io/'):])
+    elif repo.startswith('istio.io/'):
+        repo = 'github.com/istio/%s' % (repo[len('istio.io/'):])
     if ssh:
         if ":" not in repo:
             parts = repo.split('/', 1)
@@ -214,6 +227,13 @@ def auth_google_gerrit(git, call):
     call([git, 'clone', 'https://gerrit.googlesource.com/gcompute-tools'])
     call(['./gcompute-tools/git-cookie-authdaemon'])
 
+def commit_date(git, commit, call):
+    try:
+        return call([git, 'show', '-s', '--format=format:%ct', commit],
+                    output=True, log_failures=False)
+    except subprocess.CalledProcessError:
+        logging.warning('Unable to print commit date for %s', commit)
+        return None
 
 def checkout(call, repo, repo_path, branch, pull, ssh='', git_cache='', clean=False):
     """Fetch and checkout the repository at the specified branch/pull.
@@ -270,8 +290,18 @@ def checkout(call, repo, repo_path, branch, pull, ssh='', git_cache='', clean=Fa
             logging.warning('git fetch failed')
             random_sleep(attempt)
     call([git, 'checkout', '-B', 'test', checkouts[0]])
+
+    # Lie about the date in merge commits: use sequential seconds after the
+    # commit date of the tip of the parent branch we're checking into.
+    merge_date = int(commit_date(git, 'HEAD', call) or time.time())
+
+    git_merge_env = os.environ.copy()
     for ref, head in zip(refs, checkouts)[1:]:
-        call(['git', 'merge', '--no-ff', '-m', 'Merge %s' % ref, head])
+        merge_date += 1
+        git_merge_env[GIT_AUTHOR_DATE_ENV] = str(merge_date)
+        git_merge_env[GIT_COMMITTER_DATE_ENV] = str(merge_date)
+        call(['git', 'merge', '--no-ff', '-m', 'Merge %s' % ref, head],
+             env=git_merge_env)
 
 
 def repos_dict(repos):
@@ -283,7 +313,6 @@ def start(gsutil, paths, stamp, node_name, version, repos):
     """Construct and upload started.json."""
     data = {
         'timestamp': int(stamp),
-        'jenkins-node': node_name,
         'node': node_name,
     }
     if version:
@@ -294,6 +323,8 @@ def start(gsutil, paths, stamp, node_name, version, repos):
         if ref_has_shas(pull[1]):
             data['pull'] = pull[1]
         data['repos'] = repos_dict(repos)
+    if POD_ENV in os.environ:
+        data['metadata'] = {'pod': os.environ[POD_ENV]}
 
     gsutil.upload_json(paths.started, data)
     # Upload a link to the build path in the directory
@@ -459,6 +490,10 @@ def metadata(repos, artifacts, call):
         meta['repo'] = repos.main
         meta['repos'] = repos_dict(repos)
 
+    if POD_ENV in os.environ:
+        # HARDEN against metadata only being read from finished.
+        meta['pod'] = os.environ[POD_ENV]
+
     try:
         commit = call(['git', 'rev-parse', 'HEAD'], output=True)
         if commit:
@@ -542,7 +577,16 @@ def node():
     # TODO(fejta): jenkins sets the node name and our infra expect this value.
     # TODO(fejta): Consider doing something different here.
     if NODE_ENV not in os.environ:
-        os.environ[NODE_ENV] = ''.join(socket.gethostname().split('.')[:1])
+        host = socket.gethostname().split('.')[0]
+        try:
+            # Try reading the name of the VM we're running on, using the
+            # metadata server.
+            os.environ[NODE_ENV] = urllib2.urlopen(urllib2.Request(
+                'http://169.254.169.254/computeMetadata/v1/instance/name',
+                headers={'Metadata-Flavor': 'Google'})).read()
+            os.environ[POD_ENV] = host  # We also want to log this.
+        except IOError:  # Fallback.
+            os.environ[NODE_ENV] = host
     return os.environ[NODE_ENV]
 
 
@@ -669,12 +713,17 @@ GCE_KEY_ENV = 'JENKINS_GCE_SSH_PRIVATE_KEY_FILE'
 GUBERNATOR = 'https://k8s-gubernator.appspot.com/build'
 HOME_ENV = 'HOME'
 JENKINS_HOME_ENV = 'JENKINS_HOME'
+K8S_ENV = 'KUBERNETES_SERVICE_HOST'
 JOB_ENV = 'JOB_NAME'
 NODE_ENV = 'NODE_NAME'
+POD_ENV = 'POD_NAME'
 SERVICE_ACCOUNT_ENV = 'GOOGLE_APPLICATION_CREDENTIALS'
 WORKSPACE_ENV = 'WORKSPACE'
 GCS_ARTIFACTS_ENV = 'GCS_ARTIFACTS_DIR'
 IMAGE_NAME_ENV = 'IMAGE'
+GIT_AUTHOR_DATE_ENV = 'GIT_AUTHOR_DATE'
+GIT_COMMITTER_DATE_ENV = 'GIT_COMMITTER_DATE'
+SOURCE_DATE_EPOCH_ENV = 'SOURCE_DATE_EPOCH'
 
 
 def build_name(started):
@@ -742,7 +791,7 @@ def setup_logging(path):
     return build_log
 
 
-def setup_magic_environment(job):
+def setup_magic_environment(job, call):
     """Set magic environment variables scripts currently expect."""
     home = os.environ[HOME_ENV]
     # TODO(fejta): jenkins sets these values. Consider migrating to using
@@ -777,7 +826,7 @@ def setup_magic_environment(job):
     # By default, Jenkins sets HOME to JENKINS_HOME, which is shared by all
     # jobs. To avoid collisions, set it to the cwd instead, but only when
     # running on Jenkins.
-    if os.environ.get(HOME_ENV, None) == os.environ.get(JENKINS_HOME_ENV, None):
+    if os.getenv(HOME_ENV) and os.getenv(HOME_ENV) == os.getenv(JENKINS_HOME_ENV):
         os.environ[HOME_ENV] = cwd
     # TODO(fejta): jenkins sets JOB_ENV and pieces of our infra expect this
     #              value. Consider making everything below here agnostic to the
@@ -793,6 +842,13 @@ def setup_magic_environment(job):
     # This helps prevent reuse of cloudsdk configuration. It also reduces the
     # risk that running a job on a workstation corrupts the user's config.
     os.environ[CLOUDSDK_ENV] = '%s/.config/gcloud' % cwd
+
+    # Try to set SOURCE_DATE_EPOCH based on the commit date of the tip of the
+    # tree.
+    # This improves cacheability of stamped binaries.
+    head_commit_date = commit_date('git', 'HEAD', call)
+    if head_commit_date:
+        os.environ[SOURCE_DATE_EPOCH_ENV] = head_commit_date.strip()
 
 
 def job_args(args):
@@ -860,6 +916,18 @@ def configure_ssh_key(ssh):
         os.unlink(fp.name)
 
 
+def maybe_upload_podspec(call, artifacts, gsutil, getenv):
+    """ Attempt to read our own podspec and upload it to the artifacts dir. """
+    if not getenv(K8S_ENV):
+        return  # we don't appear to be a pod
+    hostname = getenv('HOSTNAME')
+    if not hostname:
+        return
+    spec = call(['kubectl', 'get', '-oyaml', 'pods/' + hostname], output=True)
+    gsutil.upload_text(
+        os.path.join(artifacts, 'prow_podspec.yaml'), spec)
+
+
 def setup_root(call, root, repos, ssh, git_cache, clean):
     """Create root dir, checkout repo and cd into resulting dir."""
     if not os.path.exists(root):
@@ -924,7 +992,8 @@ def parse_repos(args):
         ret[repo] = (args.branch, args.pull)
         return ret
     for repo in repos:
-        mat = re.match(r'([^=]+)(=([^:,~^\s]+(:[0-9a-fA-F]+)?(,|$))+)?$', repo)
+        mat = re.match(
+            r'([^=]+)(=([^:,~^\s]+(:[0-9a-fA-F]+)?(:refs/changes/[0-9/]+)?(,|$))+)?$', repo)
         if not mat:
             raise ValueError('bad repo', repo, repos)
         this_repo = mat.group(1)
@@ -985,14 +1054,17 @@ def bootstrap(args):
 
     try:
         with configure_ssh_key(args.ssh):
+            setup_credentials(call, args.service_account, upload)
+            if upload:
+                try:
+                    maybe_upload_podspec(call, paths.artifacts, gsutil, os.getenv)
+                except (OSError, subprocess.CalledProcessError), exc:
+                    logging.error("unable to upload podspecs: %s", exc)
             setup_root(call, args.root, repos, args.ssh, args.git_cache, args.clean)
             logging.info('Configure environment...')
-            if repos:
-                version = find_version(call)
-            else:
-                version = ''
-            setup_magic_environment(job)
+            setup_magic_environment(job, call)
             setup_credentials(call, args.service_account, upload)
+            version = find_version(call) if repos else ''
             logging.info('Start %s at %s...', build, version)
             if upload:
                 start(gsutil, paths, started, node(), version, repos)

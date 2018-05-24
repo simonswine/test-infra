@@ -33,7 +33,7 @@ spec:
       terminationGracePeriodSeconds: 30
       containers:
       - name: deck
-        image: gcr.io/k8s-prow/deck:v20180314-ac917cffb
+        image: gcr.io/k8s-prow/deck:v20180521-f8caf9625
         imagePullPolicy: Always
         ports:
           - name: http
@@ -42,13 +42,20 @@ spec:
         - --build-cluster=/etc/cluster/cluster
         - --tide-url=http://tide/
         - --hook-url=http://hook:8888/plugin-help
-        - --redirect-http-to=prow.k8s.io
+        - --redirect-http-to=prow.build-infra.jetstack.io
+        - --oauth-url=https://prow.build-infra.jetstack.net/pr
         volumeMounts:
         - name: config
           mountPath: /etc/config
           readOnly: true
         - name: cluster
           mountPath: /etc/cluster
+        - mountPath: /etc/github
+          name: oauth-config
+          readOnly: true
+        - mountPath: /etc/cookie
+          name: cookie-secret
+          readOnly: true
       volumes:
       - name: config
         configMap:
@@ -57,3 +64,11 @@ spec:
         secret:
           defaultMode: 420
           secretName: build-cluster
+      - name: oauth-config
+        secret:
+          defaultMode: 420
+          secretName: github-oauth-config
+      - name: cookie-secret
+        secret:
+          defaultMode: 420
+          secretName: cookie

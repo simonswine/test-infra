@@ -28,7 +28,7 @@ import (
 	"k8s.io/test-infra/prow/github"
 	"k8s.io/test-infra/prow/jenkins"
 	"k8s.io/test-infra/prow/kube"
-	"k8s.io/test-infra/prow/pjutil"
+	"k8s.io/test-infra/prow/pod-utils/downwardapi"
 )
 
 type options struct {
@@ -138,7 +138,7 @@ func main() {
 		log.Fatalf("no jenkins auth token provided")
 	}
 
-	jc, err := jenkins.NewClient(o.jenkinsURL, nil, &ac, nil, nil)
+	jc, err := jenkins.NewClient(o.jenkinsURL, false, nil, &ac, nil, nil)
 	if err != nil {
 		log.Fatalf("cannot setup Jenkins client: %v", err)
 	}
@@ -158,7 +158,7 @@ func main() {
 	spec := kube.ProwJobSpec{
 		Type: kube.PresubmitJob,
 		Job:  o.jobName,
-		Refs: kube.Refs{
+		Refs: &kube.Refs{
 			Org:     o.org,
 			Repo:    o.repo,
 			BaseRef: pr.Base.Ref,
@@ -180,7 +180,7 @@ func main() {
 
 	if err = jc.BuildFromSpec(&spec, "0", o.jobName); err != nil {
 		log.Println("Submitting the following to Jenkins:")
-		env, _ := pjutil.EnvForSpec(pjutil.NewJobSpec(spec, "0", o.jobName))
+		env, _ := downwardapi.EnvForSpec(downwardapi.NewJobSpec(spec, "0", o.jobName))
 		for k, v := range env {
 			log.Printf("  %s=%s\n", k, v)
 		}

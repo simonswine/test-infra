@@ -25,12 +25,11 @@ import (
 	"testing"
 
 	"github.com/sirupsen/logrus"
-
 	"k8s.io/apimachinery/pkg/util/sets"
-	"k8s.io/test-infra/prow/git/localgit"
-	"k8s.io/test-infra/prow/github/fakegithub"
 
 	prowConf "k8s.io/test-infra/prow/config"
+	"k8s.io/test-infra/prow/git/localgit"
+	"k8s.io/test-infra/prow/github/fakegithub"
 )
 
 var (
@@ -38,7 +37,7 @@ var (
 		"foo":                        []byte("approvers:\n- bob"),
 		"OWNERS":                     []byte("approvers: \n- cjwagner\nreviewers:\n- Alice\n- bob\nlabels:\n - EVERYTHING"),
 		"src/OWNERS":                 []byte("approvers:\n- Best-Approvers"),
-		"src/dir/OWNERS":             []byte("approvers:\n - bob\nreviewers:\n- alice\n- CJWagner\nlabels:\n- src-code"),
+		"src/dir/OWNERS":             []byte("approvers:\n - bob\nreviewers:\n- alice\n- CJWagner\n- jakub\nlabels:\n- src-code"),
 		"src/dir/conformance/OWNERS": []byte("options:\n no_parent_owners: true\napprovers:\n - mml"),
 		"docs/file.md":               []byte("---\napprovers: \n- ALICE\n\nlabels:\n- docs\n---"),
 	}
@@ -90,9 +89,11 @@ func (c testConfigGetter) Config() *prowConf.Config {
 func getTestClient(
 	files map[string][]byte,
 	enableMdYaml,
+	skipCollab,
 	includeAliases bool,
 	ownersDirBlacklistDefault []string,
 	ownersDirBlacklistByRepo map[string][]string,
+	extraBranchesAndFiles map[string]map[string][]byte,
 ) (*Client, func(), error) {
 	testAliasesFile := map[string][]byte{
 		"OWNERS_ALIASES": []byte("aliases:\n  Best-approvers:\n  - carl\n  - cjwagner\n  best-reviewers:\n  - Carl\n  - BOB"),
@@ -103,27 +104,44 @@ func getTestClient(
 		return nil, nil, err
 	}
 	if err := localGit.MakeFakeRepo("org", "repo"); err != nil {
-		return nil, nil, fmt.Errorf("Error making fake repo: %v", err)
+		return nil, nil, fmt.Errorf("cannot make fake repo: %v", err)
 	}
 	if err := localGit.AddCommit("org", "repo", files); err != nil {
-		return nil, nil, fmt.Errorf("Error adding initial commit: %v", err)
+		return nil, nil, fmt.Errorf("cannot add initial commit: %v", err)
 	}
 	if includeAliases {
 		if err := localGit.AddCommit("org", "repo", testAliasesFile); err != nil {
-			return nil, nil, fmt.Errorf("Error adding OWNERS_ALIASES commit: %v", err)
+			return nil, nil, fmt.Errorf("cannot add OWNERS_ALIASES commit: %v", err)
+		}
+	}
+	if len(extraBranchesAndFiles) > 0 {
+		for branch, extraFiles := range extraBranchesAndFiles {
+			if err := localGit.CheckoutNewBranch("org", "repo", branch); err != nil {
+				return nil, nil, err
+			}
+			if len(extraFiles) > 0 {
+				if err := localGit.AddCommit("org", "repo", extraFiles); err != nil {
+					return nil, nil, fmt.Errorf("cannot add commit: %v", err)
+				}
+			}
+		}
+		if err := localGit.Checkout("org", "repo", "master"); err != nil {
+			return nil, nil, err
 		}
 	}
 
 	return &Client{
 			git:    git,
-			ghc:    &fakegithub.FakeClient{Collaborators: []string{"cjwagner", "k8s-ci-robot", "alice", "bob", "carl", "mml"}},
+			ghc:    &fakegithub.FakeClient{Collaborators: []string{"cjwagner", "k8s-ci-robot", "alice", "bob", "carl", "mml", "maggie"}},
 			logger: logrus.WithField("client", "repoowners"),
 			cache:  make(map[string]cacheEntry),
 
 			mdYAMLEnabled: func(org, repo string) bool {
 				return enableMdYaml
 			},
-
+			skipCollaborators: func(org, repo string) bool {
+				return skipCollab
+			},
 			configGetter: testConfigGetter{
 				repoBlacklist:    ownersDirBlacklistByRepo,
 				defaultBlacklist: ownersDirBlacklistDefault,
@@ -176,18 +194,18 @@ func TestOwnersDirBlacklist(t *testing.T) {
 	}
 
 	getRepoOwnersWithBlacklist := func(t *testing.T, defaults []string, byRepo map[string][]string) *RepoOwners {
-		client, cleanup, err := getTestClient(testFiles, true, true, defaults, byRepo)
+		client, cleanup, err := getTestClient(testFiles, true, false, true, defaults, byRepo, nil)
 		if err != nil {
 			t.Fatalf("Error creating test client: %v.", err)
 		}
 		defer cleanup()
 
-		ro, err := client.LoadRepoOwners("org", "repo")
+		ro, err := client.LoadRepoOwners("org", "repo", "master")
 		if err != nil {
 			t.Fatalf("Unexpected error loading RepoOwners: %v.", err)
 		}
 
-		return ro
+		return ro.(*RepoOwners)
 	}
 
 	type testConf struct {
@@ -243,16 +261,17 @@ func TestOwnersRegexpFiltering(t *testing.T) {
 		"re/b/md.md":   sets.NewString("re/all"),
 	}
 
-	client, cleanup, err := getTestClient(testFilesRe, true, true, nil, nil)
+	client, cleanup, err := getTestClient(testFilesRe, true, false, true, nil, nil, nil)
 	if err != nil {
 		t.Fatalf("Error creating test client: %v.", err)
 	}
 	defer cleanup()
 
-	ro, err := client.LoadRepoOwners("org", "repo")
+	r, err := client.LoadRepoOwners("org", "repo", "master")
 	if err != nil {
 		t.Fatalf("Unexpected error loading RepoOwners: %v.", err)
 	}
+	ro := r.(*RepoOwners)
 	t.Logf("labels: %#v\n\n", ro.labels)
 	for file, expected := range tests {
 		if got := ro.FindLabelsForFile(file); !got.Equal(expected) {
@@ -261,11 +280,19 @@ func TestOwnersRegexpFiltering(t *testing.T) {
 	}
 }
 
+func strP(str string) *string {
+	return &str
+}
+
 func TestLoadRepoOwners(t *testing.T) {
 	tests := []struct {
 		name              string
 		mdEnabled         bool
 		aliasesFileExists bool
+		skipCollaborators bool
+		// used for testing OWNERS from a branch different from master
+		branch                *string
+		extraBranchesAndFiles map[string]map[string][]byte
 
 		expectedApprovers, expectedReviewers, expectedLabels map[string]map[string]sets.String
 
@@ -342,32 +369,118 @@ func TestLoadRepoOwners(t *testing.T) {
 				},
 			},
 		},
+		{
+			name:   "OWNERS from non-default branch",
+			branch: strP("release-1.10"),
+			extraBranchesAndFiles: map[string]map[string][]byte{
+				"release-1.10": {
+					"src/doc/OWNERS": []byte("approvers:\n - maggie\n"),
+				},
+			},
+			expectedApprovers: map[string]map[string]sets.String{
+				"":                    patternAll("cjwagner"),
+				"src":                 patternAll(),
+				"src/dir":             patternAll("bob"),
+				"src/dir/conformance": patternAll("mml"),
+				"src/doc":             patternAll("maggie"),
+			},
+			expectedReviewers: map[string]map[string]sets.String{
+				"":        patternAll("alice", "bob"),
+				"src/dir": patternAll("alice", "cjwagner"),
+			},
+			expectedLabels: map[string]map[string]sets.String{
+				"":        patternAll("EVERYTHING"),
+				"src/dir": patternAll("src-code"),
+			},
+			expectedOptions: map[string]dirOptions{
+				"src/dir/conformance": {
+					NoParentOwners: true,
+				},
+			},
+		},
+		{
+			name:   "OWNERS from master branch while release branch diverges",
+			branch: strP("master"),
+			extraBranchesAndFiles: map[string]map[string][]byte{
+				"release-1.10": {
+					"src/doc/OWNERS": []byte("approvers:\n - maggie\n"),
+				},
+			},
+			expectedApprovers: map[string]map[string]sets.String{
+				"":                    patternAll("cjwagner"),
+				"src":                 patternAll(),
+				"src/dir":             patternAll("bob"),
+				"src/dir/conformance": patternAll("mml"),
+			},
+			expectedReviewers: map[string]map[string]sets.String{
+				"":        patternAll("alice", "bob"),
+				"src/dir": patternAll("alice", "cjwagner"),
+			},
+			expectedLabels: map[string]map[string]sets.String{
+				"":        patternAll("EVERYTHING"),
+				"src/dir": patternAll("src-code"),
+			},
+			expectedOptions: map[string]dirOptions{
+				"src/dir/conformance": {
+					NoParentOwners: true,
+				},
+			},
+		},
+		{
+			name:              "Skip collaborator checks, use only OWNERS files",
+			skipCollaborators: true,
+			expectedApprovers: map[string]map[string]sets.String{
+				"":                    patternAll("cjwagner"),
+				"src":                 patternAll("best-approvers"),
+				"src/dir":             patternAll("bob"),
+				"src/dir/conformance": patternAll("mml"),
+			},
+			expectedReviewers: map[string]map[string]sets.String{
+				"":        patternAll("alice", "bob"),
+				"src/dir": patternAll("alice", "cjwagner", "jakub"),
+			},
+			expectedLabels: map[string]map[string]sets.String{
+				"":        patternAll("EVERYTHING"),
+				"src/dir": patternAll("src-code"),
+			},
+			expectedOptions: map[string]dirOptions{
+				"src/dir/conformance": {
+					NoParentOwners: true,
+				},
+			},
+		},
 	}
 
 	for _, test := range tests {
-		client, cleanup, err := getTestClient(testFiles, test.mdEnabled, test.aliasesFileExists, nil, nil)
+		t.Logf("Running scenario %q", test.name)
+		client, cleanup, err := getTestClient(testFiles, test.mdEnabled, test.skipCollaborators, test.aliasesFileExists, nil, nil, test.extraBranchesAndFiles)
 		if err != nil {
-			t.Errorf("[%s] Error creating test client: %v.", test.name, err)
+			t.Errorf("Error creating test client: %v.", err)
 			continue
 		}
 		defer cleanup()
 
-		ro, err := client.LoadRepoOwners("org", "repo")
+		base := "master"
+		if test.branch != nil {
+			base = *test.branch
+		}
+		r, err := client.LoadRepoOwners("org", "repo", base)
 		if err != nil {
-			t.Errorf("[%s] Unexpected error loading RepoOwners: %v.", test.name, err)
+			t.Errorf("Unexpected error loading RepoOwners: %v.", err)
 			continue
 		}
+		ro := r.(*RepoOwners)
 
 		if ro.baseDir == "" {
-			t.Errorf("[%s] Expected 'baseDir' to be populated.", test.name)
+			t.Errorf("Expected 'baseDir' to be populated.")
 			continue
 		}
 		if (ro.RepoAliases != nil) != test.aliasesFileExists {
-			t.Errorf("[%s] Expected 'RepoAliases' to be poplulated: %t, but got %t.", test.name, test.aliasesFileExists, ro.RepoAliases != nil)
+			t.Errorf("Expected 'RepoAliases' to be poplulated: %t, but got %t.", test.aliasesFileExists, ro.RepoAliases != nil)
 			continue
 		}
 		if ro.enableMDYAML != test.mdEnabled {
-			t.Errorf("[%s] Expected 'enableMdYaml' to be: %t, but got %t.", test.name, test.mdEnabled, ro.enableMDYAML)
+			t.Errorf("Expected 'enableMdYaml' to be: %t, but got %t.", test.mdEnabled, ro.enableMDYAML)
 			continue
 		}
 
@@ -384,22 +497,26 @@ func TestLoadRepoOwners(t *testing.T) {
 				}
 			}
 			if !reflect.DeepEqual(expected, converted) {
-				t.Errorf("[%s] Expected %s to be %#v, but got %#v.", test.name, field, expected, converted)
+				t.Errorf("Expected %s to be:\n%+v\ngot:\n%+v.", field, expected, converted)
 			}
 		}
 		check("approvers", test.expectedApprovers, ro.approvers)
 		check("reviewers", test.expectedReviewers, ro.reviewers)
 		check("labels", test.expectedLabels, ro.labels)
 		if !reflect.DeepEqual(test.expectedOptions, ro.options) {
-			t.Errorf("[%s] Expected %s to be %#v, but got %#v.", test.name, "options", test.expectedOptions, ro.options)
+			t.Errorf("Expected options to be:\n%#v\ngot:\n%#v.", test.expectedOptions, ro.options)
 		}
 	}
 }
 
 func TestLoadRepoAliases(t *testing.T) {
 	tests := []struct {
-		name                string
-		aliasFileExists     bool
+		name string
+
+		aliasFileExists       bool
+		branch                *string
+		extraBranchesAndFiles map[string]map[string][]byte
+
 		expectedRepoAliases RepoAliases
 	}{
 		{
@@ -415,15 +532,35 @@ func TestLoadRepoAliases(t *testing.T) {
 				"best-reviewers": sets.NewString("carl", "bob"),
 			},
 		},
+		{
+			name: "Aliases file from non-default branch",
+
+			aliasFileExists: true,
+			branch:          strP("release-1.10"),
+			extraBranchesAndFiles: map[string]map[string][]byte{
+				"release-1.10": {
+					"OWNERS_ALIASES": []byte("aliases:\n  Best-approvers:\n  - carl\n  - cjwagner\n  best-reviewers:\n  - Carl\n  - BOB\n  - maggie"),
+				},
+			},
+
+			expectedRepoAliases: RepoAliases{
+				"best-approvers": sets.NewString("carl", "cjwagner"),
+				"best-reviewers": sets.NewString("carl", "bob", "maggie"),
+			},
+		},
 	}
 	for _, test := range tests {
-		client, cleanup, err := getTestClient(testFiles, false, test.aliasFileExists, nil, nil)
+		client, cleanup, err := getTestClient(testFiles, false, false, test.aliasFileExists, nil, nil, test.extraBranchesAndFiles)
 		if err != nil {
 			t.Errorf("[%s] Error creating test client: %v.", test.name, err)
 			continue
 		}
 
-		got, err := client.LoadRepoAliases("org", "repo")
+		branch := "master"
+		if test.branch != nil {
+			branch = *test.branch
+		}
+		got, err := client.LoadRepoAliases("org", "repo", branch)
 		if err != nil {
 			t.Errorf("[%s] Unexpected error loading RepoAliases: %v.", test.name, err)
 			cleanup()

@@ -2,17 +2,14 @@
 #
 # Possible bucket metadata:
 #   contact: github name to contact
-#   prefix: the identifier used for this bucket on the test-history dashboard.
+#   prefix: the identifier prefixed to jobs from this bucket.
 #   sequential: an optional boolean that indicates whether test runs in this
 #     bucket are numbered sequentially. This is used for an optimization in the
-#     test-history collection phase, and defaults to true.
+#     collection phase, and defaults to true.
 
 gs://kubernetes-jenkins/logs/:
   contact: "fejta"
   prefix: ""
-gs://rktnetes-jenkins/logs/:
-  contact: "euank"
-  prefix: "rktnetes:"
 gs://kopeio-kubernetes-e2e/logs/:
   contact: "justinsb"
   prefix: "kopeio:"
@@ -39,4 +36,10 @@ gs://kubernetes-github-redhat/logs/:
   prefix: "redhat:"
 gs://istio-prow/:
   contact: "chxchx"
+  prefix: ""
+gs://istio-circleci/:
+  contact: "chxchx"
+  prefix: ""
+gs://kubernetes-openstack/:
+  contact: "kiwik"
   prefix: ""

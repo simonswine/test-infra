@@ -52,10 +52,9 @@ class JUnitParser(object):
         elif child.find('failure') is not None:
             time = float(child.attrib['time'])
             out = []
-            for param in child.findall('system-out'):
-                out.append(param.text)
-            for param in child.findall('system-err'):
-                out.append(param.text)
+            for param in child.findall('system-out') + child.findall('system-err'):
+                if param.text:
+                    out.append(param.text)
             for param in child.findall('failure'):
                 self.failed.append((name, time, param.text, filename, '\n'.join(out)))
         else:
@@ -146,12 +145,13 @@ def normalize_metadata(started_future, finished_future):
 
 
 @view_base.memcache_memoize('build-details://', expires=60)
-def build_details(build_dir):
+def build_details(build_dir, recursive=False):
     """
     Collect information from a build directory.
 
     Args:
         build_dir: GCS path containing a build's results.
+        recursive: Whether to scan artifacts recursively for XML files.
     Returns:
         started: value from started.json {'version': ..., 'timestamp': ...}
         finished: value from finished.json {'timestamp': ..., 'result': ...}
@@ -168,8 +168,12 @@ def build_details(build_dir):
     if started is None and finished is None:
         return started, finished, None
 
-    junit_paths = [f.filename for f in view_base.gcs_ls_recursive('%s/artifacts' % build_dir)
-                   if f.filename.endswith('.xml')]
+    if recursive:
+        artifact_paths = view_base.gcs_ls_recursive('%s/artifacts' % build_dir)
+    else:
+        artifact_paths = view_base.gcs_ls('%s/artifacts' % build_dir)
+
+    junit_paths = [f.filename for f in artifact_paths if f.filename.endswith('.xml')]
 
     junit_futures = {f: gcs_async.read(f) for f in junit_paths}
 
@@ -207,8 +211,8 @@ def parse_pr_path(gcs_path, default_org, default_repo):
         pr_path = parsed_repo + '/'
         repo = '%s/%s' % (default_org, parsed_repo)
     else:
-        pr_path = parsed_repo.replace('_', '/') + '/'
-        repo = parsed_repo.replace('_', '/')
+        pr_path = parsed_repo.replace('_', '/', 1) + '/'
+        repo = parsed_repo.replace('_', '/', 1)
     return pull_number, pr_path, repo
 
 
@@ -226,7 +230,9 @@ class BuildHandler(view_base.BaseHandler):
         job_dir = '/%s/%s/' % (prefix, job)
         testgrid_query = testgrid.path_to_query(job_dir)
         build_dir = job_dir + build
-        started, finished, results = build_details(build_dir)
+        issues_fut = models.GHIssueDigest.find_xrefs_async(build_dir)
+        started, finished, results = build_details(
+            build_dir, self.app.config.get('recursive_artifacts', True))
         if started is None and finished is None:
             logging.warning('unable to load %s', build_dir)
             self.render(
@@ -259,8 +265,6 @@ class BuildHandler(view_base.BaseHandler):
         version = finished and finished.get('version') or started and started.get('version')
         commit = version and version.split('+')[-1]
 
-        issues = list(models.GHIssueDigest.find_xrefs(build_dir))
-
         refs = []
         if started and started.get('pull'):
             for ref in started['pull'].split(','):
@@ -275,13 +279,13 @@ class BuildHandler(view_base.BaseHandler):
             commit=commit, started=started, finished=finished,
             res=results, refs=refs,
             build_log=build_log, build_log_src=build_log_src,
-            issues=issues, repo=repo,
+            issues=issues_fut.get_result(), repo=repo,
             pr_path=pr_path, pr=pr, pr_digest=pr_digest,
             testgrid_query=testgrid_query))
 
 
 def get_build_config(prefix, config):
-    for item in config['external_services'].values():
+    for item in config['external_services'].values() + [config['default_external_services']]:
         if prefix.startswith(item['gcs_pull_prefix']):
             return item
         if 'gcs_bucket' in item and prefix.startswith(item['gcs_bucket']):
@@ -337,14 +341,18 @@ def get_build_numbers(job_dir, before, indirect):
 def build_list(job_dir, before):
     """
     Given a job dir, give a (partial) list of recent build
-    finished.jsons.
+    started.json & finished.jsons.
 
     Args:
         job_dir: the GCS path holding the jobs
     Returns:
-        a list of [(build, finished)]. build is a string like "123",
-        finished is either None or a dict of the finished.json.
+        a list of [(build, loc, started, finished)].
+            build is a string like "123",
+            loc is the job directory and build,
+            started/finished are either None or a dict of the finished.json,
+        and a dict of {build: [issues...]} of xrefs.
     """
+    # pylint: disable=too-many-locals
 
     # /directory/ folders have a series of .txt files pointing at the correct location,
     # as a sort of fake symlink.
@@ -376,12 +384,16 @@ def build_list(job_dir, before):
             for build in builds
         ]
 
+    # This is done in parallel with waiting for GCS started/finished.
+    build_refs = models.GHIssueDigest.find_xrefs_multi_async(
+            [b[1] for b in build_futures])
+
     output = []
     for build, loc, started_future, finished_future in build_futures:
         started, finished = normalize_metadata(started_future, finished_future)
         output.append((str(build), loc, started, finished))
 
-    return output
+    return output, build_refs.get_result()
 
 class BuildListHandler(view_base.BaseHandler):
     """Show a list of Builds for a Job."""
@@ -389,12 +401,14 @@ class BuildListHandler(view_base.BaseHandler):
         job_dir = '/%s/%s/' % (prefix, job)
         testgrid_query = testgrid.path_to_query(job_dir)
         before = self.request.get('before')
-        builds = build_list(job_dir, before)
+        builds, refs = build_list(job_dir, before)
         dir_link = re.sub(r'/pull/.*', '/directory/%s' % job, prefix)
+
         self.render('build_list.html',
                     dict(job=job, job_dir=job_dir, dir_link=dir_link,
                          testgrid_query=testgrid_query,
-                         builds=builds, before=before))
+                         builds=builds, refs=refs,
+                         before=before))
 
 
 class JobListHandler(view_base.BaseHandler):
@@ -404,3 +418,21 @@ class JobListHandler(view_base.BaseHandler):
         fstats = view_base.gcs_ls(jobs_dir)
         fstats.sort()
         self.render('job_list.html', dict(jobs_dir=jobs_dir, fstats=fstats))
+
+
+class GcsProxyHandler(view_base.BaseHandler):
+    """Proxy results from GCS.
+
+    Useful for buckets that don't have public read permissions."""
+    def get(self):
+        # let's lock this down to build logs for now.
+        path = self.request.get('path')
+        if not re.match(r'^[-\w/.]+$', path):
+            self.abort(403)
+        if not path.endswith('/build-log.txt'):
+            self.abort(403)
+        content = gcs_async.read(path).get_result()
+        # lazy XSS prevention.
+        # doesn't work on terrible browsers that do content sniffing (ancient IE).
+        self.response.headers['Content-Type'] = 'text/plain'
+        self.response.write(content)

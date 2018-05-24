@@ -78,7 +78,7 @@ class JobTest(unittest.TestCase):
                 yield job, job_path
 
     def test_config_is_sorted(self):
-        """Test jobs/config.json, prow/config.yaml and boskos/resources.json are sorted."""
+        """Test jobs/config.json, prow/config.yaml and boskos/resources.yaml are sorted."""
         with open(config_sort.test_infra('jobs/config.json')) as fp:
             original = fp.read()
             expect = config_sort.sorted_job_config().getvalue()
@@ -92,18 +92,18 @@ class JobTest(unittest.TestCase):
             if original != expect:
                 self.fail('prow/config.yaml is not sorted, please run '
                           '`bazel run //jobs:config_sort`')
-        with open(config_sort.test_infra('boskos/resources.json')) as fp:
+        with open(config_sort.test_infra('boskos/resources.yaml')) as fp:
             original = fp.read()
             expect = config_sort.sorted_boskos_config().getvalue()
             if original != expect:
-                self.fail('boskos/resources.json is not sorted, please run '
+                self.fail('boskos/resources.yaml is not sorted, please run '
                           '`bazel run //jobs:config_sort`')
 
     def test_orphaned_env(self):
         orphans = env_gc.find_orphans()
         if orphans:
             self.fail('the following .env files are not referenced ' +
-                      'in config.json, please run `bazel run //jobs:env_gc: ' +
+                      'in config.json, please run `bazel run //jobs:env_gc`: ' +
                       ' '.join(orphans))
 
     def check_job_template(self, tmpl):
@@ -472,69 +472,52 @@ class JobTest(unittest.TestCase):
             'ci-kubernetes-e2enode-cosbeta-k8sstable3-serial': 'ci-kubernetes-e2e-gce-cos*',
 
             # The ubuntu image validation jobs intentionally share projects.
-            'ci-kubernetes-e2e-gce-ubuntu1-k8sdev-default': 'ci-kubernetes-e2e-gce-ubuntu*',
-            'ci-kubernetes-e2e-gce-ubuntudev-k8sdev-default': 'ci-kubernetes-e2e-gce-ubuntu*',
-            'ci-kubernetes-e2e-gce-ubuntudev-k8sdev-serial': 'ci-kubernetes-e2e-gce-ubuntu*',
-            'ci-kubernetes-e2e-gce-ubuntudev-k8sdev-slow': 'ci-kubernetes-e2e-gce-ubuntu*',
-            'ci-kubernetes-e2e-gce-ubuntudev-k8sbeta-default': 'ci-kubernetes-e2e-gce-ubuntu*',
-            'ci-kubernetes-e2e-gce-ubuntudev-k8sbeta-serial': 'ci-kubernetes-e2e-gce-ubuntu*',
-            'ci-kubernetes-e2e-gce-ubuntudev-k8sbeta-slow': 'ci-kubernetes-e2e-gce-ubuntu*',
-            'ci-kubernetes-e2e-gce-ubuntudev-k8sstable1-default': 'ci-kubernetes-e2e-gce-ubuntu*',
-            'ci-kubernetes-e2e-gce-ubuntudev-k8sstable1-serial': 'ci-kubernetes-e2e-gce-ubuntu*',
-            'ci-kubernetes-e2e-gce-ubuntudev-k8sstable1-slow': 'ci-kubernetes-e2e-gce-ubuntu*',
-            'ci-kubernetes-e2e-gce-ubuntudev-k8sstable2-default': 'ci-kubernetes-e2e-gce-ubuntu*',
-            'ci-kubernetes-e2e-gce-ubuntudev-k8sstable2-serial': 'ci-kubernetes-e2e-gce-ubuntu*',
-            'ci-kubernetes-e2e-gce-ubuntudev-k8sstable2-slow': 'ci-kubernetes-e2e-gce-ubuntu*',
-            'ci-kubernetes-e2e-gce-ubuntudev2-k8sdev-default': 'ci-kubernetes-e2e-gce-ubuntu*',
-            'ci-kubernetes-e2e-gce-ubuntudev2-k8sdev-serial': 'ci-kubernetes-e2e-gce-ubuntu*',
-            'ci-kubernetes-e2e-gce-ubuntudev2-k8sdev-slow': 'ci-kubernetes-e2e-gce-ubuntu*',
-            'ci-kubernetes-e2e-gce-ubuntudev2-k8sbeta-default': 'ci-kubernetes-e2e-gce-ubuntu*',
-            'ci-kubernetes-e2e-gce-ubuntudev2-k8sbeta-serial': 'ci-kubernetes-e2e-gce-ubuntu*',
-            'ci-kubernetes-e2e-gce-ubuntudev2-k8sbeta-slow': 'ci-kubernetes-e2e-gce-ubuntu*',
-            'ci-kubernetes-e2e-gce-ubuntustable1-k8sdev-default': 'ci-kubernetes-e2e-gce-ubuntu*',
-            'ci-kubernetes-e2e-gce-ubuntustable1-k8sdev-serial': 'ci-kubernetes-e2e-gce-ubuntu*',
-            'ci-kubernetes-e2e-gce-ubuntustable1-k8sdev-slow': 'ci-kubernetes-e2e-gce-ubuntu*',
-            'ci-kubernetes-e2e-gce-ubuntustable1-k8sstable1-default': 'ci-kubernetes-e2e-gce-ubuntu*',
-            'ci-kubernetes-e2e-gce-ubuntustable1-k8sstable1-serial': 'ci-kubernetes-e2e-gce-ubuntu*',
-            'ci-kubernetes-e2e-gce-ubuntustable1-k8sstable1-slow': 'ci-kubernetes-e2e-gce-ubuntu*',
-            'ci-kubernetes-e2e-gce-ubuntustable1-k8sstable2-default': 'ci-kubernetes-e2e-gce-ubuntu*',
-            'ci-kubernetes-e2e-gce-ubuntustable1-k8sstable2-serial': 'ci-kubernetes-e2e-gce-ubuntu*',
-            'ci-kubernetes-e2e-gce-ubuntustable1-k8sstable2-slow': 'ci-kubernetes-e2e-gce-ubuntu*',
-            'ci-kubernetes-e2e-gke-ubuntu1-k8sdev-default': 'ci-kubernetes-e2e-gce-ubuntu*',
-            'ci-kubernetes-e2e-gke-ubuntustable1-k8sstable1-alphafeatures': 'ci-kubernetes-e2e-gke-ubuntu*',
-            'ci-kubernetes-e2e-gke-ubuntustable1-k8sstable1-autoscaling': 'ci-kubernetes-e2e-gke-ubuntu*',
-            'ci-kubernetes-e2e-gke-ubuntustable1-k8sstable1-default': 'ci-kubernetes-e2e-gke-ubuntu*',
-            'ci-kubernetes-e2e-gke-ubuntustable1-k8sstable1-flaky': 'ci-kubernetes-e2e-gke-ubuntu*',
-            'ci-kubernetes-e2e-gke-ubuntustable1-k8sstable1-ingress': 'ci-kubernetes-e2e-gke-ubuntu*',
-            'ci-kubernetes-e2e-gke-ubuntustable1-k8sstable1-reboot': 'ci-kubernetes-e2e-gke-ubuntu*',
-            'ci-kubernetes-e2e-gke-ubuntustable1-k8sstable1-serial': 'ci-kubernetes-e2e-gke-ubuntu*',
-            'ci-kubernetes-e2e-gke-ubuntustable1-k8sstable1-slow': 'ci-kubernetes-e2e-gke-ubuntu*',
-            'ci-kubernetes-e2e-gke-ubuntustable1-k8sstable1-updown': 'ci-kubernetes-e2e-gke-ubuntu*',
-            # ubuntu node image tests share the same ubuntu project
-            'ci-kubernetes-e2e-gce-ubuntu-1-6-node': 'ci-kubernetes-e2e-ubuntu-node*',
-            'ci-kubernetes-e2e-gce-ubuntu-1-7-node': 'ci-kubernetes-e2e-ubuntu-node*',
-            'ci-kubernetes-e2e-gce-ubuntu-node': 'ci-kubernetes-e2e-ubuntu-node*',
-            'ci-kubernetes-e2e-gce-ubuntu-1-6-node-serial': 'ci-kubernetes-e2e-ubuntu-node*',
-            'ci-kubernetes-e2e-gce-ubuntu-1-7-node-serial': 'ci-kubernetes-e2e-ubuntu-node*',
-            'ci-kubernetes-e2e-gce-ubuntu-node-serial': 'ci-kubernetes-e2e-ubuntu-node*',
-            'ci-kubernetes-e2enode-ubuntustable1-k8sdev-gkespec': 'ci-kubernetes-e2e-ubuntu-node*',
-            'ci-kubernetes-e2enode-ubuntudev-k8sstable1-gkespec': 'ci-kubernetes-e2e-ubuntu-node*',
-            'ci-kubernetes-e2enode-ubuntudev-k8sstable2-serial': 'ci-kubernetes-e2e-ubuntu-node*',
-            'ci-kubernetes-e2enode-ubuntudev2-k8sdev-gkespec': 'ci-kubernetes-e2e-ubuntu-node*',
-            'ci-kubernetes-e2enode-ubuntudev2-k8sdev-serial': 'ci-kubernetes-e2e-ubuntu-node*',
-            'ci-kubernetes-e2enode-ubuntudev2-k8sbeta-gkespec': 'ci-kubernetes-e2e-ubuntu-node*',
-            'ci-kubernetes-e2enode-ubuntudev2-k8sbeta-serial': 'ci-kubernetes-e2e-ubuntu-node*',
-            'ci-kubernetes-e2enode-ubuntustable1-k8sstable1-gkespec': 'ci-kubernetes-e2e-ubuntu-node*',
-            'ci-kubernetes-e2enode-ubuntudev-k8sstable2-gkespec': 'ci-kubernetes-e2e-ubuntu-node*',
-            'ci-kubernetes-e2enode-ubuntudev-k8sdev-serial': 'ci-kubernetes-e2e-ubuntu-node*',
-            'ci-kubernetes-e2enode-ubuntustable1-k8sstable2-serial': 'ci-kubernetes-e2e-ubuntu-node*',
-            'ci-kubernetes-e2enode-ubuntudev-k8sdev-gkespec': 'ci-kubernetes-e2e-ubuntu-node*',
-            'ci-kubernetes-e2enode-ubuntustable1-k8sstable2-gkespec': 'ci-kubernetes-e2e-ubuntu-node*',
-            'ci-kubernetes-e2enode-ubuntustable1-k8sdev-serial': 'ci-kubernetes-e2e-ubuntu-node*',
-            'ci-kubernetes-e2enode-ubuntustable1-k8sstable1-serial': 'ci-kubernetes-e2e-ubuntu-node*',
-            'ci-kubernetes-e2enode-ubuntudev-k8sstable1-serial': 'ci-kubernetes-e2e-ubuntu-node*',
-            # The 1.5 and 1.6 scalability jobs intentionally share projects.
-            'ci-kubernetes-e2e-gci-gce-scalability-release-1-7': 'ci-kubernetes-e2e-gci-gce-scalability-release-*',
+            'ci-kubernetes-e2enode-ubuntu1-k8sbeta-gkespec': 'ci-kubernetes-e2e-ubuntu-node*',
+            'ci-kubernetes-e2enode-ubuntu1-k8sbeta-serial': 'ci-kubernetes-e2e-ubuntu-node*',
+            'ci-kubernetes-e2enode-ubuntu1-k8sstable1-gkespec': 'ci-kubernetes-e2e-ubuntu-node*',
+            'ci-kubernetes-e2enode-ubuntu1-k8sstable1-serial': 'ci-kubernetes-e2e-ubuntu-node*',
+            'ci-kubernetes-e2enode-ubuntu1-k8sstable2-gkespec': 'ci-kubernetes-e2e-ubuntu-node*',
+            'ci-kubernetes-e2enode-ubuntu1-k8sstable2-serial': 'ci-kubernetes-e2e-ubuntu-node*',
+            'ci-kubernetes-e2enode-ubuntu1-k8sstable3-gkespec': 'ci-kubernetes-e2e-ubuntu-node*',
+            'ci-kubernetes-e2enode-ubuntu1-k8sstable3-serial': 'ci-kubernetes-e2e-ubuntu-node*',
+
+            'ci-kubernetes-e2e-gce-ubuntu1-k8sbeta-default': 'ci-kubernetes-e2e-gce-ubuntu*',
+            'ci-kubernetes-e2e-gce-ubuntu1-k8sbeta-serial': 'ci-kubernetes-e2e-gce-ubuntu*',
+            'ci-kubernetes-e2e-gce-ubuntu1-k8sbeta-slow': 'ci-kubernetes-e2e-gce-ubuntu*',
+            'ci-kubernetes-e2e-gce-ubuntu1-k8sstable1-default': 'ci-kubernetes-e2e-gce-ubuntu*',
+            'ci-kubernetes-e2e-gce-ubuntu1-k8sstable1-serial': 'ci-kubernetes-e2e-gce-ubuntu*',
+            'ci-kubernetes-e2e-gce-ubuntu1-k8sstable1-slow': 'ci-kubernetes-e2e-gce-ubuntu*',
+            'ci-kubernetes-e2e-gce-ubuntu1-k8sstable2-default': 'ci-kubernetes-e2e-gce-ubuntu*',
+            'ci-kubernetes-e2e-gce-ubuntu1-k8sstable2-serial': 'ci-kubernetes-e2e-gce-ubuntu*',
+            'ci-kubernetes-e2e-gce-ubuntu1-k8sstable2-slow': 'ci-kubernetes-e2e-gce-ubuntu*',
+            'ci-kubernetes-e2e-gce-ubuntu1-k8sstable3-default': 'ci-kubernetes-e2e-gce-ubuntu*',
+            'ci-kubernetes-e2e-gce-ubuntu1-k8sstable3-serial': 'ci-kubernetes-e2e-gce-ubuntu*',
+            'ci-kubernetes-e2e-gce-ubuntu1-k8sstable3-slow': 'ci-kubernetes-e2e-gce-ubuntu*',
+
+            'ci-kubernetes-e2enode-ubuntu2-k8sbeta-gkespec': 'ci-kubernetes-e2e-ubuntu-node*',
+            'ci-kubernetes-e2enode-ubuntu2-k8sbeta-serial': 'ci-kubernetes-e2e-ubuntu-node*',
+            'ci-kubernetes-e2enode-ubuntu2-k8sstable1-gkespec': 'ci-kubernetes-e2e-ubuntu-node*',
+            'ci-kubernetes-e2enode-ubuntu2-k8sstable1-serial': 'ci-kubernetes-e2e-ubuntu-node*',
+            'ci-kubernetes-e2enode-ubuntu2-k8sstable2-gkespec': 'ci-kubernetes-e2e-ubuntu-node*',
+            'ci-kubernetes-e2enode-ubuntu2-k8sstable2-serial': 'ci-kubernetes-e2e-ubuntu-node*',
+            'ci-kubernetes-e2enode-ubuntu2-k8sstable3-gkespec': 'ci-kubernetes-e2e-ubuntu-node*',
+            'ci-kubernetes-e2enode-ubuntu2-k8sstable3-serial': 'ci-kubernetes-e2e-ubuntu-node*',
+
+            'ci-kubernetes-e2e-gce-ubuntu2-k8sbeta-default': 'ci-kubernetes-e2e-gce-ubuntu*',
+            'ci-kubernetes-e2e-gce-ubuntu2-k8sbeta-serial': 'ci-kubernetes-e2e-gce-ubuntu*',
+            'ci-kubernetes-e2e-gce-ubuntu2-k8sbeta-slow': 'ci-kubernetes-e2e-gce-ubuntu*',
+            'ci-kubernetes-e2e-gce-ubuntu2-k8sstable1-default': 'ci-kubernetes-e2e-gce-ubuntu*',
+            'ci-kubernetes-e2e-gce-ubuntu2-k8sstable1-serial': 'ci-kubernetes-e2e-gce-ubuntu*',
+            'ci-kubernetes-e2e-gce-ubuntu2-k8sstable1-slow': 'ci-kubernetes-e2e-gce-ubuntu*',
+            'ci-kubernetes-e2e-gce-ubuntu2-k8sstable2-default': 'ci-kubernetes-e2e-gce-ubuntu*',
+            'ci-kubernetes-e2e-gce-ubuntu2-k8sstable2-serial': 'ci-kubernetes-e2e-gce-ubuntu*',
+            'ci-kubernetes-e2e-gce-ubuntu2-k8sstable2-slow': 'ci-kubernetes-e2e-gce-ubuntu*',
+            'ci-kubernetes-e2e-gce-ubuntu2-k8sstable3-default': 'ci-kubernetes-e2e-gce-ubuntu*',
+            'ci-kubernetes-e2e-gce-ubuntu2-k8sstable3-serial': 'ci-kubernetes-e2e-gce-ubuntu*',
+            'ci-kubernetes-e2e-gce-ubuntu2-k8sstable3-slow': 'ci-kubernetes-e2e-gce-ubuntu*',
+
+            # The release branch scalability jobs intentionally share projects.
+            'ci-kubernetes-e2e-gci-gce-scalability-stable2': 'ci-kubernetes-e2e-gci-gce-scalability-release-*',
             'ci-kubernetes-e2e-gci-gce-scalability-stable1': 'ci-kubernetes-e2e-gci-gce-scalability-release-*',
             'ci-kubernetes-e2e-gce-scalability': 'ci-kubernetes-e2e-gce-scalability-*',
             'ci-kubernetes-e2e-gce-scalability-canary': 'ci-kubernetes-e2e-gce-scalability-*',
@@ -559,6 +542,7 @@ class JobTest(unittest.TestCase):
             'ci-kubernetes-e2e-gce-scale-performance': 'ci-kubernetes-scale-*',
             'ci-kubernetes-e2e-gke-large-correctness': 'ci-kubernetes-scale-*',
             'ci-kubernetes-e2e-gke-large-performance': 'ci-kubernetes-scale-*',
+            'ci-kubernetes-e2e-gke-large-performance-regional': 'ci-kubernetes-scale-*',
             'ci-kubernetes-e2e-gke-large-deploy': 'ci-kubernetes-scale-*',
             'ci-kubernetes-e2e-gke-large-teardown': 'ci-kubernetes-scale-*',
             'ci-kubernetes-e2e-gke-scale-correctness': 'ci-kubernetes-scale-*',
@@ -583,6 +567,7 @@ class JobTest(unittest.TestCase):
             'ci-cri-containerd-node-e2e-serial': 'cri-containerd-node-e2e-*',
             'ci-cri-containerd-node-e2e-flaky': 'cri-containerd-node-e2e-*',
             'ci-cri-containerd-node-e2e-benchmark': 'cri-containerd-node-e2e-*',
+            'ci-containerd-node-e2e': 'cri-containerd-node-e2e-*',
             # ci-cri-containerd-e2e-gce-stackdriver intentionally share projects with
             # ci-kubernetes-e2e-gce-stackdriver.
             'ci-kubernetes-e2e-gce-stackdriver': 'k8s-jkns-e2e-gce-stackdriver',
@@ -598,28 +583,12 @@ class JobTest(unittest.TestCase):
             'pull-kubernetes-kubemark-e2e-gce-canary':'k8s-jkns-pr-kubemark',
             'pull-kubernetes-kubemark-e2e-gce':'k8s-jkns-pr-kubemark',
         }
-        for soak_prefix in [
-                'ci-kubernetes-soak-gce-1.5',
-                'ci-kubernetes-soak-gce-1-7',
-                'ci-kubernetes-soak-gce-1.6',
-                'ci-kubernetes-soak-gce-2',
-                'ci-kubernetes-soak-gce',
-                'ci-kubernetes-soak-gci-gce-1.5',
-                'ci-kubernetes-soak-gce-gci',
-                'ci-kubernetes-soak-gke-gci',
-                'ci-kubernetes-soak-gci-gce-stable1',
-                'ci-kubernetes-soak-gci-gce-1.6',
-                'ci-kubernetes-soak-gci-gce-1-7',
-                'ci-kubernetes-soak-cos-docker-validation',
-                'ci-kubernetes-soak-gke',
-        ]:
-            allowed_list['%s-deploy' % soak_prefix] = '%s-*' % soak_prefix
-            allowed_list['%s-test' % soak_prefix] = '%s-*' % soak_prefix
         # pylint: enable=line-too-long
         projects = collections.defaultdict(set)
         boskos = []
-        with open(config_sort.test_infra('boskos/resources.json')) as fp:
-            for rtype in json.loads(fp.read()):
+        with open(config_sort.test_infra('boskos/resources.yaml')) as fp:
+            boskos_config = yaml.safe_load(fp)
+            for rtype in boskos_config['resources']:
                 if 'project' in rtype['type']:
                     for name in rtype['names']:
                         boskos.append(name)
@@ -636,7 +605,7 @@ class JobTest(unittest.TestCase):
                         project = arg.split('=', 1)[1]
                 if project:
                     if project in boskos:
-                        self.fail('Project %s cannot be in boskos/resources.json!' % project)
+                        self.fail('Project %s cannot be in boskos/resources.yaml!' % project)
                     projects[project].add(allowed_list.get(job, job))
 
         duplicates = [(p, j) for p, j in projects.items() if len(j) > 1]

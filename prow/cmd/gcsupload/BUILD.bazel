@@ -6,8 +6,11 @@ go_library(
     importpath = "k8s.io/test-infra/prow/cmd/gcsupload",
     visibility = ["//visibility:private"],
     deps = [
+        "//prow/gcsupload:go_default_library",
         "//prow/logrusutil:go_default_library",
+        "//prow/pod-utils/downwardapi:go_default_library",
         "//prow/pod-utils/gcs:go_default_library",
+        "//prow/pod-utils/options:go_default_library",
         "//vendor/github.com/sirupsen/logrus:go_default_library",
     ],
 )
@@ -15,6 +18,7 @@ go_library(
 go_binary(
     name = "gcsupload",
     embed = [":go_default_library"],
+    pure = "on",
     visibility = ["//visibility:public"],
 )
 
