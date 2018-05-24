@@ -9,6 +9,7 @@ triggers:
   - jetstack/test-infra
   - jetstack/navigator
   - jetstack/tarmak
+  - jetstack/okta-kubectl-auth
   - jetstack/puppet-module-aws_ebs
   - jetstack/puppet-module-calico
   - jetstack/puppet-module-etcd
@@ -147,6 +148,25 @@ plugins:
   - lgtm
   - approve
   - milestonestatus
+  - size
+  - yuks
+  - wip
+  - shrug
+
+  jetstack/okta-kubectl-auth:
+  - docs-no-retest
+  - trigger
+  - release-note
+  - assign
+  - blunderbuss
+  - lifecycle
+  - reopen
+  - golint
+  - heart
+  - hold
+  - label
+  - lgtm
+  - approve
   - size
   - yuks
   - wip
