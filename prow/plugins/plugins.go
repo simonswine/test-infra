@@ -38,7 +38,9 @@ import (
 	"k8s.io/test-infra/prow/slack"
 )
 
-const defaultBlunderbussReviewerCount = 2
+const (
+	defaultBlunderbussReviewerCount = 2
+)
 
 var (
 	pluginHelp                 = map[string]HelpProvider{}
@@ -120,7 +122,7 @@ type PluginClient struct {
 	KubeClient   *kube.Client
 	GitClient    *git.Client
 	SlackClient  *slack.Client
-	OwnersClient *repoowners.Client
+	OwnersClient repoowners.Interface
 
 	CommentPruner *commentpruner.EventClient
 
@@ -168,6 +170,7 @@ type Configuration struct {
 	RequireSIG    RequireSIG    `json:"requiresig,omitempty"`
 	SigMention    SigMention    `json:"sigmention,omitempty"`
 	Cat           Cat           `json:"cat,omitempty"`
+	Label         *Label        `json:"label,omitempty"`
 }
 
 // ExternalPlugin holds configuration for registering an external
@@ -187,8 +190,11 @@ type ExternalPlugin struct {
 type Blunderbuss struct {
 	// ReviewerCount is the minimum number of reviewers to request
 	// reviews from. Defaults to requesting reviews from 2 reviewers
-	// if none of the given options is set.
+	// if FileWeightCount is not set.
 	ReviewerCount *int `json:"request_count,omitempty"`
+	// MaxReviewerCount is the maximum number of reviewers to request
+	// reviews from. Defaults to 0 meaning no limit.
+	MaxReviewerCount int `json:"max_request_count,omitempty"`
 	// FileWeightCount is the maximum number of reviewers to request
 	// reviews from. Selects reviewers based on file weighting.
 	// This and request_count are mutually exclusive options.
@@ -211,6 +217,11 @@ type Owners struct {
 		---
 	*/
 	MDYAMLRepos []string `json:"mdyamlrepos,omitempty"`
+
+	// SkipCollaborators disables collaborator cross-checks and forces both
+	// the approve and lgtm plugins to use solely OWNERS files for access
+	// control in the provided repos.
+	SkipCollaborators []string `json:"skip_collaborators,omitempty"`
 }
 
 func (pa *PluginAgent) MDYAMLEnabled(org, repo string) bool {
@@ -221,7 +232,16 @@ func (pa *PluginAgent) MDYAMLEnabled(org, repo string) bool {
 		}
 	}
 	return false
+}
 
+func (pa *PluginAgent) SkipCollaborators(org, repo string) bool {
+	full := fmt.Sprintf("%s/%s", org, repo)
+	for _, elem := range pa.Config().Owners.SkipCollaborators {
+		if elem == org || elem == full {
+			return true
+		}
+	}
+	return false
 }
 
 // RequireSIG specifies configuration for the require-sig plugin.
@@ -296,11 +316,23 @@ type Approve struct {
 	// ImplicitSelfApprove indicates if authors implicitly approve their own PRs
 	// in the specified repos.
 	ImplicitSelfApprove bool `json:"implicit_self_approve,omitempty"`
+	// LgtmActsAsApprove indicates that the lgtm command should be used to
+	// indicate approval
+	LgtmActsAsApprove bool `json:"lgtm_acts_as_approve,omitempty"`
+	// ReviewActsAsApprove indicates that GitHub review state should be used to
+	// indicate approval.
+	ReviewActsAsApprove bool `json:"review_acts_as_approve,omitempty"`
 }
 
 type Cat struct {
 	// Path to file containing an api key for thecatapi.com
 	KeyPath string `json:"key_path,omitempty"`
+}
+
+type Label struct {
+	// AdditionalLabels is a set of additional labels enabled for use
+	// on top of the existing "kind/*", "priority/*", and "area/*" labels.
+	AdditionalLabels []string `json:"additional_labels"`
 }
 
 type Trigger struct {
@@ -337,12 +369,21 @@ type Slack struct {
 	MergeWarnings   []MergeWarning `json:"mergewarnings,omitempty"`
 }
 
+// ConfigMapSpec contains configuration options for the configMap being updated by the ConfigUpdater plugin
+type ConfigMapSpec struct {
+	// Name of ConfigMap
+	Name string `json:"name"`
+	// Namespace in which the configMap needs to be deployed. If no namespace is specified
+	// it will be deployed to the ProwJobNamespace.
+	Namespace string `json:"namespace,omitempty"`
+}
+
 type ConfigUpdater struct {
-	// A map of filename => configmap name.
+	// A map of filename => ConfigMapSpec.
 	// Whenever a commit changes filename, prow will update the corresponding configmap.
-	// map[string]string{ "/my/path.yaml": "foo" } will result in
-	// replacing the foo configmap whenever path.yaml changes
-	Maps map[string]string `json:"maps,omitempty"`
+	// map[string]ConfigMapSpec{ "/my/path.yaml": {Name: "foo", Namespace: "otherNamespace" }}
+	// will result in replacing the foo configmap whenever path.yaml changes
+	Maps map[string]ConfigMapSpec `json:"maps,omitempty"`
 	// The location of the prow configuration file inside the repository
 	// where the config-updater plugin is enabled. This needs to be relative
 	// to the root of the repository, eg. "prow/config.yaml" will match
@@ -397,9 +438,13 @@ func (c *Configuration) setDefaults() {
 		} else {
 			logrus.Warnf(`plugin_file is deprecated, please switch to "maps": {"%s": "plugins"} before July 2018`, pf)
 		}
-		c.ConfigUpdater.Maps = map[string]string{
-			cf: "config",
-			pf: "plugins",
+		c.ConfigUpdater.Maps = map[string]ConfigMapSpec{
+			cf: {
+				Name: "config",
+			},
+			pf: {
+				Name: "plugins",
+			},
 		}
 	}
 	for repo, plugins := range c.ExternalPlugins {

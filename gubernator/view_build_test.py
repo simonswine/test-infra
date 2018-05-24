@@ -108,10 +108,24 @@ class ParseJunitTest(unittest.TestCase):
             [(failures[0][0], 0.0, 'not well-formed (invalid token): line 1, column 0',
               'junit_filename.xml', '')])
 
+    def test_empty_output(self):
+        results = self.parse("""
+            <testsuites>
+                <testsuite name="k8s.io/suite">
+                    <testcase name="TestBad" time="0.1">
+                        <failure>something bad</failure>
+                        <system-out></system-out>
+                    </testcase>
+                </testsuite>
+            </testsuites>""")
+        self.assertEqual(results['failed'], [(
+            'k8s.io/suite TestBad', 0.1, 'something bad', "junit_filename.xml", "")])
+
 class BuildTest(main_test.TestBase):
     # pylint: disable=too-many-public-methods
 
-    BUILD_DIR = '/kubernetes-jenkins/logs/somejob/1234/'
+    JOB_DIR = '/kubernetes-jenkins/logs/somejob/'
+    BUILD_DIR = JOB_DIR + '1234/'
 
     def setUp(self):
         self.init_stubs()
@@ -174,7 +188,7 @@ class BuildTest(main_test.TestBase):
             {
                 'version': 'v1+56',
                 'timestamp': 1406535800,
-                'jenkins-node': 'agent-light-7',
+                'node': 'agent-light-7',
                 'pull': 'master:1234,35:abcd,72814',
                 'metadata': {
                     'master-version': 'm12'
@@ -278,6 +292,9 @@ class BuildTest(main_test.TestBase):
         check(
             'kubernetes-jenkins/pr-logs/pull/google_cadvisor/296',
             ('296', 'google/cadvisor/', 'google/cadvisor'))
+        check(
+            'kj/pr-logs/pull/kubernetes-sigs_testing_frameworks/49',
+            ('49', 'kubernetes-sigs/testing_frameworks/', 'kubernetes-sigs/testing_frameworks'))
 
     def test_github_commit_links(self):
         def check(build_dir, result):
@@ -317,6 +334,16 @@ class BuildTest(main_test.TestBase):
         self.assertIn('an update on testing', response)
         self.assertIn('org/repo/issues/123', response)
 
+    def test_build_list_xref(self):
+        """Test that builds show issues that reference them."""
+        github.models.GHIssueDigest.make(
+            'org/repo', 123, False, True, [],
+            {'xrefs': [self.BUILD_DIR[:-1]], 'title': 'an update on testing'}, None).put()
+        response = app.get('/builds' + self.JOB_DIR)
+        self.assertIn('#123', response)
+        self.assertIn('an update on testing', response)
+        self.assertIn('org/repo/issues/123', response)
+
     def test_cache(self):
         """Test that caching works at some level."""
         response = self.get_build_page()
@@ -345,12 +372,12 @@ class BuildTest(main_test.TestBase):
 
         view_target = job_dir if not indirect else job_dir + 'directory/'
 
-        builds = view_build.build_list(view_target, None)
+        builds, _ = view_build.build_list(view_target, None)
         self.assertEqual(builds,
                          [(str(n), '%s%s' % (job_dir, n), sta_result, fin_result)
                           for n in range(119, 79, -1)])
         # test that ?before works
-        builds = view_build.build_list(view_target, '80')
+        builds, _ = view_build.build_list(view_target, '80')
         self.assertEqual(builds,
                          [(str(n), '%s%s' % (job_dir, n), sta_result, fin_result)
                           for n in range(79, 39, -1)])

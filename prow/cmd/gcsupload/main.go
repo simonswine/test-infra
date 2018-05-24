@@ -1,5 +1,5 @@
 /*
-Copyright 2017 The Kubernetes Authors.
+Copyright 2018 The Kubernetes Authors.
 
 Licensed under the Apache License, Version 2.0 (the "License");
 you may not use this file except in compliance with the License.
@@ -19,20 +19,20 @@ limitations under the License.
 package main
 
 import (
-	"flag"
-	"os"
-
 	"github.com/sirupsen/logrus"
+	"k8s.io/test-infra/prow/pod-utils/downwardapi"
+	"k8s.io/test-infra/prow/pod-utils/options"
 
+	"k8s.io/test-infra/prow/gcsupload"
 	"k8s.io/test-infra/prow/logrusutil"
 	"k8s.io/test-infra/prow/pod-utils/gcs"
 )
 
 func main() {
-	fs := flag.NewFlagSet(os.Args[0], flag.ExitOnError)
-	o := gcs.BindOptions(fs)
-	fs.Parse(os.Args[1:])
-	o.Complete(fs.Args())
+	o := gcsupload.NewOptions()
+	if err := options.Load(o); err != nil {
+		logrus.Fatalf("Could not resolve options: %v", err)
+	}
 
 	if err := o.Validate(); err != nil {
 		logrus.Fatalf("Invalid options: %v", err)
@@ -42,7 +42,12 @@ func main() {
 		logrusutil.NewDefaultFieldsFormatter(nil, logrus.Fields{"component": "gcsupload"}),
 	)
 
-	if err := o.Run(map[string]gcs.UploadFunc{}); err != nil {
+	spec, err := downwardapi.ResolveSpecFromEnv()
+	if err != nil {
+		logrus.WithError(err).Fatal("Could not resolve job spec")
+	}
+
+	if err := o.Run(spec, map[string]gcs.UploadFunc{}); err != nil {
 		logrus.WithError(err).Fatal("Failed to upload to GCS")
 	}
 }

@@ -19,7 +19,6 @@ package main
 import (
 	"bytes"
 	"fmt"
-	"io"
 	"io/ioutil"
 	"net/http"
 	"regexp"
@@ -73,7 +72,6 @@ type serviceClusterClient interface {
 
 type podLogClient interface {
 	GetLog(pod string) ([]byte, error)
-	GetLogStream(pod string, options map[string]string) (io.ReadCloser, error)
 }
 
 type configAgent interface {
@@ -158,27 +156,6 @@ func (ja *JobAgent) GetJobLog(job, id string) ([]byte, error) {
 	return nil, fmt.Errorf("cannot get logs for prowjob %q with agent %q: the agent is missing from the prow config file", j.ObjectMeta.Name, j.Spec.Agent)
 }
 
-func (ja *JobAgent) GetJobLogStream(job, id string, options map[string]string) (io.ReadCloser, error) {
-	var j kube.ProwJob
-	ja.mut.Lock()
-	idMap, ok := ja.jobsIDMap[job]
-	if ok {
-		j, ok = idMap[id]
-	}
-	ja.mut.Unlock()
-	if !ok {
-		return nil, fmt.Errorf("no such job found: %s (id: %s)", job, id)
-	}
-	if j.Spec.Agent == kube.KubernetesAgent {
-		client, ok := ja.pkcs[j.ClusterAlias()]
-		if !ok {
-			return nil, fmt.Errorf("cannot get logs for prowjob %q with agent %q: unknown cluster alias %q", j.ObjectMeta.Name, j.Spec.Agent, j.ClusterAlias())
-		}
-		return client.GetLogStream(j.Status.PodName, options)
-	}
-	return nil, fmt.Errorf("streaming is available for kubernetes clients only, prowjob %q is running under %s.", j.ObjectMeta.Name, j.Spec.Agent)
-}
-
 func (ja *JobAgent) tryUpdate() {
 	if err := ja.update(); err != nil {
 		logrus.WithError(err).Warning("Error updating job list.")
@@ -207,10 +184,6 @@ func (ja *JobAgent) update() error {
 		buildID := j.Status.BuildID
 		nj := Job{
 			Type:    string(j.Spec.Type),
-			Repo:    fmt.Sprintf("%s/%s", j.Spec.Refs.Org, j.Spec.Refs.Repo),
-			Refs:    j.Spec.Refs.String(),
-			BaseRef: j.Spec.Refs.BaseRef,
-			BaseSHA: j.Spec.Refs.BaseSHA,
 			Job:     j.Spec.Job,
 			Context: j.Spec.Context,
 			Agent:   j.Spec.Agent,
@@ -232,10 +205,16 @@ func (ja *JobAgent) update() error {
 			duration -= duration % time.Second // strip fractional seconds
 			nj.Duration = duration.String()
 		}
-		if len(j.Spec.Refs.Pulls) == 1 {
-			nj.Number = j.Spec.Refs.Pulls[0].Number
-			nj.Author = j.Spec.Refs.Pulls[0].Author
-			nj.PullSHA = j.Spec.Refs.Pulls[0].SHA
+		if j.Spec.Refs != nil {
+			nj.Repo = fmt.Sprintf("%s/%s", j.Spec.Refs.Org, j.Spec.Refs.Repo)
+			nj.Refs = j.Spec.Refs.String()
+			nj.BaseRef = j.Spec.Refs.BaseRef
+			nj.BaseSHA = j.Spec.Refs.BaseSHA
+			if len(j.Spec.Refs.Pulls) == 1 {
+				nj.Number = j.Spec.Refs.Pulls[0].Number
+				nj.Author = j.Spec.Refs.Pulls[0].Author
+				nj.PullSHA = j.Spec.Refs.Pulls[0].SHA
+			}
 		}
 		njs = append(njs, nj)
 		if nj.PodName != "" {

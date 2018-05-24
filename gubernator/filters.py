@@ -19,6 +19,7 @@ import os
 import re
 import time
 import urllib
+import urlparse
 
 import jinja2
 
@@ -86,6 +87,16 @@ def do_github_commit_link(commit, repo):
     return jinja2.Markup('<a href="%s">%s</a>' % (commit_url, commit[:8]))
 
 
+def do_maybe_linkify(inp):
+    try:
+        if urlparse.urlparse(inp).scheme in ('http', 'https'):
+            inp = unicode(jinja2.escape(inp))
+            return jinja2.Markup('<a href="%s">%s</a>' % (inp, inp))
+    except (AttributeError, TypeError):
+        pass
+    return inp
+
+
 def do_testcmd(name):
     if name.startswith('k8s.io/'):
         try:
@@ -98,6 +109,8 @@ def do_testcmd(name):
         return ''
     elif name.startswith('//'):
         return 'bazel test %s' % name
+    elif name.startswith('verify '):
+        return 'make verify WHAT=%s' % name.split(' ')[1]
     else:
         name = re.sub(r'^\[k8s\.io\] ', '', name)
         name_escaped = re.escape(name).replace('\\ ', '\\s')
@@ -148,11 +161,18 @@ def do_classify_size(payload):
     return size
 
 
+def has_lgtm_without_missing_approval(payload, user):
+    labels = payload.get('labels', []) or []
+    return 'lgtm' in labels and not (
+        user in payload.get('approvers', [])
+        and 'approved' not in labels)
+
+
 def do_render_status(payload, user):
     states = set()
 
     text = 'Pending'
-    if 'lgtm' in payload.get('labels', []):
+    if has_lgtm_without_missing_approval(payload, user):
         text = 'LGTM'
     elif user in payload.get('attn', {}):
         text = payload['attn'][user].title()
@@ -165,6 +185,9 @@ def do_render_status(payload, user):
                 # Don't show overall status as pending when Submit
                 # won't continue without LGTM.
                 continue
+        if ctx == 'tide' and state == 'pending':
+            # Ignore pending tide statuses for now.
+            continue
         if ctx == 'code-review/reviewable' and state == 'pending':
             # Reviewable isn't a CI, so we don't care if it's pending.
             # Its dashboard might replace all of this eventually.
@@ -172,18 +195,22 @@ def do_render_status(payload, user):
         states.add(state)
 
     icon = ''
+    title = ''
     if 'failure' in states:
         icon = 'x'
         state = 'failure'
+        title = 'failing tests'
     elif 'pending' in states:
         icon = 'primitive-dot'
         state = 'pending'
+        title = 'pending tests'
     elif 'success' in states:
         icon = 'check'
         state = 'success'
+        title = 'tests passing'
     if icon:
-        icon = '<span class="text-%s octicon octicon-%s"></span>' % (
-            state, icon)
+        icon = '<span class="text-%s octicon octicon-%s" title="%s"></span>' % (
+            state, icon, title)
     return jinja2.Markup('%s%s' % (icon, text))
 
 

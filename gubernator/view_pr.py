@@ -78,6 +78,12 @@ def org_repo(path, default_org, default_repo):
     return org, repo
 
 
+def get_pull_prefix(config, org):
+    if org in config['external_services']:
+        return config['external_services'][org]['gcs_pull_prefix']
+    return config['default_external_services']['gcs_pull_prefix']
+
+
 class PRHandler(view_base.BaseHandler):
     """Show a list of test runs for a PR."""
     def get(self, path, pr):
@@ -87,7 +93,7 @@ class PRHandler(view_base.BaseHandler):
             default_repo=self.app.config['default_repo'],
         )
         path = pr_path(org=org, repo=repo, pr=pr,
-            pull_prefix=self.app.config['external_services'][org]['gcs_pull_prefix'],
+            pull_prefix=get_pull_prefix(self.app.config, org),
             default_org=self.app.config['default_org'],
             default_repo=self.app.config['default_repo'],
         )
@@ -183,19 +189,30 @@ class PRDashboard(view_base.BaseHandler):
                     keys = ['repo', 'number'] + list(obj._values)
                     return {k: getattr(obj, k) for k in keys}
                 raise TypeError
-            self.response.write(json.dumps(prs, sort_keys=True, default=serial))
+            self.response.write(json.dumps(prs, sort_keys=True, default=serial, indent=True))
         elif fmt == 'html':
             if user:
                 user = InsensitiveString(user)
                 def acked(p):
-                    if 'lgtm' in p.payload.get('labels', {}):
-                        return True  # LGTM is an implicit Ack
+                    if filters.has_lgtm_without_missing_approval(p, user):
+                        # LGTM is an implicit Ack (suppress from incoming)...
+                        # if it doesn't also need approval
+                        return True
                     if acks is None:
                         return False
                     return filters.do_get_latest(p.payload, user) <= acks.get(p.key.id(), 0)
+                def needs_attention(p):
+                    labels = p.payload.get('labels', {})
+                    for u, reason in p.payload['attn'].iteritems():
+                        if user == u:  # case insensitive compare
+                            if acked(p):
+                                continue  # hide acked PRs
+                            if reason == 'needs approval' and 'lgtm' not in labels:
+                                continue  # hide PRs that need approval but haven't been LGTMed yet
+                            return True
+                    return False
                 cats = [
-                    ('Needs Attention', lambda p: any(user == u for u in p.payload['attn'])
-                                                  and not acked(p), ''),
+                    ('Needs Attention', needs_attention, ''),
                     ('Approvable', lambda p: user in p.payload.get('approvers', []),
                      'is:open is:pr ("additional approvers: {0}" ' +
                      'OR "additional approver: {0}")'.format(user)),
@@ -246,5 +263,5 @@ class PRBuildLogHandler(view_base.BaseHandler):
             default_repo=self.app.config['default_repo'],
         )
         self.redirect('https://storage.googleapis.com/%s/%s' % (
-            self.app.config['external_services'][org]['gcs_pull_prefix'], path
+            get_pull_prefix(self.app.config, org), path
         ))

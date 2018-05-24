@@ -50,7 +50,7 @@ def parse_project(path):
     return None
 
 
-def clean_project(project, hours=24, dryrun=False):
+def clean_project(project, hours=24, dryrun=False, ratelimit=None):
     """Execute janitor for target GCP project """
     # Multiple jobs can share the same project, woooo
     if project in CHECKED:
@@ -61,6 +61,8 @@ def clean_project(project, hours=24, dryrun=False):
     cmd.append('--hour=%d' % hours)
     if dryrun:
         cmd.append('--dryrun')
+    if ratelimit:
+        cmd.append('--ratelimit=%d' % ratelimit)
 
     try:
         check(*cmd)
@@ -94,11 +96,14 @@ PR_PROJECTS = {
     'k8s-gke-gpu-pr': 3,
 }
 
-def check_pr_jobs():
-    """Handle PR jobs"""
-    for project, expire in PR_PROJECTS.iteritems():
-        clean_project(project, hours=expire)
+SCALE_PROJECT = {
+    'k8s-presubmit-scale': 3,
+}
 
+def check_predefine_jobs(jobs, ratelimit):
+    """Handle predefined jobs"""
+    for project, expire in jobs.iteritems():
+        clean_project(project, hours=expire, ratelimit=ratelimit)
 
 def check_ci_jobs():
     """Handle CI jobs"""
@@ -121,7 +126,7 @@ def check_ci_jobs():
             if any(b in project for b in BLACKLIST):
                 print >>sys.stderr, 'Project %r is blacklisted in ci-janitor' % project
                 continue
-            if project in PR_PROJECTS:
+            if project in PR_PROJECTS or project in SCALE_PROJECT:
                 continue # CI janitor skips all PR jobs
             found = project
         if found:
@@ -133,10 +138,12 @@ def check_ci_jobs():
     clean_project('gke-e2e-createdelete')
 
 
-def main(mode):
+def main(mode, ratelimit):
     """Run janitor for each project."""
     if mode == 'pr':
-        check_pr_jobs()
+        check_predefine_jobs(PR_PROJECTS, ratelimit)
+    elif mode == 'scale':
+        check_predefine_jobs(SCALE_PROJECT, ratelimit)
     else:
         check_ci_jobs()
 
@@ -153,7 +160,10 @@ if __name__ == '__main__':
     FAILED = []
     PARSER = argparse.ArgumentParser()
     PARSER.add_argument(
-        '--mode', default='ci', choices=['ci', 'pr'],
+        '--mode', default='ci', choices=['ci', 'pr', 'scale'],
         help='Which type of projects to clear')
+    PARSER.add_argument(
+        '--ratelimit', type=int,
+        help='Max number of resources to clear in one gcloud delete call (passed into janitor.py)')
     ARGS = PARSER.parse_args()
-    main(ARGS.mode)
+    main(ARGS.mode, ARGS.ratelimit)

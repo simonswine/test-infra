@@ -31,6 +31,7 @@ import (
 	"k8s.io/test-infra/prow/github"
 	"k8s.io/test-infra/prow/kube"
 	"k8s.io/test-infra/prow/pjutil"
+	"k8s.io/test-infra/prow/pod-utils/decorate"
 	reportlib "k8s.io/test-infra/prow/report"
 )
 
@@ -216,10 +217,12 @@ func (c *Controller) Sync() error {
 	}
 
 	var reportErrs []error
-	reportTemplate := c.ca.Config().Plank.ReportTemplate
-	for report := range reportCh {
-		if err := reportlib.Report(c.ghc, reportTemplate, report); err != nil {
-			reportErrs = append(reportErrs, err)
+	if c.ghc != nil {
+		reportTemplate := c.ca.Config().Plank.ReportTemplate
+		for report := range reportCh {
+			if err := reportlib.Report(c.ghc, reportTemplate, report); err != nil {
+				reportErrs = append(reportErrs, err)
+			}
 		}
 	}
 
@@ -358,7 +361,7 @@ func (c *Controller) syncPendingJob(pj kube.ProwJob, pm map[string]kube.Pod, rep
 			pj.Status.Description = "Job succeeded."
 			for _, nj := range pj.Spec.RunAfterSuccess {
 				child := pjutil.NewProwJob(nj, pj.ObjectMeta.Labels)
-				if !c.RunAfterSuccessCanRun(&pj, &child, c.ca, c.ghc) {
+				if c.ghc != nil && !c.RunAfterSuccessCanRun(&pj, &child, c.ca, c.ghc) {
 					continue
 				}
 				if _, err := c.kc.CreateProwJob(pjutil.NewProwJob(nj, pj.ObjectMeta.Labels)); err != nil {
@@ -404,9 +407,10 @@ func (c *Controller) syncPendingJob(pj kube.ProwJob, pm map[string]kube.Pod, rep
 
 	var b bytes.Buffer
 	if err := c.ca.Config().Plank.JobURLTemplate.Execute(&b, &pj); err != nil {
-		return fmt.Errorf("error executing URL template: %v", err)
+		c.log.Errorf("error executing URL template: %v", err)
+	} else {
+		pj.Status.URL = b.String()
 	}
-	pj.Status.URL = b.String()
 	reports <- pj
 	if prevState != pj.Status.State {
 		c.log.WithFields(pjutil.ProwJobFields(&pj)).
@@ -458,9 +462,10 @@ func (c *Controller) syncTriggeredJob(pj kube.ProwJob, pm map[string]kube.Pod, r
 		pj.Status.Description = "Job triggered."
 		var b bytes.Buffer
 		if err := c.ca.Config().Plank.JobURLTemplate.Execute(&b, &pj); err != nil {
-			return fmt.Errorf("error executing URL template: %v", err)
+			c.log.Errorf("error executing URL template: %v", err)
+		} else {
+			pj.Status.URL = b.String()
 		}
-		pj.Status.URL = b.String()
 	}
 	reports <- pj
 	if prevState != pj.Status.State {
@@ -480,7 +485,7 @@ func (c *Controller) startPod(pj kube.ProwJob) (string, string, error) {
 		return "", "", fmt.Errorf("error getting build ID: %v", err)
 	}
 
-	pod, err := pjutil.ProwJobToPod(pj, buildID)
+	pod, err := decorate.ProwJobToPod(pj, buildID)
 	if err != nil {
 		return "", "", err
 	}

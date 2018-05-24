@@ -46,6 +46,8 @@ class MakeJsonTest(unittest.TestCase):
                 'tests_failed': 0,
                 'tests_run': 0,
             }
+            if finish:
+                expected['passed'] = kwargs.get('result') == 'SUCCESS'
             expected.update(kwargs)
             row = make_json.row_for_build(path, start, finish, results)
             self.assertEqual(row, expected)
@@ -60,6 +62,14 @@ class MakeJsonTest(unittest.TestCase):
                job='J', number=123,
                started=10, finished=15, elapsed=5,
                version='v1.2.3', result='SUCCESS', executor='agent-34',
+              )
+        expect(path,
+               {'timestamp': 10},
+               {'timestamp': 15, 'passed': True},
+               [],
+               job='J', number=123,
+               started=10, finished=15, elapsed=5,
+               result='SUCCESS',
               )
         expect(path, None,
                {'timestamp': 15, 'result': 'FAILURE',
@@ -79,11 +89,6 @@ class MakeJsonTest(unittest.TestCase):
                      {'name': 't2', 'time': 2.0}])
 
     def test_main(self):
-        # these tests look for dissallowed substrings in the json, so we guarantee
-        # a fixed timestamp that will not produce them :shrug:
-        # https://github.com/kubernetes/test-infra/issues/4825
-        time.time = lambda: 1512507930.230854
-
         now = time.time()
         last_month = now - (60 * 60 * 24 * 30)
         junits = ['<testsuite><testcase name="t1" time="3.0"></testcase></testsuite>']
@@ -116,7 +121,9 @@ class MakeJsonTest(unittest.TestCase):
             for needle in needles:
                 self.assertIn(needle, result)
             for needle in negneedles:
-                self.assertNotIn(needle, result)
+                # Only match negative needles in the middle of a word, to avoid
+                # failures on timestamps that happen to contain a short number.
+                self.assertNotRegexpMatches(result, r'\b%s\b' % needle)
 
         add_build('some-job/123', last_month, last_month + 10, 'SUCCESS', junits)
         add_build('some-job/456', now - 10, now, 'FAILURE', junits)

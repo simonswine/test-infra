@@ -48,8 +48,10 @@ func TestLabel(t *testing.T) {
 		name                  string
 		body                  string
 		commenter             string
+		extraLabels           []string
 		expectedNewLabels     []string
 		expectedRemovedLabels []string
+		expectedBotComment    bool
 		repoLabels            []string
 		issueLabels           []string
 	}
@@ -105,6 +107,15 @@ func TestLabel(t *testing.T) {
 			repoLabels:            []string{"area/infra", "priority/critical", "kind/bug"},
 			issueLabels:           []string{},
 			expectedNewLabels:     formatLabels("kind/bug"),
+			expectedRemovedLabels: []string{},
+			commenter:             orgMember,
+		},
+		{
+			name:                  "Add Single Triage Label",
+			body:                  "/triage needs-information",
+			repoLabels:            []string{"area/infra", "triage/needs-information"},
+			issueLabels:           []string{"area/infra"},
+			expectedNewLabels:     formatLabels("triage/needs-information"),
 			expectedRemovedLabels: []string{},
 			commenter:             orgMember,
 		},
@@ -242,6 +253,7 @@ func TestLabel(t *testing.T) {
 			expectedNewLabels:     []string{},
 			expectedRemovedLabels: []string{},
 			commenter:             orgMember,
+			expectedBotComment:    true,
 		},
 		{
 			name:                  "Remove Area Label when no such Label on Issue",
@@ -251,6 +263,7 @@ func TestLabel(t *testing.T) {
 			expectedNewLabels:     []string{},
 			expectedRemovedLabels: []string{},
 			commenter:             orgMember,
+			expectedBotComment:    true,
 		},
 		{
 			name:                  "Remove Area Label",
@@ -298,6 +311,15 @@ func TestLabel(t *testing.T) {
 			commenter:             orgMember,
 		},
 		{
+			name:                  "Remove Triage Label",
+			body:                  "/remove-triage needs-information",
+			repoLabels:            []string{"area/infra", "triage/needs-information"},
+			issueLabels:           []string{"area/infra", "triage/needs-information"},
+			expectedNewLabels:     []string{},
+			expectedRemovedLabels: formatLabels("triage/needs-information"),
+			commenter:             orgMember,
+		},
+		{
 			name:                  "Remove Multiple Labels",
 			body:                  "/remove-priority low high\n/remove-kind api-server\n/remove-area  infra",
 			repoLabels:            []string{"area/infra", "priority/high", "priority/low", "kind/api-server"},
@@ -305,6 +327,7 @@ func TestLabel(t *testing.T) {
 			expectedNewLabels:     []string{},
 			expectedRemovedLabels: formatLabels("priority/low", "priority/high", "kind/api-server", "area/infra"),
 			commenter:             orgMember,
+			expectedBotComment:    true,
 		},
 		{
 			name:                  "Add and Remove Label at the same time",
@@ -333,9 +356,70 @@ func TestLabel(t *testing.T) {
 			expectedRemovedLabels: formatLabels("area/ruby", "kind/srv", "priority/l", "priority/m"),
 			commenter:             orgMember,
 		},
+		{
+			name:                  "Do nothing with empty /label command",
+			body:                  "/label",
+			extraLabels:           []string{"orchestrator/foo", "orchestrator/bar"},
+			repoLabels:            []string{"orchestrator/foo"},
+			issueLabels:           []string{},
+			expectedNewLabels:     []string{},
+			expectedRemovedLabels: []string{},
+			commenter:             orgMember,
+		},
+		{
+			name:                  "Do nothing with empty /remove-label command",
+			body:                  "/remove-label",
+			extraLabels:           []string{"orchestrator/foo", "orchestrator/bar"},
+			repoLabels:            []string{"orchestrator/foo"},
+			issueLabels:           []string{},
+			expectedNewLabels:     []string{},
+			expectedRemovedLabels: []string{},
+			commenter:             orgMember,
+		},
+		{
+			name:                  "Add custom label",
+			body:                  "/label orchestrator/foo",
+			extraLabels:           []string{"orchestrator/foo", "orchestrator/bar"},
+			repoLabels:            []string{"orchestrator/foo"},
+			issueLabels:           []string{},
+			expectedNewLabels:     formatLabels("orchestrator/foo"),
+			expectedRemovedLabels: []string{},
+			commenter:             orgMember,
+		},
+		{
+			name:                  "Cannot add missing custom label",
+			body:                  "/label orchestrator/foo",
+			extraLabels:           []string{"orchestrator/jar", "orchestrator/bar"},
+			repoLabels:            []string{"orchestrator/foo"},
+			issueLabels:           []string{},
+			expectedNewLabels:     []string{},
+			expectedRemovedLabels: []string{},
+			commenter:             orgMember,
+		},
+		{
+			name:                  "Remove custom label",
+			body:                  "/remove-label orchestrator/foo",
+			extraLabels:           []string{"orchestrator/foo", "orchestrator/bar"},
+			repoLabels:            []string{"orchestrator/foo"},
+			issueLabels:           []string{"orchestrator/foo"},
+			expectedNewLabels:     []string{},
+			expectedRemovedLabels: formatLabels("orchestrator/foo"),
+			commenter:             orgMember,
+		},
+		{
+			name:                  "Cannot remove missing custom label",
+			body:                  "/remove-label orchestrator/jar",
+			extraLabels:           []string{"orchestrator/foo", "orchestrator/bar"},
+			repoLabels:            []string{"orchestrator/foo"},
+			issueLabels:           []string{"orchestrator/foo"},
+			expectedNewLabels:     []string{},
+			expectedRemovedLabels: []string{},
+			commenter:             orgMember,
+		},
 	}
 
 	for _, tc := range testcases {
+		t.Logf("Running scenario %q", tc.name)
 		sort.Strings(tc.expectedNewLabels)
 		fakeClient := &fakegithub.FakeClient{
 			Issues:         make([]github.Issue, 1),
@@ -356,9 +440,9 @@ func TestLabel(t *testing.T) {
 			Repo:   github.Repo{Owner: github.User{Login: "org"}, Name: "repo"},
 			User:   github.User{Login: tc.commenter},
 		}
-		err := handle(fakeClient, logrus.WithField("plugin", pluginName), e)
+		err := handle(fakeClient, logrus.WithField("plugin", pluginName), tc.extraLabels, e)
 		if err != nil {
-			t.Errorf("For case %s, didn't expect error from label test: %v", tc.name, err)
+			t.Errorf("didn't expect error from label test: %v", err)
 			continue
 		}
 
@@ -370,13 +454,19 @@ func TestLabel(t *testing.T) {
 		sort.Strings(expectLabels)
 		sort.Strings(fakeClient.LabelsAdded)
 		if !reflect.DeepEqual(expectLabels, fakeClient.LabelsAdded) {
-			t.Errorf("(%s): Expected the labels %q to be added, but %q were added.", tc.name, expectLabels, fakeClient.LabelsAdded)
+			t.Errorf("expected the labels %q to be added, but %q were added.", expectLabels, fakeClient.LabelsAdded)
 		}
 
 		sort.Strings(tc.expectedRemovedLabels)
 		sort.Strings(fakeClient.LabelsRemoved)
 		if !reflect.DeepEqual(tc.expectedRemovedLabels, fakeClient.LabelsRemoved) {
-			t.Errorf("(%s): Expected the labels %q to be removed, but %q were removed.", tc.name, tc.expectedRemovedLabels, fakeClient.LabelsRemoved)
+			t.Errorf("expected the labels %q to be removed, but %q were removed.", tc.expectedRemovedLabels, fakeClient.LabelsRemoved)
+		}
+		if len(fakeClient.IssueCommentsAdded) > 0 && !tc.expectedBotComment {
+			t.Errorf("unexpected bot comments: %#v", fakeClient.IssueCommentsAdded)
+		}
+		if len(fakeClient.IssueCommentsAdded) == 0 && tc.expectedBotComment {
+			t.Error("expected a bot comment but got none")
 		}
 	}
 }
