@@ -147,6 +147,7 @@ plugins:
   - lifecycle
   - reopen
   - golint
+  - skip
   - heart
   - hold
   - label
