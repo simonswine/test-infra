@@ -641,6 +641,7 @@ presubmits:
     trigger: "(?m)^/test( all| e2e( v?1.7)?|)( \\[.+\\])?$"
     rerun_command: "/test e2e v1.7"
     # Match everything except PRs that only touch docs/
+    always_run: false
     run_if_changed: (^[^d].*$)|(^.[^o].*$)|(^..[^c].*$)|(^...[^s].*$)|(^....[^/].*$)
     skip_report: false
     max_concurrency: 4
@@ -675,6 +676,7 @@ presubmits:
     trigger: "(?m)^/test( all| e2e( v?1.8)?|)( \\[.+\\])?$"
     rerun_command: "/test e2e v1.8"
     # Match everything except PRs that only touch docs/
+    always_run: false
     run_if_changed: (^[^d].*$)|(^.[^o].*$)|(^..[^c].*$)|(^...[^s].*$)|(^....[^/].*$)
     skip_report: false
     max_concurrency: 4
@@ -709,6 +711,7 @@ presubmits:
     trigger: "(?m)^/test( all| e2e( v?1.9)?|)( \\[.+\\])?$"
     rerun_command: "/test e2e v1.9"
     # Match everything except PRs that only touch docs/
+    always_run: false
     run_if_changed: (^[^d].*$)|(^.[^o].*$)|(^..[^c].*$)|(^...[^s].*$)|(^....[^/].*$)
     skip_report: false
     max_concurrency: 4
@@ -884,6 +887,7 @@ presubmits:
   - <<: *puppet_module_verify
     name: tarmak-puppet-module-aws_ebs-quick-verify
     context: tarmak-puppet-module-aws_ebs-quick-verify
+    always_run: false
     run_if_changed: "^(puppet/modules/aws_ebs).*$"
     trigger: "(?m)^/test( all| puppet| puppet-aws_ebs| puppet-verify| puppet-aws_ebs-verify|)( \\[.+\\])?$"
     rerun_command: "/test puppet-aws_ebs-verify"
@@ -891,6 +895,7 @@ presubmits:
   - <<: *puppet_module_verify
     name: tarmak-puppet-module-aws_es_proxy-quick-verify
     context: tarmak-puppet-module-aws_es_proxy-quick-verify
+    always_run: false
     run_if_changed: "^(puppet/modules/aws_es_proxy).*$"
     trigger: "(?m)^/test( all| puppet| puppet-aws_es_proxy| puppet-verify| puppet-aws_es_proxy-verify|)( \\[.+\\])?$"
     rerun_command: "/test puppet-aws_es_proxy-verify"
@@ -898,12 +903,14 @@ presubmits:
   - <<: *puppet_module_verify
     name: tarmak-puppet-module-calico-quick-verify
     context: tarmak-puppet-module-calico-quick-verify
+    always_run: false
     run_if_changed: "^(puppet/modules/calico).*$"
     trigger: "(?m)^/test( all| puppet| puppet-calico| puppet-verify| puppet-calico-verify|)( \\[.+\\])?$"
     rerun_command: "/test puppet-calico-verify"
   - <<: *puppet_module_acceptance
     name: tarmak-puppet-module-calico-acceptance
     context: tarmak-puppet-module-calico-acceptance
+    always_run: false
     run_if_changed: "^(puppet/modules/calico).*$"
     trigger: "(?m)^/test( all| puppet| puppet-calico| puppet-calico-acceptance|)( \\[.+\\])?$"
     rerun_command: "/test puppet-calico-acceptance"
@@ -911,12 +918,14 @@ presubmits:
   - <<: *puppet_module_verify
     name: tarmak-puppet-module-etcd-quick-verify
     context: tarmak-puppet-module-etcd-quick-verify
+    always_run: false
     run_if_changed: "^(puppet/modules/etcd).*$"
     trigger: "(?m)^/test( all| puppet| puppet-etcd| puppet-verify| puppet-etcd-verify|)( \\[.+\\])?$"
     rerun_command: "/test puppet-etcd-verify"
   - <<: *puppet_module_acceptance
     name: tarmak-puppet-module-etcd-acceptance-single-node
     context: tarmak-puppet-module-etcd-acceptance-single-node
+    always_run: false
     run_if_changed: "^(puppet/modules/etcd).*$"
     trigger: "(?m)^/test( all| puppet| puppet-etcd| puppet-etcd-acceptance-single-node|)( \\[.+\\])?$"
     rerun_command: "/test puppet-etcd-acceptance-single-node"
@@ -924,6 +933,7 @@ presubmits:
     - <<: *puppet_module_acceptance
       name: tarmak-puppet-module-etcd-acceptance-three-node
       context: tarmak-puppet-module-etcd-acceptance-three-node
+      always_run: false
       run_if_changed: "^(puppet/modules/etcd).*$"
       trigger: "(?m)^/test( all| puppet| puppet-etcd| puppet-etcd-acceptance-three-node|)( \\[.+\\])?$"
       rerun_command: "/test puppet-etcd-acceptance-three-node"
@@ -931,12 +941,14 @@ presubmits:
   - <<: *puppet_module_verify
     name: tarmak-puppet-module-fluent_bit-quick-verify
     context: tarmak-puppet-module-fluent_bit-quick-verify
+    always_run: false
     run_if_changed: "^(puppet/modules/fluent_bit).*$"
     trigger: "(?m)^/test( all| puppet| puppet-fluent_bit| puppet-verify| puppet-fluent_bit-verify|)( \\[.+\\])?$"
     rerun_command: "/test puppet-fluent_bit-verify"
   - <<: *puppet_module_acceptance
     name: tarmak-puppet-module-fluent_bit-acceptance
     context: tarmak-puppet-module-fluent_bit-acceptance
+    always_run: false
     run_if_changed: "^(puppet/modules/fluent_bit).*$"
     trigger: "(?m)^/test( all| puppet| puppet-fluent_bit| puppet-fluent_bit-acceptance|)( \\[.+\\])?$"
     rerun_command: "/test puppet-fluent_bit-acceptance"
@@ -944,12 +956,14 @@ presubmits:
   - <<: *puppet_module_verify
     name: tarmak-puppet-module-kubernetes-quick-verify
     context: tarmak-puppet-module-kubernetes-quick-verify
+    always_run: false
     run_if_changed: "^(puppet/modules/kubernetes).*$"
     trigger: "(?m)^/test( all| puppet| puppet-kubernetes| puppet-verify| puppet-kubernetes-verify|)( \\[.+\\])?$"
     rerun_command: "/test puppet-kubernetes-verify"
   - <<: *puppet_module_acceptance
     name: tarmak-puppet-module-kubernetes-acceptance
     context: tarmak-puppet-module-kubernetes-acceptance
+    always_run: false
     run_if_changed: "^(puppet/modules/kubernetes).*$"
     trigger: "(?m)^/test( all| puppet| puppet-tarmak| puppet-kubernetes-acceptance|)( \\[.+\\])?$"
     rerun_command: "/test puppet-kubernetes-acceptance"
@@ -957,6 +971,7 @@ presubmits:
   - <<: *puppet_module_verify
     name: tarmak-puppet-module-kubernetes_addons-quick-verify
     context: tarmak-puppet-module-kubernetes_addons-quick-verify
+    always_run: false
     run_if_changed: "^(puppet/modules/kubernetes_addons).*$"
     trigger: "(?m)^/test( all| puppet| puppet-kubernetes_addons| puppet-verify| puppet-kubernetes_addons-verify|)( \\[.+\\])?$"
     rerun_command: "/test puppet-kubernetes_addons-verify"
@@ -964,6 +979,7 @@ presubmits:
   - <<: *puppet_module_verify
     name: tarmak-puppet-module-prometheus-quick-verify
     context: tarmak-puppet-module-prometheus-quick-verify
+    always_run: false
     run_if_changed: "^(puppet/modules/prometheus).*$"
     trigger: "(?m)^/test( all| puppet| puppet-prometheus| puppet-verify| puppet-prometheus-verify|)( \\[.+\\])?$"
     rerun_command: "/test puppet-prometheus-verify"
@@ -971,12 +987,14 @@ presubmits:
   - <<: *puppet_module_verify
     name: tarmak-puppet-module-tarmak-quick-verify
     context: tarmak-puppet-module-tarmak-quick-verify
+    always_run: false
     run_if_changed: "^(puppet/modules).*$"
     trigger: "(?m)^/test( all| puppet| puppet-tarmak| puppet-verify| puppet-tarmak-verify|)( \\[.+\\])?$"
     rerun_command: "/test puppet-tarmak-verify"
   - <<: *puppet_module_acceptance
     name: tarmak-puppet-module-tarmak-acceptance-1-9-centos
     context: tarmak-puppet-module-tarmak-acceptance-1-9-centos
+    always_run: false
     run_if_changed: "^(puppet/modules).*$"
     trigger: "(?m)^/test( all| puppet| puppet-tarmak| puppet-tarmak-acceptance-centos( v?1.9)?|)( \\[.+\\])?$"
     rerun_command: "/test puppet-tarmak-acceptance-centos v1.9"
@@ -984,12 +1002,14 @@ presubmits:
     - <<: *puppet_module_acceptance
       name: tarmak-puppet-module-tarmak-acceptance-1-9-ubuntu
       context: tarmak-puppet-module-tarmak-acceptance-1-9-ubuntu
+      always_run: false
       run_if_changed: "^(puppet/modules).*$"
       trigger: "(?m)^/test( all| puppet| puppet-tarmak| puppet-tarmak-acceptance-ubuntu( v?1.9)?|)( \\[.+\\])?$"
       rerun_command: "/test puppet-tarmak-acceptance-ubuntu v1.9"
     - <<: *puppet_module_acceptance
       name: tarmak-puppet-module-tarmak-acceptance-1-10-centos
       context: tarmak-puppet-module-tarmak-acceptance-1-10-centos
+      always_run: false
       run_if_changed: "^(puppet/modules).*$"
       trigger: "(?m)^/test( all| puppet| puppet-tarmak| puppet-tarmak-acceptance-centos( v?1.10)?|)( \\[.+\\])?$"
       rerun_command: "/test puppet-tarmak-acceptance-centos v1.10"
@@ -1002,18 +1022,21 @@ presubmits:
     - <<: *puppet_module_acceptance
       name: tarmak-puppet-module-tarmak-acceptance-1-7-centos
       context: tarmak-puppet-module-tarmak-acceptance-1-7-centos
+      always_run: false
       run_if_changed: "^(puppet/modules).*$"
       trigger: "(?m)^/test( all| puppet| puppet-tarmak| puppet-tarmak-acceptance-centos( v?1.7)?|)( \\[.+\\])?$"
       rerun_command: "/test puppet-tarmak-acceptance-centos v1.7"
     - <<: *puppet_module_acceptance
       name: tarmak-puppet-module-tarmak-acceptance-1-6-centos
       context: tarmak-puppet-module-tarmak-acceptance-1-6-centos
+      always_run: false
       run_if_changed: "^(puppet/modules).*$"
       trigger: "(?m)^/test( all| puppet| puppet-tarmak| puppet-tarmak-acceptance-centos( v?1.6)?|)( \\[.+\\])?$"
       rerun_command: "/test puppet-tarmak-acceptance-centos v1.6"
     - <<: *puppet_module_acceptance
       name: tarmak-puppet-module-tarmak-acceptance-1-10-centos
       context: tarmak-puppet-module-tarmak-acceptance-1-10-centos
+      always_run: false
       run_if_changed: "^(puppet/modules).*$"
       trigger: "(?m)^/test( all| puppet| puppet-tarmak| puppet-tarmak-acceptance-centos( v?1.10)?|)( \\[.+\\])?$"
       rerun_command: "/test puppet-tarmak-acceptance-centos v1.10"
@@ -1021,12 +1044,14 @@ presubmits:
   - <<: *puppet_module_verify
     name: tarmak-puppet-module-vault_client-quick-verify
     context: tarmak-puppet-module-vault_client-quick-verify
+    always_run: false
     run_if_changed: "^(puppet/modules/vault_client).*$"
     trigger: "(?m)^/test( all| puppet| puppet-vault_client| puppet-verify| puppet-vault_client-verify|)( \\[.+\\])?$"
     rerun_command: "/test puppet-vault_client-verify"
   - <<: *puppet_module_acceptance
     name: tarmak-puppet-module-vault_client-acceptance-centos
     context: tarmak-puppet-module-vault_client-acceptance-centos
+    always_run: false
     run_if_changed: "^(puppet/modules/vault_client).*$"
     trigger: "(?m)^/test( all| puppet| puppet-vault_client| puppet-vault_client-acceptance-centos|)( \\[.+\\])?$"
     rerun_command: "/test puppet-vault_client-acceptance-centos"
@@ -1034,6 +1059,7 @@ presubmits:
     - <<: *puppet_module_acceptance
       name: tarmak-puppet-module-vault_client-acceptance-ubuntu
       context: tarmak-puppet-module-vault_client-acceptance-ubuntu
+      always_run: false
       run_if_changed: "^(puppet/modules/vault_client).*$"
       trigger: "(?m)^/test( all| puppet| puppet-vault_client| puppet-vault_client-acceptance-ubuntu|)( \\[.+\\])?$"
       rerun_command: "/test puppet-vault_client-acceptance-ubuntu"
