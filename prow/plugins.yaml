@@ -4,7 +4,6 @@
 ---
 triggers:
 - repos:
-  - jetstack/cert-manager
   - jetstack/kube-lego
   - jetstack/test-infra
   - jetstack/navigator
@@ -22,6 +21,9 @@ triggers:
   - jetstack/vault-unsealer
   - jetstack/vault-plugin-auth-templated-aws
   trusted_org: jetstack
+- repos:
+  - jetstack/cert-manager
+  trusted_org: cert-manager
 
 blunderbuss:
   # Only request a review from 1 reviewer
