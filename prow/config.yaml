@@ -1258,10 +1258,9 @@ periodics:
     - image: gcr.io/k8s-testimages/commenter:v20170808-abf66782
       args:
       - |-
-        --query=org:jetstack
+        --query=repo:jetstack/cert-manager
         -label:lifecycle/frozen
         label:lifecycle/rotten
-        repo:jetstack/cert-manager
       - --updated=720h
       - --token=/etc/token/bot-github-token
       - |-
@@ -1289,11 +1288,10 @@ periodics:
     - image: gcr.io/k8s-testimages/commenter:v20170808-abf66782
       args:
       - |-
-        --query=org:jetstack
+        --query=repo:jetstack/cert-manager
         -label:lifecycle/frozen
         label:lifecycle/stale
         -label:lifecycle/rotten
-        repo:jetstack/cert-manager
       - --updated=720h
       - --token=/etc/token/bot-github-token
       - |-
@@ -1323,11 +1321,10 @@ periodics:
     - image: gcr.io/k8s-testimages/commenter:v20170808-abf66782
       args:
       - |-
-        --query=org:jetstack
+        --query=repo:jetstack/cert-manager
         -label:lifecycle/frozen
         -label:lifecycle/stale
         -label:lifecycle/rotten
-        repo:jetstack/cert-manager
       - --updated=2160h
       - --token=/etc/token/bot-github-token
       - |-
