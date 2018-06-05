@@ -48,7 +48,7 @@ Instead, you can achieve the same thing with a `curl` command like follows:
 curl -H "Authorization: token {auth-token}" \
   -d '{"permission":"pull"}' \
   -XPUT \
-  https://api.github.com/repos/jetstack/cert-manager/Dcollaborators/vdesjardins
+  https://api.github.com/repos/jetstack/cert-manager/collaborators/someone
 ```
 
 You will need to replace `{auth-token}` with an authentication token with suitable privileges to perform the operation
