@@ -731,7 +731,7 @@
   "vault-unsealer-quick-verify": {
     "args": [
       "make",
-      "all"
+      "verify"
     ],
     "scenario": "execute",
     "sigOwners": [
