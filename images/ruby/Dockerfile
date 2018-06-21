@@ -13,7 +13,7 @@
 # limitations under the License.
 
 # Includes go and gcloud
-FROM ruby:2.3
+FROM ruby:2.4.4
 LABEL maintainer="christian.simon@jetstack.io"
 
 RUN apt-get update && apt-get install -y \
@@ -33,7 +33,7 @@ RUN apt-get update && apt-get install -y \
     libxslt1-dev \
     libvirt-dev \
     libcurl4-openssl-dev \
-    python-software-properties \
+    python3-software-properties \
     libffi-dev \
     nodejs \
     rsync \
@@ -42,8 +42,8 @@ RUN apt-get update && apt-get install -y \
 
 
 # Download and install vagrant
-ENV VAGRANT_VERSION 2.0.1
-ENV VAGRANT_HASH 2f9498a83b3d650fcfcfe0ec7971070fcd3803fad6470cf7da871caf2564d84f
+ENV VAGRANT_VERSION 2.1.1
+ENV VAGRANT_HASH cee18b6f3b1209ea5878c22cfd84a9f0004f20ef146cb7a18aada19162928a0f
 RUN curl -sL -o /tmp/vagrant.deb https://releases.hashicorp.com/vagrant/${VAGRANT_VERSION}/vagrant_${VAGRANT_VERSION}_x86_64.deb \
  && echo "${VAGRANT_HASH}  /tmp/vagrant.deb" | sha256sum -c \
  && DEBIAN_FRONTEND=noninteractive dpkg -i /tmp/vagrant.deb \
@@ -52,8 +52,8 @@ RUN curl -sL -o /tmp/vagrant.deb https://releases.hashicorp.com/vagrant/${VAGRAN
 # Download and install vagrant's libvirt plugin
 RUN vagrant plugin install vagrant-libvirt
 
-ENV GCLOUD_VERSION 178.0.0
-ENV GCLOUD_HASH 2e0bbbf81c11164bf892cf0b891751ba4e5172661eff907ad1f7fc0b6907e296
+ENV GCLOUD_VERSION 206.0.0
+ENV GCLOUD_HASH d39293914b2e969bfe18dd19eb77ba96d283995f8cf1e5d7ba6ac712a3c9479a
 RUN curl -sL -o /tmp/google-cloud-sdk.tar.gz https://dl.google.com/dl/cloudsdk/channels/rapid/downloads/google-cloud-sdk-$GCLOUD_VERSION-linux-x86_64.tar.gz && \
     echo "$GCLOUD_HASH  /tmp/google-cloud-sdk.tar.gz" | sha256sum -c && \
     tar xf /tmp/google-cloud-sdk.tar.gz -C / && \

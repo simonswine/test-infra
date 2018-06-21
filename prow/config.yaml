@@ -181,7 +181,7 @@ tide:
     preset-service-account: true
   spec:
     containers:
-    - image: gcr.io/jetstack-build-infra/ruby-2.3:0.5
+    - image: gcr.io/jetstack-build-infra/ruby:2.4.0
       args:
       - "--repo=github.com/$(REPO_OWNER)/$(REPO_NAME)=$(PULL_REFS)"
       - "--root=/workspace"
@@ -224,7 +224,7 @@ tide:
       key: dedicated
       operator: Equal
     containers:
-    - image: gcr.io/jetstack-build-infra/ruby-2.3:0.5
+    - image: gcr.io/jetstack-build-infra/ruby:2.4.0
       args:
       - "--repo=github.com/$(REPO_OWNER)/$(REPO_NAME)=$(PULL_REFS)"
       - "--root=/workspace"

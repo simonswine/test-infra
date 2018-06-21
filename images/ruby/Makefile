@@ -12,12 +12,12 @@
 # See the License for the specific language governing permissions and
 # limitations under the License.
 
-VERSION = 0.5
+VERSION = 2.4.0
 
 image:
-	docker build -t "gcr.io/jetstack-build-infra/ruby-2.3:$(VERSION)" .
+	docker build -t "gcr.io/jetstack-build-infra/ruby:$(VERSION)" .
 
 push: image
-	gcloud docker -- push "gcr.io/jetstack-build-infra/ruby-2.3:$(VERSION)"
+	gcloud docker -- push "gcr.io/jetstack-build-infra/ruby:$(VERSION)"
 
 .PHONY: image push
