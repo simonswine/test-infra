@@ -98,6 +98,7 @@ plugins:
   - lgtm
   - approve
   - skip
+  - milestone
   - milestonestatus
   - lifecycle
   - size
