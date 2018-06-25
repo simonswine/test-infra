@@ -56,7 +56,8 @@ milestonestatus:
   # You can curl the following endpoint in order to determine the github ID of your team
   # responsible for maintaining the milestones:
   # curl -H "Authorization: token <token>" https://api.github.com/orgs/<org-name>/teams
-  maintainers_id: 2462700
+  # https://github.com/orgs/cert-manager/teams/milestone-maintainers
+  maintainers_id: 2805308
 
 config_updater:
   maps:
