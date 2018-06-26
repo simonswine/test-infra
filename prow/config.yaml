@@ -623,7 +623,7 @@ presubmits:
       preset-service-account: true
     spec:
       containers:
-      - image: gcr.io/jetstack-build-infra/gcloud-in-go:0.10
+      - image: gcr.io/jetstack-build-infra/gcloud-in-go:0.11
         args:
         - "--repo=github.com/$(REPO_OWNER)/$(REPO_NAME)=$(PULL_REFS)"
         - "--root=/go/src"
