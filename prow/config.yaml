@@ -613,6 +613,40 @@ presubmits:
     trigger: "(?m)^/test( dind-e2e),?(\\s+|$)"
     rerun_command: "/test dind-e2e"
 
+  - name: cert-manager-chart-verify
+    always_run: true
+    context: cert-manager-chart-verify
+    max_concurrency: 4
+    agent: kubernetes
+    labels:
+      preset-service-account: true
+    spec:
+      containers:
+      - image: gcr.io/jetstack-build-infra/bootstrap:v20180509-54804d71a
+        args:
+        - "--repo=github.com/$(REPO_OWNER)/$(REPO_NAME)=$(PULL_REFS)"
+        - "--root=/go/src"
+        - "--upload=gs://jetstack-logs/pr-logs"
+        - "--clean"
+        resources:
+          requests:
+            cpu: 100m
+            memory: 512Mi
+        env:
+        - name: DOCKER_IN_DOCKER_ENABLED
+          value: true
+        # docker-in-docker needs privileged mode
+        securityContext:
+          privileged: true
+        volumeMounts:
+        - name: docker-graph
+          mountPath: /docker-graph
+      volumes:
+      - name: docker-graph
+        emptyDir: {}
+    trigger: "(?m)^/test( all| chart-verify),?(\\s+|$)"
+    rerun_command: "/test chart-verify"
+
   - name: cert-manager-quick-verify
     always_run: true
     skip_report: false

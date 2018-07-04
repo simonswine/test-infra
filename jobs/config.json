@@ -626,11 +626,20 @@
       "UNKNOWN"
     ]
   },
+  "cert-manager-chart-verify": {
+    "args": [
+      "make",
+      "verify_pr"
+    ],
+    "scenario": "execute",
+    "sigOwners": [
+      "UNKNOWN"
+    ]
+  },
   "cert-manager-quick-verify": {
     "args": [
       "make",
       "verify",
-      "verify_pr",
       "test"
     ],
     "scenario": "execute",
