@@ -640,7 +640,6 @@
     "args": [
       "make",
       "verify",
-      "verify_pr",
       "test"
     ],
     "scenario": "execute",
