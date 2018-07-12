@@ -62,7 +62,7 @@ func TestOptions_Validate(t *testing.T) {
 			name: "ok with oauth",
 			input: options{
 				configPath:            "test",
-				oauthUrl:              "website",
+				oauthURL:              "website",
 				githubOAuthConfigFile: "something",
 				cookieSecretFile:      "yum",
 			},
@@ -72,7 +72,7 @@ func TestOptions_Validate(t *testing.T) {
 			name: "missing github config with oauth",
 			input: options{
 				configPath:       "test",
-				oauthUrl:         "website",
+				oauthURL:         "website",
 				cookieSecretFile: "yum",
 			},
 			expectedErr: true,
@@ -81,7 +81,7 @@ func TestOptions_Validate(t *testing.T) {
 			name: "missing cookie with oauth",
 			input: options{
 				configPath:            "test",
-				oauthUrl:              "website",
+				oauthURL:              "website",
 				githubOAuthConfigFile: "something",
 			},
 			expectedErr: true,
@@ -202,7 +202,15 @@ func (fc *fpjc) GetProwJob(name string) (kube.ProwJob, error) {
 func TestRerun(t *testing.T) {
 	fc := fpjc(kube.ProwJob{
 		Spec: kube.ProwJobSpec{
-			Job: "whoa",
+			Job:  "whoa",
+			Type: kube.PresubmitJob,
+			Refs: &kube.Refs{
+				Org:  "org",
+				Repo: "repo",
+				Pulls: []kube.Pull{
+					{Number: 1},
+				},
+			},
 		},
 		Status: kube.ProwJobStatus{
 			State: kube.PendingState,
@@ -251,9 +259,11 @@ func TestTide(t *testing.T) {
 	}))
 	ca := &config.Agent{}
 	ca.Set(&config.Config{
-		Tide: config.Tide{
-			Queries: []config.TideQuery{
-				{Repos: []string{"kubernetes/test-infra"}},
+		ProwConfig: config.ProwConfig{
+			Tide: config.Tide{
+				Queries: []config.TideQuery{
+					{Repos: []string{"kubernetes/test-infra"}},
+				},
 			},
 		},
 	})

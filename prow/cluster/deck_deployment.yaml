@@ -30,10 +30,11 @@ spec:
       labels:
         app: deck
     spec:
+      # serviceAccountName: "deck" # Uncomment for use with RBAC
       terminationGracePeriodSeconds: 30
       containers:
       - name: deck
-        image: gcr.io/k8s-prow/deck:v20180521-f8caf9625
+        image: gcr.io/k8s-prow/deck:v20180709-7109caeb1
         imagePullPolicy: Always
         ports:
           - name: http
@@ -43,7 +44,7 @@ spec:
         - --tide-url=http://tide/
         - --hook-url=http://hook:8888/plugin-help
         - --redirect-http-to=prow.build-infra.jetstack.io
-        - --oauth-url=https://prow.build-infra.jetstack.net/pr
+        - --oauth-url=/github-login
         volumeMounts:
         - name: config
           mountPath: /etc/config

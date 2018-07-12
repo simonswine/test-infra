@@ -22,7 +22,7 @@ log_level: info
 
 presets:
 - labels:
-    preset-service-account: true
+    preset-service-account: "true"
   env:
   - name: GOOGLE_APPLICATION_CREDENTIALS
     value: /etc/service-account/service-account.json
@@ -36,7 +36,7 @@ presets:
     readOnly: true
 
 - labels:
-    libvirt-socket: true
+    libvirt-socket: "true"
   volumes:
   - name: var-run-libvirt-libvirt-sock
     hostPath:
@@ -47,7 +47,7 @@ presets:
     mountPath: /var/run/libvirt/libvirt-sock
 
 - labels:
-    minikube-support: true
+    minikube-support: "true"
   volumeMounts:
   - name: var-lib-libvirt
     mountPath: /var/lib/libvirt
@@ -82,7 +82,7 @@ presets:
 
 # storage / caching presets
 - labels:
-    preset-bazel-scratch-dir: true
+    preset-bazel-scratch-dir: "true"
   env:
   - name: TEST_TMPDIR
     value: /bazel-scratch/.cache/bazel
@@ -94,7 +94,7 @@ presets:
     mountPath: /bazel-scratch/.cache
 
 - labels:
-    cert-manager-cloudflare-svc-acct: true
+    cert-manager-cloudflare-svc-acct: "true"
   env:
   - name: CLOUDFLARE_E2E_API_TOKEN
     valueFrom:
@@ -113,7 +113,7 @@ presets:
         key: domain
 
 - labels:
-    preset-bazel-remote-cache-enabled: true
+    preset-bazel-remote-cache-enabled: "true"
   env:
   - name: BAZEL_REMOTE_CACHE_ENABLED
     value: "true"
@@ -178,7 +178,7 @@ tide:
   max_concurrency: 4
   agent: kubernetes
   labels:
-    preset-service-account: true
+    preset-service-account: "true"
   spec:
     containers:
     - image: gcr.io/jetstack-build-infra/ruby:2.4.0
@@ -213,8 +213,8 @@ tide:
   max_concurrency: 2
   agent: kubernetes
   labels:
-    preset-service-account: true
-    libvirt-socket: true
+    preset-service-account: "true"
+    libvirt-socket: "true"
   spec:
     nodeSelector:
       node-role.kubernetes.io/libvirt: ""
@@ -263,9 +263,9 @@ presubmits:
     rerun_command: "/test pull-navigator-bazel-verify"
     trigger: "(?m)^/test pull-navigator-bazel-verify,?(\\s+|$)"
     labels:
-      preset-service-account: true
-      preset-bazel-scratch-dir: true
-      preset-bazel-remote-cache-enabled: true
+      preset-service-account: "true"
+      preset-bazel-scratch-dir: "true"
+      preset-bazel-remote-cache-enabled: "true"
     spec:
       containers:
       - image: gcr.io/jetstack-build-infra/bazelbuild:v20180321-d7679e93b-0.11.1
@@ -295,10 +295,10 @@ presubmits:
     max_concurrency: 4
     agent: kubernetes
     labels:
-      preset-service-account: true
-      preset-bazel-remote-cache-enabled: true
-      libvirt-socket: true
-      minikube-support: true
+      preset-service-account: "true"
+      preset-bazel-remote-cache-enabled: "true"
+      libvirt-socket: "true"
+      minikube-support: "true"
       minikube-size: medium
     spec:
       nodeSelector:
@@ -331,7 +331,7 @@ presubmits:
     max_concurrency: 2
     agent: kubernetes
     labels:
-      preset-service-account: true
+      preset-service-account: "true"
     spec:
       containers:
       - image: gcr.io/jetstack-build-infra/gcloud-in-go:0.10
@@ -356,9 +356,9 @@ presubmits:
     max_concurrency: 4
     agent: kubernetes
     labels:
-      preset-service-account: true
-      libvirt-socket: true
-      minikube-support: true
+      preset-service-account: "true"
+      libvirt-socket: "true"
+      minikube-support: "true"
       minikube-size: medium
     spec:
       nodeSelector:
@@ -388,9 +388,9 @@ presubmits:
     max_concurrency: 4
     agent: kubernetes
     labels:
-      preset-service-account: true
-      libvirt-socket: true
-      minikube-support: true
+      preset-service-account: "true"
+      libvirt-socket: "true"
+      minikube-support: "true"
       minikube-size: medium
     spec:
       nodeSelector:
@@ -420,9 +420,9 @@ presubmits:
     max_concurrency: 4
     agent: kubernetes
     labels:
-      preset-service-account: true
-      libvirt-socket: true
-      minikube-support: true
+      preset-service-account: "true"
+      libvirt-socket: "true"
+      minikube-support: "true"
       minikube-size: medium
     spec:
       nodeSelector:
@@ -452,9 +452,9 @@ presubmits:
     max_concurrency: 4
     agent: kubernetes
     labels:
-      preset-service-account: true
-      libvirt-socket: true
-      minikube-support: true
+      preset-service-account: "true"
+      libvirt-socket: "true"
+      minikube-support: "true"
       minikube-size: medium
     spec:
       nodeSelector:
@@ -482,7 +482,7 @@ presubmits:
     trigger: "(?m)^/test kubetest-e2e,?(\\s+|$)"
     always_run: false
     labels:
-      preset-service-account: true
+      preset-service-account: "true"
     spec:
       containers:
       - image: gcr.io/k8s-testimages/bootstrap:v20180122-6fd3aef1a
@@ -497,7 +497,7 @@ presubmits:
         - "--timeout=90"
         env:
         - name: DOCKER_IN_DOCKER_ENABLED
-          value: true
+          value: "true"
         # docker-in-docker needs privileged mode
         securityContext:
           privileged: true
@@ -536,7 +536,7 @@ presubmits:
     max_concurrency: 2
     agent: kubernetes
     labels:
-      preset-service-account: true
+      preset-service-account: "true"
     spec:
       containers:
       - image: gcr.io/jetstack-build-infra/bootstrap:v20180509-54804d71a
@@ -551,7 +551,7 @@ presubmits:
             memory: 1Gi
         env:
         - name: DOCKER_IN_DOCKER_ENABLED
-          value: true
+          value: "true"
         # docker-in-docker needs privileged mode
         securityContext:
           privileged: true
@@ -571,7 +571,7 @@ presubmits:
     max_concurrency: 2
     agent: kubernetes
     labels:
-      preset-service-account: true
+      preset-service-account: "true"
     spec:
       containers:
       - image: gcr.io/jetstack-build-infra/bootstrap:v20180510-5a6e51d3f
@@ -619,7 +619,7 @@ presubmits:
     max_concurrency: 4
     agent: kubernetes
     labels:
-      preset-service-account: true
+      preset-service-account: "true"
     spec:
       containers:
       - image: gcr.io/jetstack-build-infra/bootstrap:v20180509-54804d71a
@@ -634,7 +634,7 @@ presubmits:
             memory: 512Mi
         env:
         - name: DOCKER_IN_DOCKER_ENABLED
-          value: true
+          value: "true"
         # docker-in-docker needs privileged mode
         securityContext:
           privileged: true
@@ -654,7 +654,7 @@ presubmits:
     max_concurrency: 2
     agent: kubernetes
     labels:
-      preset-service-account: true
+      preset-service-account: "true"
     spec:
       containers:
       - image: gcr.io/jetstack-build-infra/gcloud-in-go:0.11
@@ -681,10 +681,10 @@ presubmits:
     max_concurrency: 4
     agent: kubernetes
     labels:
-      cert-manager-cloudflare-svc-acct: true
-      preset-service-account: true
-      libvirt-socket: true
-      minikube-support: true
+      cert-manager-cloudflare-svc-acct: "true"
+      preset-service-account: "true"
+      libvirt-socket: "true"
+      minikube-support: "true"
       minikube-size: small
     spec:
       nodeSelector:
@@ -716,10 +716,10 @@ presubmits:
     max_concurrency: 4
     agent: kubernetes
     labels:
-      cert-manager-cloudflare-svc-acct: true
-      preset-service-account: true
-      libvirt-socket: true
-      minikube-support: true
+      cert-manager-cloudflare-svc-acct: "true"
+      preset-service-account: "true"
+      libvirt-socket: "true"
+      minikube-support: "true"
       minikube-size: small
     spec:
       nodeSelector:
@@ -751,10 +751,10 @@ presubmits:
     max_concurrency: 4
     agent: kubernetes
     labels:
-      cert-manager-cloudflare-svc-acct: true
-      preset-service-account: true
-      libvirt-socket: true
-      minikube-support: true
+      cert-manager-cloudflare-svc-acct: "true"
+      preset-service-account: "true"
+      libvirt-socket: "true"
+      minikube-support: "true"
       minikube-size: small
     spec:
       nodeSelector:
@@ -786,10 +786,10 @@ presubmits:
     max_concurrency: 4
     agent: kubernetes
     labels:
-      cert-manager-cloudflare-svc-acct: true
-      preset-service-account: true
-      libvirt-socket: true
-      minikube-support: true
+      cert-manager-cloudflare-svc-acct: "true"
+      preset-service-account: "true"
+      libvirt-socket: "true"
+      minikube-support: "true"
       minikube-size: small
     spec:
       nodeSelector:
@@ -1105,7 +1105,7 @@ presubmits:
     max_concurrency: 2
     agent: kubernetes
     labels:
-      preset-service-account: true
+      preset-service-account: "true"
     spec:
       containers:
       - image: gcr.io/jetstack-build-infra/gcloud-in-go:0.7
@@ -1128,7 +1128,7 @@ presubmits:
     max_concurrency: 2
     agent: kubernetes
     labels:
-      preset-service-account: true
+      preset-service-account: "true"
     spec:
       containers:
       - image: gcr.io/jetstack-build-infra/sphinx-docs:0.1
@@ -1153,7 +1153,7 @@ presubmits:
     max_concurrency: 2
     agent: kubernetes
     labels:
-      preset-service-account: true
+      preset-service-account: "true"
     spec:
       containers:
       - image: gcr.io/jetstack-build-infra/gcloud-in-go:0.10
@@ -1177,7 +1177,7 @@ presubmits:
     max_concurrency: 2
     agent: kubernetes
     labels:
-      preset-service-account: true
+      preset-service-account: "true"
     spec:
       containers:
       - image: gcr.io/jetstack-build-infra/gcloud-in-go:0.10
@@ -1201,7 +1201,7 @@ presubmits:
     max_concurrency: 2
     agent: kubernetes
     labels:
-      preset-service-account: true
+      preset-service-account: "true"
     spec:
       containers:
       - image: gcr.io/jetstack-build-infra/gcloud-in-go:0.10
@@ -1225,7 +1225,7 @@ presubmits:
     max_concurrency: 2
     agent: kubernetes
     labels:
-      preset-service-account: true
+      preset-service-account: "true"
     spec:
       containers:
       - image: gcr.io/jetstack-build-infra/gcloud-in-go:0.10
@@ -1393,7 +1393,7 @@ postsubmits:
     context: tarmak-docs-push
     agent: kubernetes
     labels:
-      preset-service-account: true
+      preset-service-account: "true"
     spec:
       containers:
       - image: gcr.io/jetstack-build-infra/sphinx-docs:0.1

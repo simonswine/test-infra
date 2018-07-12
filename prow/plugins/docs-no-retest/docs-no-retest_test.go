@@ -122,6 +122,28 @@ func TestHandlePR(t *testing.T) {
 			shouldSkipRetest: true,
 		},
 		{
+			name:   "change SECURITY_CONTACTS, no label, needs label",
+			labels: sets.NewString(),
+			prChanges: []github.PullRequestChange{
+				{
+					Filename: "/path/to/file/SECURITY_CONTACTS",
+				},
+			},
+			action:           github.PullRequestActionOpened,
+			shouldSkipRetest: true,
+		},
+		{
+			name:   "change OWNERS_ALIASES, no label, needs label",
+			labels: sets.NewString(),
+			prChanges: []github.PullRequestChange{
+				{
+					Filename: "/path/to/file/OWNERS_ALIASES",
+				},
+			},
+			action:           github.PullRequestActionOpened,
+			shouldSkipRetest: true,
+		},
+		{
 			name:   "change non doc, no label, needs no label",
 			labels: sets.NewString(),
 			prChanges: []github.PullRequestChange{
@@ -186,6 +208,28 @@ func TestHandlePR(t *testing.T) {
 			prChanges: []github.PullRequestChange{
 				{
 					Filename: "/path/to/file/LICENSE",
+				},
+			},
+			action:           github.PullRequestActionOpened,
+			shouldSkipRetest: true,
+		},
+		{
+			name:   "change SECURITY_CONTACTS, has label, needs label",
+			labels: sets.NewString(labelSkipRetest),
+			prChanges: []github.PullRequestChange{
+				{
+					Filename: "/path/to/file/SECURITY_CONTACTS",
+				},
+			},
+			action:           github.PullRequestActionOpened,
+			shouldSkipRetest: true,
+		},
+		{
+			name:   "change OWNERS_ALIASES, has label, needs label",
+			labels: sets.NewString(labelSkipRetest),
+			prChanges: []github.PullRequestChange{
+				{
+					Filename: "/path/to/file/OWNERS_ALIASES",
 				},
 			},
 			action:           github.PullRequestActionOpened,

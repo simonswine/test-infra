@@ -12,7 +12,7 @@
 # See the License for the specific language governing permissions and
 # limitations under the License.
 
-VERSION = $(shell date +v%Y%m%d)-$(shell git describe --tags --always --dirty)
+VERSION := $(shell date +v%Y%m%d)-$(shell git describe --tags --always --dirty)
 PROJECT ?= jetstack-build-infra
 
 # TODO(fejta): convert these to bazel rules

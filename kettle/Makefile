@@ -13,7 +13,7 @@
 # limitations under the License.
 
 IMG = gcr.io/k8s-testimages/kettle
-TAG = $(shell date +v%Y%m%d)-$(shell git describe --tags --always --dirty)
+TAG := $(shell date +v%Y%m%d)-$(shell git describe --tags --always --dirty)
 
 # These are the usual GKE variables.
 PROJECT       ?= k8s-gubernator
@@ -24,9 +24,7 @@ get-cluster-credentials:
 	kubectl config use-context gke_k8s-gubernator_us-west1-b_g8r || gcloud container clusters get-credentials "$(CLUSTER)" --project="$(PROJECT)" --zone="$(ZONE)"
 
 build:
-	cp ../buckets.yaml .
 	docker build -t $(IMG):$(TAG) .
-	rm buckets.yaml
 	docker tag $(IMG):$(TAG) $(IMG):latest
 	echo Built $(IMG):$(TAG) and tagged with $(IMG):latest ;
 
@@ -36,7 +34,14 @@ push: build
 	echo Pushed $(IMG):latest and $(IMG):$(TAG)
 
 deploy: get-cluster-credentials
-	sed "s/:latest/:$(TAG)/g" deployment.yaml | kubectl apply -f -
+	sed "s/:latest/:$(TAG)/g" deployment.yaml | kubectl apply -f - --record
+
+update: get-cluster-credentials
+	kubectl set image deployment/kettle kettle=$(IMG):$(TAG) --record
+
+rollback: get-cluster-credentials
+	kubectl rollout undo deployments/kettle
+
 
 .PHONY: all build push
 

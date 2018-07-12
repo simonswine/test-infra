@@ -21,9 +21,11 @@ triggers:
   - jetstack/vault-unsealer
   - jetstack/vault-plugin-auth-templated-aws
   trusted_org: jetstack
+  only_org_members: true
 - repos:
   - jetstack/cert-manager
   trusted_org: cert-manager
+  only_org_members: true
 
 blunderbuss:
   # Only request a review from 1 reviewer
@@ -67,6 +69,8 @@ config_updater:
       name: config
     prow/plugins.yaml:
       name: plugins
+    config/jobs/**/*.yaml:
+      name: job-config
 
 plugins:
 

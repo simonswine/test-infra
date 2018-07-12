@@ -523,9 +523,7 @@ class JobTest(unittest.TestCase):
             'ci-kubernetes-e2e-gce-scalability-canary': 'ci-kubernetes-e2e-gce-scalability-*',
             # TODO(fejta): remove these (found while migrating jobs)
             'ci-kubernetes-kubemark-100-gce': 'ci-kubernetes-kubemark-*',
-            'ci-kubernetes-kubemark-5-prow-canary': 'ci-kubernetes-kubemark-*',
             'ci-kubernetes-kubemark-100-canary': 'ci-kubernetes-kubemark-*',
-            'ci-kubernetes-kubemark-5-gce': 'ci-kubernetes-kubemark-*',
             'ci-kubernetes-kubemark-5-gce-last-release': 'ci-kubernetes-kubemark-*',
             'ci-kubernetes-kubemark-high-density-100-gce': 'ci-kubernetes-kubemark-*',
             'ci-kubernetes-kubemark-gce-scale': 'ci-kubernetes-scale-*',
@@ -551,7 +549,9 @@ class JobTest(unittest.TestCase):
             'ci-kubernetes-e2e-gce': 'ci-kubernetes-e2e-gce-*',
             'ci-kubernetes-e2e-gce-canary': 'ci-kubernetes-e2e-gce-*',
             'ci-kubernetes-node-kubelet-serial': 'ci-kubernetes-node-kubelet-*',
+            'ci-kubernetes-node-kubelet-orphans': 'ci-kubernetes-node-kubelet-*',
             'ci-kubernetes-node-kubelet-serial-cpu-manager': 'ci-kubernetes-node-kubelet-*',
+            'ci-kubernetes-node-kubelet-features': 'ci-kubernetes-node-kubelet-*',
             'ci-kubernetes-node-kubelet-flaky': 'ci-kubernetes-node-kubelet-*',
             'ci-kubernetes-node-kubelet-conformance': 'ci-kubernetes-node-kubelet-*',
             'ci-kubernetes-node-kubelet-benchmark': 'ci-kubernetes-node-kubelet-*',
@@ -561,13 +561,17 @@ class JobTest(unittest.TestCase):
             'ci-kubernetes-node-kubelet-stable3': 'ci-kubernetes-node-kubelet-*',
             'ci-kubernetes-node-kubelet-alpha': 'ci-kubernetes-node-kubelet-*',
             'ci-kubernetes-node-kubelet-beta': 'ci-kubernetes-node-kubelet-*',
+            'ci-kubernetes-node-kubelet-beta-features': 'ci-kubernetes-node-kubelet-*',
             'ci-kubernetes-node-kubelet-non-cri-1-6': 'ci-kubernetes-node-kubelet-*',
             # The cri-containerd validation node e2e jobs intentionally share projects.
             'ci-cri-containerd-node-e2e': 'cri-containerd-node-e2e-*',
             'ci-cri-containerd-node-e2e-serial': 'cri-containerd-node-e2e-*',
+            'ci-cri-containerd-node-e2e-features': 'cri-containerd-node-e2e-*',
             'ci-cri-containerd-node-e2e-flaky': 'cri-containerd-node-e2e-*',
             'ci-cri-containerd-node-e2e-benchmark': 'cri-containerd-node-e2e-*',
             'ci-containerd-node-e2e': 'cri-containerd-node-e2e-*',
+            'ci-containerd-node-e2e-1-1': 'cri-containerd-node-e2e-*',
+            'ci-containerd-node-e2e-features': 'cri-containerd-node-e2e-*',
             # ci-cri-containerd-e2e-gce-stackdriver intentionally share projects with
             # ci-kubernetes-e2e-gce-stackdriver.
             'ci-kubernetes-e2e-gce-stackdriver': 'k8s-jkns-e2e-gce-stackdriver',
@@ -579,9 +583,8 @@ class JobTest(unittest.TestCase):
             'ci-kubernetes-e2e-gci-gce-autoscaling-hpa':'ci-kubernetes-e2e-gci-gce-autoscaling',
             'ci-kubernetes-e2e-gci-gce-autoscaling-migs-hpa':'ci-kubernetes-e2e-gci-gce-autoscaling-migs',
             'ci-kubernetes-e2e-gci-gke-autoscaling-hpa':'ci-kubernetes-e2e-gci-gke-autoscaling',
-            # kubemark presubmits
-            'pull-kubernetes-kubemark-e2e-gce-canary':'k8s-jkns-pr-kubemark',
-            'pull-kubernetes-kubemark-e2e-gce':'k8s-jkns-pr-kubemark',
+            # gpu+autoscaling jobs intentionally share projects with gpu tests
+            'ci-kubernetes-e2e-gci-gke-autoscaling-gpu-v100': 'ci-kubernetes-e2e-gke-staging-latest-device-plugin-gpu-v100',
         }
         # pylint: enable=line-too-long
         projects = collections.defaultdict(set)

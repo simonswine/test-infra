@@ -38,6 +38,7 @@ import (
 	"golang.org/x/oauth2"
 	"golang.org/x/oauth2/github"
 	"k8s.io/test-infra/prow/config"
+	"k8s.io/test-infra/prow/deck/jobs"
 	"k8s.io/test-infra/prow/githuboauth"
 	"k8s.io/test-infra/prow/kube"
 	"k8s.io/test-infra/prow/logrusutil"
@@ -48,10 +49,11 @@ import (
 
 type options struct {
 	configPath            string
+	jobConfigPath         string
 	buildCluster          string
 	tideURL               string
 	hookURL               string
-	oauthUrl              string
+	oauthURL              string
 	githubOAuthConfigFile string
 	cookieSecretFile      string
 	redirectHTTPTo        string
@@ -63,7 +65,7 @@ func (o *options) Validate() error {
 	if o.configPath == "" {
 		return errors.New("required flag --config-path was unset")
 	}
-	if o.oauthUrl != "" {
+	if o.oauthURL != "" {
 		if o.githubOAuthConfigFile == "" {
 			return errors.New("an OAuth URL was provided but required flag --github-oauth-config-file was unset")
 		}
@@ -76,11 +78,12 @@ func (o *options) Validate() error {
 
 func gatherOptions() options {
 	o := options{}
-	flag.StringVar(&o.configPath, "config-path", "/etc/config/config", "Path to config.yaml.")
+	flag.StringVar(&o.configPath, "config-path", "/etc/config/config.yaml", "Path to config.yaml.")
+	flag.StringVar(&o.jobConfigPath, "job-config-path", "", "Path to prow job configs.")
 	flag.StringVar(&o.buildCluster, "build-cluster", "", "Path to file containing a YAML-marshalled kube.Cluster object. If empty, uses the local cluster.")
 	flag.StringVar(&o.tideURL, "tide-url", "", "Path to tide. If empty, do not serve tide data.")
 	flag.StringVar(&o.hookURL, "hook-url", "", "Path to hook plugin help endpoint.")
-	flag.StringVar(&o.oauthUrl, "oauth-url", "", "Path to deck user dashboard endpoint.")
+	flag.StringVar(&o.oauthURL, "oauth-url", "", "Path to deck user dashboard endpoint.")
 	flag.StringVar(&o.githubOAuthConfigFile, "github-oauth-config-file", "/etc/github/secret", "Path to the file containing the GitHub App Client secret.")
 	flag.StringVar(&o.cookieSecretFile, "cookie-secret", "/etc/cookie/secret", "Path to the file containing the cookie secret key.")
 	// use when behind a load balancer
@@ -128,7 +131,7 @@ func main() {
 func prodOnlyMain(o options, mux *http.ServeMux) *http.ServeMux {
 	// setup config agent, pod log clients etc.
 	configAgent := &config.Agent{}
-	if err := configAgent.Start(o.configPath); err != nil {
+	if err := configAgent.Start(o.configPath, o.jobConfigPath); err != nil {
 		logrus.WithError(err).Fatal("Error starting config agent.")
 	}
 
@@ -147,16 +150,12 @@ func prodOnlyMain(o options, mux *http.ServeMux) *http.ServeMux {
 			logrus.WithError(err).Fatal("Error getting kube client to build cluster.")
 		}
 	}
-	plClients := map[string]podLogClient{}
+	plClients := map[string]jobs.PodLogClient{}
 	for alias, client := range pkcs {
 		plClients[alias] = client
 	}
 
-	ja := &JobAgent{
-		kc:   kc,
-		pkcs: plClients,
-		c:    configAgent,
-	}
+	ja := jobs.NewJobAgent(kc, plClients, configAgent)
 	ja.Start()
 
 	// setup prod only handlers
@@ -187,8 +186,8 @@ func prodOnlyMain(o options, mux *http.ServeMux) *http.ServeMux {
 		mux.Handle("/tide.js", gziphandler.GzipHandler(handleTide(configAgent, ta)))
 	}
 
-	// Enable Git OAuth feature if oauthUrl is provided.
-	if o.oauthUrl != "" {
+	// Enable Git OAuth feature if oauthURL is provided.
+	if o.oauthURL != "" {
 		githubOAuthConfigRaw, err := loadToken(o.githubOAuthConfigFile)
 		if err != nil {
 			logrus.WithError(err).Fatal("Could not read github oauth config file.")
@@ -343,7 +342,7 @@ func handleNotCached(next http.Handler) http.HandlerFunc {
 	}
 }
 
-func handleProwJobs(ja *JobAgent) http.HandlerFunc {
+func handleProwJobs(ja *jobs.JobAgent) http.HandlerFunc {
 	return func(w http.ResponseWriter, r *http.Request) {
 		setHeadersNoCaching(w)
 		jobs := ja.ProwJobs()
@@ -369,7 +368,7 @@ func handleProwJobs(ja *JobAgent) http.HandlerFunc {
 	}
 }
 
-func handleData(ja *JobAgent) http.HandlerFunc {
+func handleData(ja *jobs.JobAgent) http.HandlerFunc {
 	return func(w http.ResponseWriter, r *http.Request) {
 		setHeadersNoCaching(w)
 		jobs := ja.Jobs()
@@ -388,7 +387,7 @@ func handleData(ja *JobAgent) http.HandlerFunc {
 	}
 }
 
-func handleBadge(ja *JobAgent) http.HandlerFunc {
+func handleBadge(ja *jobs.JobAgent) http.HandlerFunc {
 	return func(w http.ResponseWriter, r *http.Request) {
 		setHeadersNoCaching(w)
 		wantJobs := r.URL.Query().Get("jobs")
@@ -480,7 +479,7 @@ func handleLog(lc logClient) http.HandlerFunc {
 		log, err := lc.GetJobLog(job, id)
 		if err != nil {
 			http.Error(w, fmt.Sprintf("Log not found: %v", err), http.StatusNotFound)
-			logrus.WithError(err).Warning("Error returned.")
+			logrus.WithError(err).Warning("Log not found.")
 			return
 		}
 		if _, err = w.Write(log); err != nil {
@@ -522,7 +521,7 @@ func handleRerun(kc pjClient) http.HandlerFunc {
 		pj, err := kc.GetProwJob(name)
 		if err != nil {
 			http.Error(w, fmt.Sprintf("ProwJob not found: %v", err), http.StatusNotFound)
-			logrus.WithError(err).Warning("Error returned.")
+			logrus.WithError(err).Warning("ProwJob not found.")
 			return
 		}
 		pjutil := pjutil.NewProwJob(pj.Spec, pj.ObjectMeta.Labels)
@@ -538,7 +537,7 @@ func handleRerun(kc pjClient) http.HandlerFunc {
 	}
 }
 
-func handleConfig(ca configAgent) http.HandlerFunc {
+func handleConfig(ca jobs.ConfigAgent) http.HandlerFunc {
 	return func(w http.ResponseWriter, r *http.Request) {
 		// TODO(bentheelder): add the ability to query for portions of the config?
 		setHeadersNoCaching(w)
@@ -558,7 +557,7 @@ func handleConfig(ca configAgent) http.HandlerFunc {
 	}
 }
 
-func handleBranding(ca configAgent) http.HandlerFunc {
+func handleBranding(ca jobs.ConfigAgent) http.HandlerFunc {
 	return func(w http.ResponseWriter, r *http.Request) {
 		setHeadersNoCaching(w)
 		config := ca.Config()

@@ -25,10 +25,18 @@ import (
 	"strings"
 	"testing"
 
+	"flag"
 	"k8s.io/test-infra/prow/kube"
 )
 
+var c *Config
+var cj configJSON
+var configPath = flag.String("config", "../config.yaml", "Path to prow config")
+var jobConfigPath = flag.String("job-config", "", "Path to prow job config")
+var configJSONPath = flag.String("config-json", "../../jobs/config.json", "Path to prow job config")
 var podRe = regexp.MustCompile(`^[a-z0-9]([-a-z0-9]*[a-z0-9])?$`)
+
+type configJSON map[string]map[string]interface{}
 
 const (
 	testThis   = "/test all"
@@ -72,6 +80,44 @@ func checkOverlapBrancher(b1, b2 Brancher) bool {
 	return false
 }
 
+func readConfigJSON(path string) (config configJSON, err error) {
+	raw, err := ioutil.ReadFile(path)
+	if err != nil {
+		return nil, err
+	}
+	config = configJSON{}
+	err = json.Unmarshal(raw, &config)
+	if err != nil {
+		return nil, err
+	}
+	return config, nil
+}
+
+func TestMain(m *testing.M) {
+	flag.Parse()
+	if *configPath == "" {
+		fmt.Println("--config must set")
+		os.Exit(1)
+	}
+
+	conf, err := Load(*configPath, *jobConfigPath)
+	if err != nil {
+		fmt.Printf("Could not load config: %v", err)
+		os.Exit(1)
+	}
+	c = conf
+
+	if *configJSONPath != "" {
+		cj, err = readConfigJSON(*configJSONPath)
+		if err != nil {
+			fmt.Printf("Could not load jobs config: %v", err)
+			os.Exit(1)
+		}
+	}
+
+	os.Exit(m.Run())
+}
+
 // TODO(spxtr): Some of this is generic prowjob stuff and some of this is k8s-
 // specific. Figure out which is which and split this up.
 func TestPresubmits(t *testing.T) {
@@ -91,7 +137,7 @@ func TestPresubmits(t *testing.T) {
 				t.Errorf("Job %v needs a name.", job)
 				continue
 			}
-			if job.Context == "" {
+			if !job.SkipReport && job.Context == "" {
 				t.Errorf("Job %s needs a context.", job.Name)
 			}
 			if job.RerunCommand == "" || job.Trigger == "" {
@@ -211,51 +257,53 @@ func TestCommentBodyMatches(t *testing.T) {
 		},
 	}
 	c := &Config{
-		Presubmits: map[string][]Presubmit{
-			"org/repo": {
-				{
-					Name:      "gce",
-					re:        regexp.MustCompile(`/test (gce|all)`),
-					AlwaysRun: true,
+		JobConfig: JobConfig{
+			Presubmits: map[string][]Presubmit{
+				"org/repo": {
+					{
+						Name:      "gce",
+						re:        regexp.MustCompile(`/test (gce|all)`),
+						AlwaysRun: true,
+					},
+					{
+						Name:      "unit",
+						re:        regexp.MustCompile(`/test (unit|all)`),
+						AlwaysRun: true,
+					},
+					{
+						Name:      "gke",
+						re:        regexp.MustCompile(`/test (gke|all)`),
+						AlwaysRun: false,
+					},
+					{
+						Name:      "federation",
+						re:        regexp.MustCompile(`/test federation`),
+						AlwaysRun: false,
+					},
 				},
-				{
-					Name:      "unit",
-					re:        regexp.MustCompile(`/test (unit|all)`),
-					AlwaysRun: true,
-				},
-				{
-					Name:      "gke",
-					re:        regexp.MustCompile(`/test (gke|all)`),
-					AlwaysRun: false,
-				},
-				{
-					Name:      "federation",
-					re:        regexp.MustCompile(`/test federation`),
-					AlwaysRun: false,
-				},
-			},
-			"org/repo2": {
-				{
-					Name:      "cadveapster",
-					re:        regexp.MustCompile(`/test all`),
-					AlwaysRun: true,
-					RunAfterSuccess: []Presubmit{
-						{
-							Name:      "after-cadveapster",
-							re:        regexp.MustCompile(`/test (really|all)`),
-							AlwaysRun: true,
-							RunAfterSuccess: []Presubmit{
-								{
-									Name:      "after-after-cadveapster",
-									re:        regexp.MustCompile(`/test (again really|all)`),
-									AlwaysRun: true,
+				"org/repo2": {
+					{
+						Name:      "cadveapster",
+						re:        regexp.MustCompile(`/test all`),
+						AlwaysRun: true,
+						RunAfterSuccess: []Presubmit{
+							{
+								Name:      "after-cadveapster",
+								re:        regexp.MustCompile(`/test (really|all)`),
+								AlwaysRun: true,
+								RunAfterSuccess: []Presubmit{
+									{
+										Name:      "after-after-cadveapster",
+										re:        regexp.MustCompile(`/test (again really|all)`),
+										AlwaysRun: true,
+									},
 								},
 							},
-						},
-						{
-							Name:      "another-after-cadveapster",
-							re:        regexp.MustCompile(`@k8s-bot dont test this`),
-							AlwaysRun: true,
+							{
+								Name:      "another-after-cadveapster",
+								re:        regexp.MustCompile(`@k8s-bot dont test this`),
+								AlwaysRun: true,
+							},
 						},
 					},
 				},
@@ -321,29 +369,31 @@ func TestRetestPresubmits(t *testing.T) {
 		},
 	}
 	c := &Config{
-		Presubmits: map[string][]Presubmit{
-			"org/repo": {
-				{
-					Context:   "gce",
-					AlwaysRun: true,
+		JobConfig: JobConfig{
+			Presubmits: map[string][]Presubmit{
+				"org/repo": {
+					{
+						Context:   "gce",
+						AlwaysRun: true,
+					},
+					{
+						Context:   "unit",
+						AlwaysRun: true,
+					},
+					{
+						Context:   "gke",
+						AlwaysRun: false,
+					},
+					{
+						Context:   "federation",
+						AlwaysRun: false,
+					},
 				},
-				{
-					Context:   "unit",
-					AlwaysRun: true,
-				},
-				{
-					Context:   "gke",
-					AlwaysRun: false,
-				},
-				{
-					Context:   "federation",
-					AlwaysRun: false,
-				},
-			},
-			"org/repo2": {
-				{
-					Context:   "shouldneverrun",
-					AlwaysRun: true,
+				"org/repo2": {
+					{
+						Context:   "shouldneverrun",
+						AlwaysRun: true,
+					},
 				},
 			},
 		},
@@ -382,7 +432,7 @@ func TestConditionalPresubmits(t *testing.T) {
 			RunIfChanged: `(Makefile|\.sh|_(windows|linux|osx|unknown)(_test)?\.go)$`,
 		},
 	}
-	SetRegexes(presubmits)
+	SetPresubmitRegexes(presubmits)
 	ps := presubmits[0]
 	var testcases = []struct {
 		changes  []string
@@ -405,33 +455,35 @@ func TestConditionalPresubmits(t *testing.T) {
 
 func TestListPresubmit(t *testing.T) {
 	c := &Config{
-		Presubmits: map[string][]Presubmit{
-			"r1": {
-				{
-					Name: "a",
-					RunAfterSuccess: []Presubmit{
-						{Name: "aa"},
-						{Name: "ab"},
+		JobConfig: JobConfig{
+			Presubmits: map[string][]Presubmit{
+				"r1": {
+					{
+						Name: "a",
+						RunAfterSuccess: []Presubmit{
+							{Name: "aa"},
+							{Name: "ab"},
+						},
 					},
+					{Name: "b"},
 				},
-				{Name: "b"},
-			},
-			"r2": {
-				{
-					Name: "c",
-					RunAfterSuccess: []Presubmit{
-						{Name: "ca"},
-						{Name: "cb"},
+				"r2": {
+					{
+						Name: "c",
+						RunAfterSuccess: []Presubmit{
+							{Name: "ca"},
+							{Name: "cb"},
+						},
 					},
+					{Name: "d"},
 				},
-				{Name: "d"},
 			},
-		},
-		Postsubmits: map[string][]Postsubmit{
-			"r1": {{Name: "e"}},
-		},
-		Periodics: []Periodic{
-			{Name: "f"},
+			Postsubmits: map[string][]Postsubmit{
+				"r1": {{Name: "e"}},
+			},
+			Periodics: []Periodic{
+				{Name: "f"},
+			},
 		},
 	}
 
@@ -474,24 +526,26 @@ func TestListPresubmit(t *testing.T) {
 
 func TestListPostsubmit(t *testing.T) {
 	c := &Config{
-		Presubmits: map[string][]Presubmit{
-			"r1": {{Name: "a"}},
-		},
-		Postsubmits: map[string][]Postsubmit{
-			"r1": {
-				{
-					Name: "c",
-					RunAfterSuccess: []Postsubmit{
-						{Name: "ca"},
-						{Name: "cb"},
-					},
-				},
-				{Name: "d"},
+		JobConfig: JobConfig{
+			Presubmits: map[string][]Presubmit{
+				"r1": {{Name: "a"}},
 			},
-			"r2": {{Name: "e"}},
-		},
-		Periodics: []Periodic{
-			{Name: "f"},
+			Postsubmits: map[string][]Postsubmit{
+				"r1": {
+					{
+						Name: "c",
+						RunAfterSuccess: []Postsubmit{
+							{Name: "ca"},
+							{Name: "cb"},
+						},
+					},
+					{Name: "d"},
+				},
+				"r2": {{Name: "e"}},
+			},
+			Periodics: []Periodic{
+				{Name: "f"},
+			},
 		},
 	}
 
@@ -534,21 +588,23 @@ func TestListPostsubmit(t *testing.T) {
 
 func TestListPeriodic(t *testing.T) {
 	c := &Config{
-		Presubmits: map[string][]Presubmit{
-			"r1": {{Name: "a"}},
-		},
-		Postsubmits: map[string][]Postsubmit{
-			"r1": {{Name: "b"}},
-		},
-		Periodics: []Periodic{
-			{
-				Name: "c",
-				RunAfterSuccess: []Periodic{
-					{Name: "ca"},
-					{Name: "cb"},
-				},
+		JobConfig: JobConfig{
+			Presubmits: map[string][]Presubmit{
+				"r1": {{Name: "a"}},
 			},
-			{Name: "d"},
+			Postsubmits: map[string][]Postsubmit{
+				"r1": {{Name: "b"}},
+			},
+			Periodics: []Periodic{
+				{
+					Name: "c",
+					RunAfterSuccess: []Periodic{
+						{Name: "ca"},
+						{Name: "cb"},
+					},
+				},
+				{Name: "d"},
+			},
 		},
 	}
 
@@ -598,6 +654,10 @@ func TestRunAgainstBranch(t *testing.T) {
 		{
 			Name: "default",
 		},
+	}
+
+	if err := SetPresubmitRegexes(jobs); err != nil {
+		t.Fatalf("could not set regexes: %v", err)
 	}
 
 	for _, job := range jobs {
@@ -766,7 +826,7 @@ func TestMergePreset(t *testing.T) {
 		},
 	}
 	for _, tc := range tcs {
-		if err := validatePresets("foo", tc.jobLabels, tc.pod, tc.presets); err == nil && tc.shouldError {
+		if err := resolvePresets("foo", tc.jobLabels, tc.pod, tc.presets); err == nil && tc.shouldError {
 			t.Errorf("For test \"%s\": expected error but got none.", tc.name)
 		} else if err != nil && !tc.shouldError {
 			t.Errorf("For test \"%s\": expected no error but got %v.", tc.name, err)

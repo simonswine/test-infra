@@ -200,7 +200,7 @@ func TestConfig(t *testing.T) {
 				t.Errorf("Dashboard %v, tab %v: - Testgroup %v must be defined first",
 					dashboard.Name, dashboardtab.Name, dashboardtab.TestGroupName)
 			} else {
-				testgroupMap[dashboardtab.TestGroupName] += 1
+				testgroupMap[dashboardtab.TestGroupName]++
 			}
 
 			if dashboardtab.AlertOptions != nil && (dashboardtab.AlertOptions.AlertStaleResultsHours != 0 || dashboardtab.AlertOptions.NumFailuresToAlert != 0) {
@@ -343,40 +343,43 @@ func TestConfig(t *testing.T) {
 
 func TestJobsTestgridEntryMatch(t *testing.T) {
 	prowPath := "../../../prow/config.yaml"
+	jobPath := "../../../config/jobs"
 
 	jobs := make(map[string]bool)
 
-	prowConfig, err := prow_config.Load(prowPath)
+	prowConfig, err := prow_config.Load(prowPath, jobPath)
 	if err != nil {
 		t.Fatalf("Could not load prow configs: %v\n", err)
 	}
 
 	// Also check k/k presubmit, prow postsubmit and periodic jobs
 	for _, job := range prowConfig.AllPresubmits([]string{
+		"bazelbuild/rules_k8s",
 		"google/cadvisor",
+		"kubeflow/caffe2-operator",
 		"kubeflow/examples",
+		"kubeflow/experimental-beagle",
+		"kubeflow/experimental-kvc",
+		"kubeflow/experimental-seldon",
+		"kubeflow/katib",
+		"kubeflow/kubebench",
 		"kubeflow/kubeflow",
+		"kubeflow/mpi-operator",
 		"kubeflow/pytorch-operator",
 		"kubeflow/reporting",
 		"kubeflow/testing",
 		"kubeflow/tf-operator",
-		"kubeflow/katib",
-		"kubeflow/experimental-kvc",
-		"kubeflow/experimental-seldon",
-		"kubeflow/experimental-beagle",
-		"kubeflow/caffe2-operator",
 		"kubeflow/website",
-		"kubeflow/kubebench",
-		"kubernetes/kubernetes",
-		"kubernetes/test-infra",
-		"kubernetes/cluster-registry",
-		"kubernetes/federation",
-		"kubernetes/kops",
-		"kubernetes/heapster",
-		"kubernetes/charts",
-		"kubernetes/kube-deploy",
 		"kubernetes-sigs/cluster-api",
 		"kubernetes-sigs/poseidon",
+		"kubernetes/charts",
+		"kubernetes/cluster-registry",
+		"kubernetes/federation",
+		"kubernetes/heapster",
+		"kubernetes/kops",
+		"kubernetes/kube-deploy",
+		"kubernetes/kubernetes",
+		"kubernetes/test-infra",
 		"tensorflow/minigo",
 	}) {
 		jobs[job.Name] = false

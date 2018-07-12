@@ -50,7 +50,7 @@ func (o *options) Validate() error {
 
 func gatherOptions() options {
 	o := options{}
-	flag.StringVar(&o.configPath, "config-path", "/etc/config/config", "Path to config.yaml.")
+	flag.StringVar(&o.configPath, "config-path", "/etc/config/config.yaml", "Path to config.yaml.")
 	flag.StringVar(&o.instance, "gerrit-instance", "", "URL to gerrit instance")
 	flag.StringVar(&o.projects, "gerrit-projects", "", "comma separated gerrit projects to fetch from the gerrit instance")
 	flag.StringVar(&o.storage, "storage", "", "Path to persistent volume to load the last sync time")
@@ -74,7 +74,7 @@ func main() {
 	}
 
 	ca := &config.Agent{}
-	if err := ca.Start(o.configPath); err != nil {
+	if err := ca.Start(o.configPath, ""); err != nil {
 		logrus.WithError(err).Fatal("Error starting config agent.")
 	}
 
