@@ -173,7 +173,6 @@ tide:
 
 # puppet module verify using ruby tooling
 .puppet_module_verify: &puppet_module_verify
-  always_run: true
   skip_report: false
   max_concurrency: 4
   agent: kubernetes
@@ -208,7 +207,6 @@ tide:
 # puppet module acceptance tests using ruby tooling, elevated privileges due
 # to requirement to run nested VMs
 .puppet_module_acceptance: &puppet_module_acceptance
-  always_run: true
   skip_report: false
   max_concurrency: 2
   agent: kubernetes
@@ -812,11 +810,13 @@ presubmits:
 
   jetstack/puppet-module-aws_ebs:
   - <<: *puppet_module_verify
+    always_run: true
     name: puppet-module-aws_ebs-quick-verify
     context: puppet-module-aws_ebs-quick-verify
 
   jetstack/puppet-module-calico:
   - <<: *puppet_module_verify
+    always_run: true
     name: puppet-module-calico-quick-verify
     context: puppet-module-calico-quick-verify
   - <<: *puppet_module_acceptance
@@ -825,20 +825,25 @@ presubmits:
 
   jetstack/puppet-module-etcd:
   - <<: *puppet_module_verify
+    always_run: true
     name: puppet-module-etcd-quick-verify
     context: puppet-module-etcd-quick-verify
   - <<: *puppet_module_acceptance
+    always_run: true
     name: puppet-module-etcd-acceptance-single-node
     context: puppet-module-etcd-acceptance-single-node
   - <<: *puppet_module_acceptance
+    always_run: true
     name: puppet-module-etcd-acceptance-three-node
     context: puppet-module-etcd-acceptance-three-node
 
   jetstack/puppet-module-kubernetes:
   - <<: *puppet_module_verify
+    always_run: true
     name: puppet-module-kubernetes-quick-verify
     context: puppet-module-kubernetes-quick-verify
   - <<: *puppet_module_acceptance
+    always_run: true
     name: puppet-module-kubernetes-acceptance
     context: puppet-module-kubernetes-acceptance
 
@@ -846,16 +851,20 @@ presubmits:
   - <<: *puppet_module_verify
     name: puppet-module-kubernetes_addons-quick-verify
     context: puppet-module-kubernetes_addons-quick-verify
+    always_run: true
 
   jetstack/puppet-module-prometheus:
   - <<: *puppet_module_verify
     name: puppet-module-prometheus-quick-verify
     context: puppet-module-prometheus-quick-verify
+    always_run: true
 
   jetstack/puppet-module-tarmak:
   - <<: *puppet_module_verify
     name: puppet-module-tarmak-quick-verify
     context: puppet-module-tarmak-quick-verify
+    always_run: true
+
   - <<: *puppet_module_acceptance
     name: puppet-module-tarmak-acceptance-1-10-centos
     context: puppet-module-tarmak-acceptance-1-10-centos
@@ -903,6 +912,8 @@ presubmits:
   - <<: *puppet_module_verify
     name: puppet-module-vault_client-quick-verify
     context: puppet-module-vault_client-quick-verify
+    always_run: true
+
   - <<: *puppet_module_acceptance
     name: puppet-module-vault_client-acceptance-centos
     context: puppet-module-vault_client-acceptance-centos
@@ -1050,6 +1061,7 @@ presubmits:
     - <<: *puppet_module_acceptance
       name: tarmak-puppet-module-tarmak-acceptance-1-8-centos
       context: tarmak-puppet-module-tarmak-acceptance-1-8-centos
+      always_run: false
       run_if_changed: "^(puppet/modules).*$"
       trigger: "(?m)^/test( all| puppet| puppet-tarmak| puppet-tarmak-acceptance-centos( v?1.8)?|)( \\[.+\\])?$"
       rerun_command: "/test puppet-tarmak-acceptance-centos v1.8"
