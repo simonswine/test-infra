@@ -21,9 +21,11 @@ triggers:
   - jetstack/vault-unsealer
   - jetstack/vault-plugin-auth-templated-aws
   trusted_org: jetstack
+  only_org_members: true
 - repos:
   - jetstack/cert-manager
   trusted_org: cert-manager
+  only_org_members: true
 
 blunderbuss:
   # Only request a review from 1 reviewer
@@ -67,6 +69,8 @@ config_updater:
       name: config
     prow/plugins.yaml:
       name: plugins
+    config/jobs/**/*.yaml:
+      name: job-config
 
 plugins:
 
@@ -79,7 +83,6 @@ plugins:
   - size
   - wip
   - lifecycle
-  - reopen
   - assign
   - hold
   - label
@@ -91,7 +94,6 @@ plugins:
   - release-note
   - blunderbuss
   - assign
-  - reopen
   - golint
   - heart
   - hold
@@ -112,7 +114,6 @@ plugins:
   - trigger
   - assign
   - lifecycle
-  - reopen
   - heart
   - hold
   - label
@@ -129,7 +130,6 @@ plugins:
   - blunderbuss
   - assign
   - lifecycle
-  - reopen
   - golint
   - heart
   - hold
@@ -149,7 +149,6 @@ plugins:
   - assign
   - blunderbuss
   - lifecycle
-  - reopen
   - golint
   - skip
   - heart
@@ -170,7 +169,6 @@ plugins:
   - assign
   - blunderbuss
   - lifecycle
-  - reopen
   - golint
   - heart
   - hold
@@ -187,7 +185,6 @@ plugins:
   - trigger
   - assign
   - lifecycle
-  - reopen
   - heart
   - hold
   - label
@@ -202,7 +199,6 @@ plugins:
   - trigger
   - assign
   - lifecycle
-  - reopen
   - heart
   - hold
   - label
@@ -217,7 +213,6 @@ plugins:
   - trigger
   - assign
   - lifecycle
-  - reopen
   - heart
   - hold
   - label
@@ -232,7 +227,6 @@ plugins:
   - trigger
   - assign
   - lifecycle
-  - reopen
   - heart
   - hold
   - label
@@ -247,7 +241,6 @@ plugins:
   - trigger
   - assign
   - lifecycle
-  - reopen
   - heart
   - hold
   - label
@@ -262,7 +255,6 @@ plugins:
   - trigger
   - assign
   - lifecycle
-  - reopen
   - heart
   - hold
   - label
@@ -277,7 +269,6 @@ plugins:
   - trigger
   - assign
   - lifecycle
-  - reopen
   - heart
   - hold
   - label
@@ -292,7 +283,6 @@ plugins:
   - trigger
   - assign
   - lifecycle
-  - reopen
   - heart
   - hold
   - label
@@ -309,7 +299,6 @@ plugins:
   - assign
   - blunderbuss
   - lifecycle
-  - reopen
   - golint
   - heart
   - hold
@@ -328,7 +317,6 @@ plugins:
   - assign
   - blunderbuss
   - lifecycle
-  - reopen
   - golint
   - heart
   - hold
@@ -347,7 +335,6 @@ plugins:
   - assign
   - blunderbuss
   - lifecycle
-  - reopen
   - golint
   - heart
   - hold

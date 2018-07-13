@@ -41,26 +41,37 @@ const maxConcurrentWorkers = 20
 
 // A label in a repository.
 
+// LabelTarget specifies the intent of the label (PR or issue)
 type LabelTarget string
 
 const (
-	PRTarget    LabelTarget = "prs"
-	IssueTarget             = "issues"
-	BothTarget              = "both"
+	prTarget    LabelTarget = "prs"
+	issueTarget             = "issues"
+	bothTarget              = "both"
 )
 
-var LabelTargets []LabelTarget = []LabelTarget{PRTarget, IssueTarget, BothTarget}
+// LabelTargets is a slice of options: pr, issue, both
+var LabelTargets = []LabelTarget{prTarget, issueTarget, bothTarget}
 
+// Label holds declarative data about the label.
 type Label struct {
-	Name        string      `json:"name"`                  // Current name of the label
-	Color       string      `json:"color"`                 // rrggbb or color
-	Description string      `json:"description"`           // What does this label mean, who can apply it
-	Target      LabelTarget `json:"target"`                // What can this label be applied to: issues, prs, or both
-	ProwPlugin  string      `json:"prowPlugin"`            // Which prow plugin is used to add/remove this label
-	AddedBy     string      `json:"addedBy"`               // What human or plugin or munger or bot adds this label
-	Previously  []Label     `json:"previously,omitempty"`  // Previous names for this label
-	DeleteAfter *time.Time  `json:"deleteAfter,omitempty"` // Retired labels deleted on this date
-	parent      *Label      // Current name for previous labels (used internally)
+	// Name is the current name of the label
+	Name string `json:"name"`
+	// Color is rrggbb or color
+	Color string `json:"color"`
+	// Description is brief text explaining its meaning, who can apply it
+	Description string `json:"description"` // What does this label mean, who can apply it
+	// Target specifies whether it targets PRs, issues or both
+	Target LabelTarget `json:"target"`
+	// ProwPlugin specifies which prow plugin add/removes this label
+	ProwPlugin string `json:"prowPlugin"`
+	// AddedBy specifies whether human/munger/bot adds the label
+	AddedBy string `json:"addedBy"`
+	// Previously lists deprecated names for this label
+	Previously []Label `json:"previously,omitempty"`
+	// DeleteAfter specifies the label is retired and a safe date for deletion
+	DeleteAfter *time.Time `json:"deleteAfter,omitempty"`
+	parent      *Label     // Current name for previous labels (used internally)
 }
 
 // Configuration is a list of Required Labels to sync in all kubernetes repos
@@ -68,7 +79,10 @@ type Configuration struct {
 	Labels []Label `json:"labels"`
 }
 
+// RepoList holds a slice of repos.
 type RepoList []github.Repo
+
+// RepoLabels holds a repo => []github.Label mapping.
 type RepoLabels map[string][]github.Label
 
 // Update a label in a repo
@@ -82,6 +96,12 @@ type Update struct {
 // RepoUpdates Repositories to update: map repo name --> list of Updates
 type RepoUpdates map[string][]Update
 
+const (
+	defaultTokens = 300
+	defaultBurst  = 100
+)
+
+// TODO(fejta): rewrite this to use an option struct which we can unit test, like everything else.
 var (
 	debug        = flag.Bool("debug", false, "Turn on debug to be more verbose")
 	confirm      = flag.Bool("confirm", false, "Make mutating API calls to GitHub.")
@@ -94,6 +114,8 @@ var (
 	action       = flag.String("action", "sync", "One of: sync, docs")
 	docsTemplate = flag.String("docs-template", "", "Path to template file for label docs")
 	docsOutput   = flag.String("docs-output", "", "Path to output file for docs")
+	tokens       = flag.Int("tokens", defaultTokens, "Throttle hourly token consumption (0 to disable)")
+	tokenBurst   = flag.Int("token-burst", defaultBurst, "Allow consuming a subset of hourly tokens in a short burst")
 )
 
 func init() {
@@ -143,7 +165,9 @@ func writeTemplate(templatePath string, outputPath string, data interface{}) err
 	return nil
 }
 
-// Ensures that no two label names (including previous names) have the same lowercase value.
+// validate runs checks to ensure the label inputs are valid
+// It ensures that no two label names (including previous names) have the same
+// lowercase value, and that the description is not over 100 characters.
 func validate(labels []Label, parent string, seen map[string]string) error {
 	for _, l := range labels {
 		name := strings.ToLower(l.Name)
@@ -154,6 +178,9 @@ func validate(labels []Label, parent string, seen map[string]string) error {
 		seen[name] = path
 		if err := validate(l.Previously, path, seen); err != nil {
 			return err
+		}
+		if len(l.Description) > 99 { // github limits the description field to 100 chars
+			return fmt.Errorf("description for %s is too long", name)
 		}
 	}
 	return nil
@@ -168,7 +195,7 @@ func (c Configuration) validate() error {
 	return nil
 }
 
-// Return labels that have a given target
+// LabelsByTarget returns labels that have a given target
 func (c Configuration) LabelsByTarget(target LabelTarget) (labels []Label) {
 	for _, label := range c.Labels {
 		if target == label.Target {
@@ -178,7 +205,7 @@ func (c Configuration) LabelsByTarget(target LabelTarget) (labels []Label) {
 	return
 }
 
-// Load yaml config at path
+// LoadConfig reads the yaml config at path
 func LoadConfig(path string) (*Configuration, error) {
 	if path == "" {
 		return nil, errors.New("empty path")
@@ -208,10 +235,8 @@ func GetOrg(org string) (string, bool) {
 	return org, false
 }
 
-// Get reads repository list for given org
-// Use provided githubClient (real, dry, fake)
-// Uses GitHub: /orgs/:org/repos
-func LoadRepos(org string, gc client, filt filter) (RepoList, error) {
+// loadRepos read what (filtered) repos exist under an org
+func loadRepos(org string, gc client, filt filter) (RepoList, error) {
 	org, isUser := GetOrg(org)
 	repos, err := gc.GetRepos(org, isUser)
 	if err != nil {
@@ -227,10 +252,8 @@ func LoadRepos(org string, gc client, filt filter) (RepoList, error) {
 	return rl, nil
 }
 
-// Get reads repository's labels list
-// Use provided githubClient (real, dry, fake)
-// Uses GitHub: /repos/:org/:repo/labels
-func LoadLabels(gc client, org string, repos RepoList) (*RepoLabels, error) {
+// loadLabels returns what labels exist in github
+func loadLabels(gc client, org string, repos RepoList) (*RepoLabels, error) {
 	repoChan := make(chan github.Repo, len(repos))
 	for _, repo := range repos {
 		repoChan <- repo
@@ -297,10 +320,10 @@ func rename(repo string, previous, wanted Label) Update {
 	return Update{Why: "rename", Current: &previous, Wanted: &wanted, repo: repo}
 }
 
-// Update the label color
-func recolor(repo string, label Label) Update {
-	logrus.WithField("repo", repo).WithField("label", label.Name).WithField("color", label.Color).Info("recolor")
-	return Update{Why: "recolor", Current: &label, Wanted: &label, repo: repo}
+// Update the label color/description
+func change(repo string, label Label) Update {
+	logrus.WithField("repo", repo).WithField("label", label.Name).WithField("color", label.Color).Info("change")
+	return Update{Why: "change", Current: &label, Wanted: &label, repo: repo}
 }
 
 // Migrate labels to another label
@@ -309,7 +332,8 @@ func move(repo string, previous, wanted Label) Update {
 	return Update{Why: "migrate", Wanted: &wanted, Current: &previous, repo: repo}
 }
 
-func ClassifyLabels(labels []Label, required, archaic, dead map[string]Label, now time.Time, parent *Label) {
+// classifyLabels will put labels into the required, archaic, dead maps as appropriate.
+func classifyLabels(labels []Label, required, archaic, dead map[string]Label, now time.Time, parent *Label) {
 	for i, l := range labels {
 		first := parent
 		if first == nil {
@@ -325,11 +349,11 @@ func ClassifyLabels(labels []Label, required, archaic, dead map[string]Label, no
 			l.parent = parent
 			archaic[lower] = l
 		}
-		ClassifyLabels(l.Previously, required, archaic, dead, now, first)
+		classifyLabels(l.Previously, required, archaic, dead, now, first)
 	}
 }
 
-func SyncLabels(config Configuration, repos RepoLabels) (RepoUpdates, error) {
+func syncLabels(config Configuration, repos RepoLabels) (RepoUpdates, error) {
 	// Ensure the config is valid
 	if err := config.validate(); err != nil {
 		return nil, fmt.Errorf("invalid config: %v", err)
@@ -339,7 +363,7 @@ func SyncLabels(config Configuration, repos RepoLabels) (RepoUpdates, error) {
 	required := make(map[string]Label) // Must exist
 	archaic := make(map[string]Label)  // Migrate
 	dead := make(map[string]Label)     // Delete
-	ClassifyLabels(config.Labels, required, archaic, dead, time.Now(), nil)
+	classifyLabels(config.Labels, required, archaic, dead, time.Now(), nil)
 
 	var validationErrors []error
 	var actions []Update
@@ -348,7 +372,7 @@ func SyncLabels(config Configuration, repos RepoLabels) (RepoUpdates, error) {
 		// Convert github.Label to Label
 		var labels []Label
 		for _, l := range repoLabels {
-			labels = append(labels, Label{Name: l.Name, Color: l.Color})
+			labels = append(labels, Label{Name: l.Name, Description: l.Description, Color: l.Color})
 		}
 		// Check for any duplicate labels
 		if err := validate(labels, "", make(map[string]string)); err != nil {
@@ -375,7 +399,7 @@ func SyncLabels(config Configuration, repos RepoLabels) (RepoUpdates, error) {
 				continue
 			}
 			// What do we want to migrate it to?
-			desired := Label{Name: l.parent.Name, Color: l.parent.Color}
+			desired := Label{Name: l.parent.Name, Description: l.Description, Color: l.parent.Color}
 			desiredName := strings.ToLower(l.parent.Name)
 			// Does the new label exist?
 			_, found = current[desiredName]
@@ -396,7 +420,9 @@ func SyncLabels(config Configuration, repos RepoLabels) (RepoUpdates, error) {
 			case l.Name != cur.Name:
 				actions = append(actions, rename(repo, cur, l))
 			case l.Color != cur.Color:
-				actions = append(actions, recolor(repo, l))
+				actions = append(actions, change(repo, l))
+			case l.Description != cur.Description:
+				actions = append(actions, change(repo, l))
 			}
 		}
 
@@ -452,12 +478,12 @@ func (ru RepoUpdates) DoUpdates(org string, gc client) error {
 				logrus.WithField("org", org).WithField("repo", repo).WithField("why", update.Why).Debug("running update")
 				switch update.Why {
 				case "missing":
-					err := gc.AddRepoLabel(org, repo, update.Wanted.Name, update.Wanted.Color)
+					err := gc.AddRepoLabel(org, repo, update.Wanted.Name, update.Wanted.Description, update.Wanted.Color)
 					if err != nil {
 						errChan <- err
 					}
-				case "recolor", "rename":
-					err := gc.UpdateRepoLabel(org, repo, update.Current.Name, update.Wanted.Name, update.Wanted.Color)
+				case "change", "rename":
+					err := gc.UpdateRepoLabel(org, repo, update.Current.Name, update.Wanted.Name, update.Wanted.Description, update.Wanted.Color)
 					if err != nil {
 						errChan <- err
 					}
@@ -508,8 +534,8 @@ func (ru RepoUpdates) DoUpdates(org string, gc client) error {
 }
 
 type client interface {
-	AddRepoLabel(org, repo, name, color string) error
-	UpdateRepoLabel(org, repo, currentName, newName, color string) error
+	AddRepoLabel(org, repo, name, description, color string) error
+	UpdateRepoLabel(org, repo, currentName, newName, description, color string) error
 	DeleteRepoLabel(org, repo, label string) error
 	AddLabel(org, repo string, number int, label string) error
 	RemoveLabel(org, repo string, number int, label string) error
@@ -518,7 +544,7 @@ type client interface {
 	GetRepoLabels(string, string) ([]github.Label, error)
 }
 
-func newClient(tokenPath string, dryRun bool, hosts ...string) (client, error) {
+func newClient(tokenPath string, tokens, tokenBurst int, dryRun bool, hosts ...string) (client, error) {
 	if tokenPath == "" {
 		return nil, errors.New("--token unset")
 	}
@@ -532,7 +558,12 @@ func newClient(tokenPath string, dryRun bool, hosts ...string) (client, error) {
 		return github.NewDryRunClient(oauthSecret, hosts...), nil
 	}
 	c := github.NewClient(oauthSecret, hosts...)
-	c.Throttle(300, 100) // 300 hourly tokens, bursts of 100
+	if tokens > 0 && tokenBurst >= tokens {
+		return nil, fmt.Errorf("--tokens=%d must exceed --token-burst=%d", tokens, tokenBurst)
+	}
+	if tokens > 0 {
+		c.Throttle(tokens, tokenBurst) // 300 hourly tokens, bursts of 100
+	}
 	return c, nil
 }
 
@@ -558,11 +589,11 @@ func main() {
 
 	switch {
 	case *action == "docs":
-		if err := WriteDocs(*docsTemplate, *docsOutput, *config); err != nil {
+		if err := writeDocs(*docsTemplate, *docsOutput, *config); err != nil {
 			logrus.WithError(err).Fatalf("failed to write docs using docs-template %s to docs-output %s", *docsTemplate, *docsOutput)
 		}
 	case *action == "sync":
-		githubClient, err := newClient(*token, !*confirm, endpoint.Strings()...)
+		githubClient, err := newClient(*token, *tokens, *tokenBurst, !*confirm, endpoint.Strings()...)
 		if err != nil {
 			logrus.WithError(err).Fatal("failed to create client")
 		}
@@ -599,7 +630,7 @@ func main() {
 		for _, org := range strings.Split(*orgs, ",") {
 			org = strings.TrimSpace(org)
 
-			if err = SyncOrg(org, githubClient, *config, filt); err != nil {
+			if err = syncOrg(org, githubClient, *config, filt); err != nil {
 				logrus.WithError(err).Fatalf("failed to update %s", org)
 			}
 		}
@@ -610,33 +641,37 @@ func main() {
 
 type filter func(string, string) bool
 
-func WriteDocs(template string, output string, config Configuration) error {
-	labels := map[string][]Label{
-		"both issues and PRs": config.LabelsByTarget(BothTarget),
-		"only issues":         config.LabelsByTarget(IssueTarget),
-		"only PRs":            config.LabelsByTarget(PRTarget),
+type labelData struct {
+	Description, Link, Labels interface{}
+}
+
+func writeDocs(template string, output string, config Configuration) error {
+	data := []labelData{
+		{"both issues and PRs", "both-issues-and-prs", config.LabelsByTarget(bothTarget)},
+		{"only issues", "only-issues", config.LabelsByTarget(issueTarget)},
+		{"only PRs", "only-prs", config.LabelsByTarget(prTarget)},
 	}
-	if err := writeTemplate(*docsTemplate, *docsOutput, labels); err != nil {
+	if err := writeTemplate(*docsTemplate, *docsOutput, data); err != nil {
 		return err
 	}
 	return nil
 }
 
-func SyncOrg(org string, githubClient client, config Configuration, filt filter) error {
+func syncOrg(org string, githubClient client, config Configuration, filt filter) error {
 	logrus.WithField("org", org).Info("Reading repos")
-	repos, err := LoadRepos(org, githubClient, filt)
+	repos, err := loadRepos(org, githubClient, filt)
 	if err != nil {
 		return err
 	}
 
 	logrus.WithField("org", org).Infof("Found %d repos", len(repos))
-	currLabels, err := LoadLabels(githubClient, org, repos)
+	currLabels, err := loadLabels(githubClient, org, repos)
 	if err != nil {
 		return err
 	}
 
 	logrus.WithField("org", org).Infof("Syncing labels for %d repos", len(repos))
-	updates, err := SyncLabels(config, *currLabels)
+	updates, err := syncLabels(config, *currLabels)
 	if err != nil {
 		return err
 	}

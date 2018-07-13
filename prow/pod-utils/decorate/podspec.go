@@ -36,31 +36,34 @@ import (
 )
 
 const (
-	LogMountName            = "logs"
-	LogMountPath            = "/logs"
-	ArtifactsEnv            = "ARTIFACTS"
-	ArtifactsPath           = LogMountPath + "/artifacts"
-	CodeMountName           = "code"
-	CodeMountPath           = "/home/prow/go"
-	GopathEnv               = "GOPATH"
-	ToolsMountName          = "tools"
-	ToolsMountPath          = "/tools"
-	GcsCredentialsMountName = "gcs-credentials"
-	GcsCredentialsMountPath = "/secrets/gcs"
-	SshKeysMountNamePrefix  = "ssh-keys"
-	SshKeysMountPathPrefix  = "/secrets/ssh"
+	logMountName            = "logs"
+	logMountPath            = "/logs"
+	artifactsEnv            = "ARTIFACTS"
+	artifactsPath           = logMountPath + "/artifacts"
+	codeMountName           = "code"
+	codeMountPath           = "/home/prow/go"
+	gopathEnv               = "GOPATH"
+	toolsMountName          = "tools"
+	toolsMountPath          = "/tools"
+	gcsCredentialsMountName = "gcs-credentials"
+	gcsCredentialsMountPath = "/secrets/gcs"
+	sshKeysMountNamePrefix  = "ssh-keys"
+	sshKeysMountPathPrefix  = "/secrets/ssh"
 )
 
+// Labels returns a string slice with label consts from kube.
 func Labels() []string {
 	return []string{kube.ProwJobTypeLabel, kube.CreatedByProw, kube.ProwJobIDLabel}
 }
 
+// VolumeMounts returns a string slice with *MountName consts in it.
 func VolumeMounts() []string {
-	return []string{LogMountName, CodeMountName, ToolsMountName, GcsCredentialsMountName}
+	return []string{logMountName, codeMountName, toolsMountName, gcsCredentialsMountName}
 }
 
+// VolumeMountPaths returns a string slice with *MountPath consts in it.
 func VolumeMountPaths() []string {
-	return []string{LogMountPath, CodeMountPath, ToolsMountPath, GcsCredentialsMountPath}
+	return []string{logMountPath, codeMountPath, toolsMountPath, gcsCredentialsMountPath}
 }
 
 // ProwJobToPod converts a ProwJob to a Pod that will run the tests.
@@ -106,47 +109,47 @@ func ProwJobToPod(pj kube.ProwJob, buildID string) (*v1.Pod, error) {
 }
 
 func decorate(spec *kube.PodSpec, pj *kube.ProwJob, rawEnv map[string]string) error {
-	rawEnv[ArtifactsEnv] = ArtifactsPath
-	rawEnv[GopathEnv] = CodeMountPath
+	rawEnv[artifactsEnv] = artifactsPath
+	rawEnv[gopathEnv] = codeMountPath
 	logMount := kube.VolumeMount{
-		Name:      LogMountName,
-		MountPath: LogMountPath,
+		Name:      logMountName,
+		MountPath: logMountPath,
 	}
 	logVolume := kube.Volume{
-		Name: LogMountName,
+		Name: logMountName,
 		VolumeSource: kube.VolumeSource{
 			EmptyDir: &kube.EmptyDirVolumeSource{},
 		},
 	}
 
 	codeMount := kube.VolumeMount{
-		Name:      CodeMountName,
-		MountPath: CodeMountPath,
+		Name:      codeMountName,
+		MountPath: codeMountPath,
 	}
 	codeVolume := kube.Volume{
-		Name: CodeMountName,
+		Name: codeMountName,
 		VolumeSource: kube.VolumeSource{
 			EmptyDir: &kube.EmptyDirVolumeSource{},
 		},
 	}
 
 	toolsMount := kube.VolumeMount{
-		Name:      ToolsMountName,
-		MountPath: ToolsMountPath,
+		Name:      toolsMountName,
+		MountPath: toolsMountPath,
 	}
 	toolsVolume := kube.Volume{
-		Name: ToolsMountName,
+		Name: toolsMountName,
 		VolumeSource: kube.VolumeSource{
 			EmptyDir: &kube.EmptyDirVolumeSource{},
 		},
 	}
 
 	gcsCredentialsMount := kube.VolumeMount{
-		Name:      GcsCredentialsMountName,
-		MountPath: GcsCredentialsMountPath,
+		Name:      gcsCredentialsMountName,
+		MountPath: gcsCredentialsMountPath,
 	}
 	gcsCredentialsVolume := kube.Volume{
-		Name: GcsCredentialsMountName,
+		Name: gcsCredentialsMountName,
 		VolumeSource: kube.VolumeSource{
 			Secret: &kube.SecretSource{
 				SecretName: pj.Spec.DecorationConfig.GCSCredentialsSecret,
@@ -154,73 +157,81 @@ func decorate(spec *kube.PodSpec, pj *kube.ProwJob, rawEnv map[string]string) er
 		},
 	}
 
-	var sshKeyMode int32 = 0400 // this is octal, so symbolic ref is `u+r`
-	var sshKeysMounts []kube.VolumeMount
 	var sshKeysVolumes []kube.Volume
-	var sshKeyPaths []string
-	for _, secret := range pj.Spec.DecorationConfig.SshKeySecrets {
-		name := fmt.Sprintf("%s-%s", SshKeysMountNamePrefix, secret)
-		keyPath := path.Join(SshKeysMountPathPrefix, secret)
-		sshKeyPaths = append(sshKeyPaths, keyPath)
-		sshKeysMounts = append(sshKeysMounts, kube.VolumeMount{
-			Name:      name,
-			MountPath: keyPath,
-			ReadOnly:  true,
-		})
-		sshKeysVolumes = append(sshKeysVolumes, kube.Volume{
-			Name: name,
-			VolumeSource: kube.VolumeSource{
-				Secret: &kube.SecretSource{
-					SecretName:  secret,
-					DefaultMode: &sshKeyMode,
-				},
-			},
-		})
-	}
-
-	cloneLog := fmt.Sprintf("%s/clone.json", LogMountPath)
+	var cloneLog string
 	var refs []*kube.Refs
 	if pj.Spec.Refs != nil {
 		refs = append(refs, pj.Spec.Refs)
 	}
 	refs = append(refs, pj.Spec.ExtraRefs...)
-	cloneConfigEnv, err := clonerefs.Encode(clonerefs.Options{
-		SrcRoot:      CodeMountPath,
-		Log:          cloneLog,
-		GitUserName:  clonerefs.DefaultGitUserName,
-		GitUserEmail: clonerefs.DefaultGitUserEmail,
-		GitRefs:      refs,
-		KeyFiles:     sshKeyPaths,
-	})
-	if err != nil {
-		return fmt.Errorf("could not encode clone configuration as JSON: %v", err)
-	}
+	willCloneRefs := len(refs) > 0 && !pj.Spec.DecorationConfig.SkipCloning
+	if willCloneRefs {
+		var sshKeyMode int32 = 0400 // this is octal, so symbolic ref is `u+r`
+		var sshKeysMounts []kube.VolumeMount
+		var sshKeyPaths []string
+		for _, secret := range pj.Spec.DecorationConfig.SSHKeySecrets {
+			name := fmt.Sprintf("%s-%s", sshKeysMountNamePrefix, secret)
+			keyPath := path.Join(sshKeysMountPathPrefix, secret)
+			sshKeyPaths = append(sshKeyPaths, keyPath)
+			sshKeysMounts = append(sshKeysMounts, kube.VolumeMount{
+				Name:      name,
+				MountPath: keyPath,
+				ReadOnly:  true,
+			})
+			sshKeysVolumes = append(sshKeysVolumes, kube.Volume{
+				Name: name,
+				VolumeSource: kube.VolumeSource{
+					Secret: &kube.SecretSource{
+						SecretName:  secret,
+						DefaultMode: &sshKeyMode,
+					},
+				},
+			})
+		}
 
-	gcsOptions := gcsupload.Options{
-		// TODO: pass the artifact dir here too once we figure that out
-		GCSConfiguration:   pj.Spec.DecorationConfig.GCSConfiguration,
-		GcsCredentialsFile: fmt.Sprintf("%s/service-account.json", GcsCredentialsMountPath),
-		DryRun:             false,
-	}
-	initUploadConfigEnv, err := initupload.Encode(initupload.Options{
-		Log:     cloneLog,
-		Options: &gcsOptions,
-	})
-	if err != nil {
-		return fmt.Errorf("could not encode initupload configuration as JSON: %v", err)
-	}
+		cloneLog = fmt.Sprintf("%s/clone.json", logMountPath)
+		cloneConfigEnv, err := clonerefs.Encode(clonerefs.Options{
+			SrcRoot:      codeMountPath,
+			Log:          cloneLog,
+			GitUserName:  clonerefs.DefaultGitUserName,
+			GitUserEmail: clonerefs.DefaultGitUserEmail,
+			GitRefs:      refs,
+			KeyFiles:     sshKeyPaths,
+		})
+		if err != nil {
+			return fmt.Errorf("could not encode clone configuration as JSON: %v", err)
+		}
 
-	entrypointLocation := fmt.Sprintf("%s/entrypoint", ToolsMountPath)
-
-	spec.InitContainers = []kube.Container{
-		{
+		spec.InitContainers = append(spec.InitContainers, kube.Container{
 			Name:         "clonerefs",
 			Image:        pj.Spec.DecorationConfig.UtilityImages.CloneRefs,
 			Command:      []string{"/clonerefs"},
 			Env:          kubeEnv(map[string]string{clonerefs.JSONConfigEnvVar: cloneConfigEnv}),
 			VolumeMounts: append([]kube.VolumeMount{logMount, codeMount}, sshKeysMounts...),
-		},
-		{
+		})
+	}
+	gcsOptions := gcsupload.Options{
+		// TODO: pass the artifact dir here too once we figure that out
+		GCSConfiguration:   pj.Spec.DecorationConfig.GCSConfiguration,
+		GcsCredentialsFile: fmt.Sprintf("%s/service-account.json", gcsCredentialsMountPath),
+		DryRun:             false,
+	}
+
+	initUploadOptions := initupload.Options{
+		Options: &gcsOptions,
+	}
+	if willCloneRefs {
+		initUploadOptions.Log = cloneLog
+	}
+	initUploadConfigEnv, err := initupload.Encode(initUploadOptions)
+	if err != nil {
+		return fmt.Errorf("could not encode initupload configuration as JSON: %v", err)
+	}
+
+	entrypointLocation := fmt.Sprintf("%s/entrypoint", toolsMountPath)
+
+	spec.InitContainers = append(spec.InitContainers,
+		kube.Container{
 			Name:    "initupload",
 			Image:   pj.Spec.DecorationConfig.UtilityImages.InitUpload,
 			Command: []string{"/initupload"},
@@ -230,25 +241,25 @@ func decorate(spec *kube.PodSpec, pj *kube.ProwJob, rawEnv map[string]string) er
 			}),
 			VolumeMounts: []kube.VolumeMount{logMount, gcsCredentialsMount},
 		},
-		{
+		kube.Container{
 			Name:         "place-tools",
 			Image:        pj.Spec.DecorationConfig.UtilityImages.Entrypoint,
 			Command:      []string{"/bin/cp"},
 			Args:         []string{"/entrypoint", entrypointLocation},
 			VolumeMounts: []kube.VolumeMount{toolsMount},
 		},
-	}
+	)
 
 	wrapperOptions := wrapper.Options{
-		ProcessLog: fmt.Sprintf("%s/process-log.txt", LogMountPath),
-		MarkerFile: fmt.Sprintf("%s/marker-file.txt", LogMountPath),
+		ProcessLog: fmt.Sprintf("%s/process-log.txt", logMountPath),
+		MarkerFile: fmt.Sprintf("%s/marker-file.txt", logMountPath),
 	}
 	entrypointConfigEnv, err := entrypoint.Encode(entrypoint.Options{
 		Args:        append(spec.Containers[0].Command, spec.Containers[0].Args...),
 		Options:     &wrapperOptions,
 		Timeout:     pj.Spec.DecorationConfig.Timeout,
 		GracePeriod: pj.Spec.DecorationConfig.GracePeriod,
-		ArtifactDir: ArtifactsPath,
+		ArtifactDir: artifactsPath,
 	})
 	if err != nil {
 		return fmt.Errorf("could not encode entrypoint configuration as JSON: %v", err)
@@ -257,22 +268,11 @@ func decorate(spec *kube.PodSpec, pj *kube.ProwJob, rawEnv map[string]string) er
 	allEnv[entrypoint.JSONConfigEnvVar] = entrypointConfigEnv
 
 	spec.Containers[0].Command = []string{entrypointLocation}
-	var checkoutRefs *kube.Refs
-	if pj.Spec.Type == kube.PeriodicJob {
-		if len(pj.Spec.ExtraRefs) > 0 {
-			checkoutRefs = pj.Spec.ExtraRefs[0]
-		}
-	} else {
-		checkoutRefs = pj.Spec.Refs
-	}
-	if checkoutRefs != nil {
-		spec.Containers[0].WorkingDir = clone.PathForRefs(CodeMountPath, checkoutRefs)
-	}
 	spec.Containers[0].Args = []string{}
 	spec.Containers[0].Env = append(spec.Containers[0].Env, kubeEnv(allEnv)...)
-	spec.Containers[0].VolumeMounts = append(spec.Containers[0].VolumeMounts, logMount, codeMount, toolsMount)
+	spec.Containers[0].VolumeMounts = append(spec.Containers[0].VolumeMounts, logMount, toolsMount)
 
-	gcsOptions.Items = append(gcsOptions.Items, ArtifactsPath)
+	gcsOptions.Items = append(gcsOptions.Items, artifactsPath)
 	sidecarConfigEnv, err := sidecar.Encode(sidecar.Options{
 		GcsOptions:     &gcsOptions,
 		WrapperOptions: &wrapperOptions,
@@ -291,7 +291,13 @@ func decorate(spec *kube.PodSpec, pj *kube.ProwJob, rawEnv map[string]string) er
 		}),
 		VolumeMounts: []kube.VolumeMount{logMount, gcsCredentialsMount},
 	})
-	spec.Volumes = append(spec.Volumes, append(sshKeysVolumes, logVolume, codeVolume, toolsVolume, gcsCredentialsVolume)...)
+	spec.Volumes = append(spec.Volumes, logVolume, toolsVolume, gcsCredentialsVolume)
+
+	if willCloneRefs {
+		spec.Containers[0].WorkingDir = clone.PathForRefs(codeMountPath, refs[0])
+		spec.Containers[0].VolumeMounts = append(spec.Containers[0].VolumeMounts, codeMount)
+		spec.Volumes = append(spec.Volumes, append(sshKeysVolumes, codeVolume)...)
+	}
 
 	return nil
 }

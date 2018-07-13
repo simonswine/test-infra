@@ -25,11 +25,14 @@ import (
 	"io/ioutil"
 	"net/http"
 	"net/http/httptest"
+	"reflect"
 	"strconv"
 	"strings"
 	"sync/atomic"
 	"testing"
 	"time"
+
+	"k8s.io/apimachinery/pkg/util/sets"
 )
 
 type testTime struct {
@@ -678,6 +681,56 @@ func TestListReviews(t *testing.T) {
 	}
 }
 
+func TestPrepareReviewersBody(t *testing.T) {
+	var tests = []struct {
+		name         string
+		logins       []string
+		expectedBody map[string][]string
+	}{
+		{
+			name:         "one reviewer",
+			logins:       []string{"george"},
+			expectedBody: map[string][]string{"reviewers": {"george"}},
+		},
+		{
+			name:         "three reviewers",
+			logins:       []string{"george", "jungle", "chimp"},
+			expectedBody: map[string][]string{"reviewers": {"george", "jungle", "chimp"}},
+		},
+		{
+			name:         "one team",
+			logins:       []string{"kubernetes/sig-testing-misc"},
+			expectedBody: map[string][]string{"team_reviewers": {"sig-testing-misc"}},
+		},
+		{
+			name:         "two teams",
+			logins:       []string{"kubernetes/sig-testing-misc", "kubernetes/sig-testing-bugs"},
+			expectedBody: map[string][]string{"team_reviewers": {"sig-testing-misc", "sig-testing-bugs"}},
+		},
+		{
+			name:         "one team not in org",
+			logins:       []string{"kubernetes/sig-testing-misc", "other-org/sig-testing-bugs"},
+			expectedBody: map[string][]string{"team_reviewers": {"sig-testing-misc"}},
+		},
+		{
+			name:         "mixed single",
+			logins:       []string{"george", "kubernetes/sig-testing-misc"},
+			expectedBody: map[string][]string{"reviewers": {"george"}, "team_reviewers": {"sig-testing-misc"}},
+		},
+		{
+			name:         "mixed multiple",
+			logins:       []string{"george", "kubernetes/sig-testing-misc", "kubernetes/sig-testing-bugs", "jungle", "chimp"},
+			expectedBody: map[string][]string{"reviewers": {"george", "jungle", "chimp"}, "team_reviewers": {"sig-testing-misc", "sig-testing-bugs"}},
+		},
+	}
+	for _, test := range tests {
+		body, _ := prepareReviewersBody(test.logins, "kubernetes")
+		if !reflect.DeepEqual(body, test.expectedBody) {
+			t.Errorf("%s: got %s instead of %s", test.name, body, test.expectedBody)
+		}
+	}
+}
+
 func TestRequestReview(t *testing.T) {
 	ts := httptest.NewTLSServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		if r.Method != http.MethodPost {
@@ -694,42 +747,30 @@ func TestRequestReview(t *testing.T) {
 		if err := json.Unmarshal(b, &ps); err != nil {
 			t.Fatalf("Could not unmarshal request: %v", err)
 		}
-		if len(ps) != 1 {
+		if len(ps) < 1 || len(ps) > 2 {
 			t.Fatalf("Wrong length patch: %v", ps)
 		}
-		switch len(ps["reviewers"]) {
-		case 3:
-			if ps["reviewers"][0] != "george" || ps["reviewers"][1] != "jungle" || ps["reviewers"][2] != "not-a-collaborator" {
-				t.Errorf("Wrong reviewers: %v", ps)
-			}
-			//fall out of switch statement to bad reviewer case
-		case 2:
-			if ps["reviewers"][0] != "george" || ps["reviewers"][1] != "jungle" {
-				t.Errorf("Wrong reviewers: %v", ps)
-			}
-			w.WriteHeader(http.StatusCreated)
-			json.NewEncoder(w).Encode(PullRequest{
-				RequestedReviewers: []User{{Login: "george"}, {Login: "jungle"}, {Login: "ignore-other"}},
-			})
+		if sets.NewString(ps["reviewers"]...).Has("not-a-collaborator") {
+			w.WriteHeader(http.StatusUnprocessableEntity)
 			return
-		case 1:
-			if ps["reviewers"][0] != "not-a-collaborator" {
-				w.WriteHeader(http.StatusCreated)
-				json.NewEncoder(w).Encode(PullRequest{
-					RequestedReviewers: []User{{Login: ps["reviewers"][0]}, {Login: "ignore-other"}},
-				})
-				return
-			}
-			//fall out of switch statement to bad reviewer case
-		default:
-			t.Errorf("Wrong reviewers length: %v", ps)
 		}
-		//bad reviewer case
-		w.WriteHeader(http.StatusUnprocessableEntity)
+		requestedReviewers := []User{}
+		for _, reviewers := range ps {
+			for _, reviewer := range reviewers {
+				requestedReviewers = append(requestedReviewers, User{Login: reviewer})
+			}
+		}
+		w.WriteHeader(http.StatusCreated)
+		json.NewEncoder(w).Encode(PullRequest{
+			RequestedReviewers: requestedReviewers,
+		})
 	}))
 	defer ts.Close()
 	c := getClient(ts.URL)
 	if err := c.RequestReview("k8s", "kuber", 5, []string{"george", "jungle"}); err != nil {
+		t.Errorf("Unexpected error: %v", err)
+	}
+	if err := c.RequestReview("k8s", "kuber", 5, []string{"george", "jungle", "k8s/team1"}); err != nil {
 		t.Errorf("Unexpected error: %v", err)
 	}
 	if err := c.RequestReview("k8s", "kuber", 5, []string{"george", "jungle", "not-a-collaborator"}); err == nil {
@@ -737,6 +778,15 @@ func TestRequestReview(t *testing.T) {
 	} else if merr, ok := err.(MissingUsers); ok {
 		if len(merr.Users) != 1 || merr.Users[0] != "not-a-collaborator" {
 			t.Errorf("Expected [not-a-collaborator], not %v", merr.Users)
+		}
+	} else {
+		t.Errorf("Expected MissingUsers error")
+	}
+	if err := c.RequestReview("k8s", "kuber", 5, []string{"george", "jungle", "notk8s/team1"}); err == nil {
+		t.Errorf("Expected an error")
+	} else if merr, ok := err.(MissingUsers); ok {
+		if len(merr.Users) != 1 || merr.Users[0] != "notk8s/team1" {
+			t.Errorf("Expected [notk8s/team1], not %v", merr.Users)
 		}
 	} else {
 		t.Errorf("Expected MissingUsers error")
@@ -1107,17 +1157,131 @@ func TestListTeams(t *testing.T) {
 	}
 }
 
+func TestCreateTeam(t *testing.T) {
+	ts := httptest.NewTLSServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if r.Method != http.MethodPost {
+			t.Errorf("Bad method: %s", r.Method)
+		}
+		if r.URL.Path != "/orgs/foo/teams" {
+			t.Errorf("Bad request path: %s", r.URL.Path)
+		}
+		b, err := ioutil.ReadAll(r.Body)
+		if err != nil {
+			t.Fatalf("Could not read request body: %v", err)
+		}
+		var team Team
+		switch err := json.Unmarshal(b, &team); {
+		case err != nil:
+			t.Errorf("Could not unmarshal request: %v", err)
+		case team.Name == "":
+			t.Errorf("client should reject empty names")
+		case team.Name != "frobber":
+			t.Errorf("Bad name: %s", team.Name)
+		}
+		team.Name = "hello"
+		team.Description = "world"
+		team.Privacy = "special"
+		b, err = json.Marshal(team)
+		if err != nil {
+			t.Fatalf("Didn't expect error: %v", err)
+		}
+		w.WriteHeader(http.StatusCreated) // 201
+		fmt.Fprint(w, string(b))
+	}))
+	defer ts.Close()
+	c := getClient(ts.URL)
+	if _, err := c.CreateTeam("foo", Team{Name: ""}); err == nil {
+		t.Errorf("client should reject empty name")
+	}
+	switch team, err := c.CreateTeam("foo", Team{Name: "frobber"}); {
+	case err != nil:
+		t.Errorf("unexpected error: %v", err)
+	case team.Name != "hello":
+		t.Errorf("bad name: %s", team.Name)
+	case team.Description != "world":
+		t.Errorf("bad description: %s", team.Description)
+	case team.Privacy != "special":
+		t.Errorf("bad privacy: %s", team.Privacy)
+	}
+}
+
+func TestEditTeam(t *testing.T) {
+	ts := httptest.NewTLSServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if r.Method != http.MethodPatch {
+			t.Errorf("Bad method: %s", r.Method)
+		}
+		if r.URL.Path != "/teams/63" {
+			t.Errorf("Bad request path: %s", r.URL.Path)
+		}
+		b, err := ioutil.ReadAll(r.Body)
+		if err != nil {
+			t.Fatalf("Could not read request body: %v", err)
+		}
+		var team Team
+		switch err := json.Unmarshal(b, &team); {
+		case err != nil:
+			t.Errorf("Could not unmarshal request: %v", err)
+		case team.Name == "":
+			t.Errorf("Bad name: %s", team.Name)
+		}
+		team.Name = "hello"
+		team.Description = "world"
+		team.Privacy = "special"
+		b, err = json.Marshal(team)
+		if err != nil {
+			t.Fatalf("Didn't expect error: %v", err)
+		}
+		w.WriteHeader(http.StatusCreated) // 201
+		fmt.Fprint(w, string(b))
+	}))
+	defer ts.Close()
+	c := getClient(ts.URL)
+	if _, err := c.EditTeam(Team{ID: 0, Name: "frobber"}); err == nil {
+		t.Errorf("client should reject id 0")
+	}
+	switch team, err := c.EditTeam(Team{ID: 63, Name: "frobber"}); {
+	case err != nil:
+		t.Errorf("unexpected error: %v", err)
+	case team.Name != "hello":
+		t.Errorf("bad name: %s", team.Name)
+	case team.Description != "world":
+		t.Errorf("bad description: %s", team.Description)
+	case team.Privacy != "special":
+		t.Errorf("bad privacy: %s", team.Privacy)
+	}
+}
+
 func TestListTeamMembers(t *testing.T) {
 	ts := simpleTestServer(t, "/teams/1/members", []TeamMember{{Login: "foo"}})
 	defer ts.Close()
 	c := getClient(ts.URL)
-	teamMembers, err := c.ListTeamMembers(1)
+	teamMembers, err := c.ListTeamMembers(1, RoleAll)
 	if err != nil {
 		t.Errorf("Didn't expect error: %v", err)
 	} else if len(teamMembers) != 1 {
 		t.Errorf("Expected one team member, found %d: %v", len(teamMembers), teamMembers)
 	} else if teamMembers[0].Login != "foo" {
 		t.Errorf("Wrong team names: %v", teamMembers)
+	}
+}
+
+func TestIsCollaborator(t *testing.T) {
+	ts := httptest.NewTLSServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if r.Method != http.MethodGet {
+			t.Errorf("Bad method: %s", r.Method)
+		}
+		if r.URL.Path != "/repos/k8s/kuber/collaborators/person" {
+			t.Errorf("Bad request path: %s", r.URL.Path)
+		}
+		http.Error(w, "204 No Content", http.StatusNoContent)
+	}))
+	defer ts.Close()
+	c := getClient(ts.URL)
+	mem, err := c.IsCollaborator("k8s", "kuber", "person")
+	if err != nil {
+		t.Errorf("Didn't expect error: %v", err)
+	} else if !mem {
+		t.Errorf("Should be member.")
 	}
 }
 

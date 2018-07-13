@@ -10,7 +10,7 @@ the operator to make requests to. By default, `--dry-run` is set to `true`
 so the operator will not make any mutating requests to Jenkins, Github,
 and Kubernetes, but you most probably want to set it to `false`.
 The Jenkins operator expects to read the Prow configuration by default
-in `/etc/config/config` which can be configured with `--config-path`.
+in `/etc/config/config.yaml` which can be configured with `--config-path`.
 
 The following stanza is config that can be optionally set in the Prow config file:
 
@@ -155,10 +155,10 @@ in Github.
 The following Prometheus metrics are exposed by the operator:
 
 * `jenkins_requests` is the number of Jenkins requests made.
- - `verb` is the type of request (`GET`, `POST`)
- - `handler` is the path of the request, usually containing a
+  - `verb` is the type of request (`GET`, `POST`)
+  - `handler` is the path of the request, usually containing a
    job name (eg. `job/test-pull-request-unit`).
- - `code` is the status code of the request (`200`, `404`, etc.).
+  - `code` is the status code of the request (`200`, `404`, etc.).
 * `jenkins_request_retries` is the number of Jenkins request
 retries made.
 * `jenkins_request_latency` is the time for a request to roundtrip

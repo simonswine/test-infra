@@ -69,7 +69,7 @@ func newFakeConfigAgent(t *testing.T, maxConcurrency int) *fca {
 			Name: "test-bazel-test",
 		},
 	}
-	if err := config.SetRegexes(presubmits); err != nil {
+	if err := config.SetPresubmitRegexes(presubmits); err != nil {
 		t.Fatal(err)
 	}
 	presubmitMap := map[string][]config.Presubmit{
@@ -78,15 +78,19 @@ func newFakeConfigAgent(t *testing.T, maxConcurrency int) *fca {
 
 	return &fca{
 		c: &config.Config{
-			Plank: config.Plank{
-				Controller: config.Controller{
-					JobURLTemplate: template.Must(template.New("test").Parse("{{.ObjectMeta.Name}}/{{.Status.State}}")),
-					MaxConcurrency: maxConcurrency,
-					MaxGoroutines:  20,
+			ProwConfig: config.ProwConfig{
+				Plank: config.Plank{
+					Controller: config.Controller{
+						JobURLTemplate: template.Must(template.New("test").Parse("{{.ObjectMeta.Name}}/{{.Status.State}}")),
+						MaxConcurrency: maxConcurrency,
+						MaxGoroutines:  20,
+					},
+					PodPendingTimeout: podPendingTimeout,
 				},
-				PodPendingTimeout: podPendingTimeout,
 			},
-			Presubmits: presubmitMap,
+			JobConfig: config.JobConfig{
+				Presubmits: presubmitMap,
+			},
 		},
 	}
 }
@@ -347,9 +351,11 @@ func TestTerminateDupes(t *testing.T) {
 		fkc := &fkc{pods: pods, prowjobs: tc.pjs}
 		fca := &fca{
 			c: &config.Config{
-				Plank: config.Plank{
-					Controller: config.Controller{
-						AllowCancellations: tc.allowCancellations,
+				ProwConfig: config.ProwConfig{
+					Plank: config.Plank{
+						Controller: config.Controller{
+							AllowCancellations: tc.allowCancellations,
+						},
 					},
 				},
 			},
@@ -829,9 +835,13 @@ func TestSyncPendingJob(t *testing.T) {
 					Name: "boop-42",
 				},
 				Spec: kube.ProwJobSpec{
-					Type:            kube.BatchJob,
-					PodSpec:         &kube.PodSpec{Containers: []kube.Container{{Name: "test-name", Env: []kube.EnvVar{}}}},
-					RunAfterSuccess: []kube.ProwJobSpec{{}},
+					Type:    kube.BatchJob,
+					PodSpec: &kube.PodSpec{Containers: []kube.Container{{Name: "test-name", Env: []kube.EnvVar{}}}},
+					RunAfterSuccess: []kube.ProwJobSpec{{
+						Job:     "job-name",
+						Type:    kube.PeriodicJob,
+						PodSpec: &kube.PodSpec{Containers: []kube.Container{{Name: "test-name", Env: []kube.EnvVar{}}}},
+					}},
 				},
 				Status: kube.ProwJobStatus{
 					State:   kube.PendingState,
@@ -929,6 +939,8 @@ func TestSyncPendingJob(t *testing.T) {
 				},
 				Spec: kube.ProwJobSpec{
 					RunAfterSuccess: []kube.ProwJobSpec{{
+						Job:     "job-name",
+						Type:    kube.PeriodicJob,
 						PodSpec: &kube.PodSpec{Containers: []kube.Container{{Name: "test-name", Env: []kube.EnvVar{}}}},
 					}},
 				},
@@ -958,6 +970,8 @@ func TestSyncPendingJob(t *testing.T) {
 				},
 				Spec: kube.ProwJobSpec{
 					RunAfterSuccess: []kube.ProwJobSpec{{
+						Job:     "job-name",
+						Type:    kube.PeriodicJob,
 						PodSpec: &kube.PodSpec{Containers: []kube.Container{{Name: "test-name", Env: []kube.EnvVar{}}}},
 					}},
 				},
@@ -1013,6 +1027,8 @@ func TestSyncPendingJob(t *testing.T) {
 				},
 				Spec: kube.ProwJobSpec{
 					RunAfterSuccess: []kube.ProwJobSpec{{
+						Job:     "job-name",
+						Type:    kube.PeriodicJob,
 						PodSpec: &kube.PodSpec{Containers: []kube.Container{{Name: "test-name", Env: []kube.EnvVar{}}}},
 					}},
 				},

@@ -21,7 +21,7 @@ ALPINE_VERSION           ?= 0.1
 GIT_VERSION              ?= 0.2
 
 # YYYYmmdd-commitish
-TAG = $(shell date -u +v%Y%m%d)-$(shell git describe --tags --always --dirty)
+TAG := $(shell date -u +v%Y%m%d)-$(shell git describe --tags --always --dirty)
 # HOOK_VERSION is the version of the hook image
 HOOK_VERSION              ?= $(TAG)
 # SINKER_VERSION is the version of the sinker image
@@ -52,6 +52,8 @@ ENTRYPOINT_VERSION        ?= $(TAG)
 SIDECAR_VERSION           ?= $(TAG)
 # ARTIFACT-UPLOADER_VERSION is the version of the artifact uploader image
 ARTIFACT-UPLOADER_VERSION ?= $(TAG)
+# NEEDS-REBASE_VERSION is the version of the needs-rebase image
+NEEDS_REBASE_VERSION      ?= $(TAG)
 
 # These are the usual GKE variables.
 PROJECT       ?= jetstack-build-infra
@@ -63,13 +65,13 @@ CLUSTER       ?= github-build-infra
 REGISTRY ?= gcr.io
 PUSH     ?= docker push
 
-DOCKER_LABELS=--label io.k8s.prow.git-describe="$(shell git describe --tags --always --dirty)"
+DOCKER_LABELS:=--label io.k8s.prow.git-describe="$(shell git describe --tags --always --dirty)"
 
 update-config: get-cluster-credentials
-	kubectl create configmap config --from-file=config=config.yaml --dry-run -o yaml | kubectl replace configmap config -f -
+	kubectl create configmap config --from-file=config.yaml=config.yaml --dry-run -o yaml | kubectl replace configmap config -f -
 
 update-plugins: get-cluster-credentials
-	kubectl create configmap plugins --from-file=plugins=plugins.yaml --dry-run -o yaml | kubectl replace configmap plugins -f -
+	kubectl create configmap plugins --from-file=plugins.yaml=plugins.yaml --dry-run -o yaml | kubectl replace configmap plugins -f -
 
 update-cat-api-key: get-cluster-credentials
 	kubectl create configmap cat-api-key --from-file=api-key=plugins/cat/api-key --dry-run -o yaml | kubectl replace configmap cat-api-key -f -
@@ -246,3 +248,15 @@ artifact-uploader-image: alpine-image
 
 .PHONY: clonerefs-image initupload-image gcsupload-image entrypoint-image sidecar-image artifact-uploader-image
 
+needs-rebase-image: git-image
+	CGO_ENABLED=0 GOOS=linux GOARCH=amd64 go build -o external-plugins/needs-rebase/needs_rebase k8s.io/test-infra/prow/external-plugins/needs-rebase
+	docker build -t "$(REGISTRY)/$(PROJECT)/needs-rebase:$(NEEDS_REBASE_VERSION)" $(DOCKER_LABELS) external-plugins/needs-rebase
+	$(PUSH) "$(REGISTRY)/$(PROJECT)/needs-rebase:$(NEEDS_REBASE_VERSION)"
+
+needs-rebase-deployment: get-cluster-credentials
+	kubectl apply -f cluster/needs-rebase_deployment.yaml
+
+needs-rebase-service: get-cluster-credentials
+	kubectl apply -f cluster/needs-rebase_service.yaml
+
+.PHONY: needs-rebase-image needs-rebase-deployment needs-rebase-service

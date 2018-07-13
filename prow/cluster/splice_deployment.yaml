@@ -13,12 +13,20 @@ spec:
     spec:
       containers:
       - name: splice
-        image: gcr.io/k8s-prow/splice:v20180521-f8caf9625
+        image: gcr.io/k8s-prow/splice:v20180709-7109caeb1
+        args:
+        - --job-config-path=/etc/job-config
         volumeMounts:
         - name: config
           mountPath: /etc/config
+          readOnly: true
+        - name: job-config
+          mountPath: /etc/job-config
           readOnly: true
       volumes:
       - name: config
         configMap:
           name: config
+      - name: job-config
+        configMap:
+          name: job-config

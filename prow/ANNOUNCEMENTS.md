@@ -1,8 +1,11 @@
 # Announcements
 
 New features added to each components:
-
- - *April 10, 2018* `cla` plugin now supports `/check-cla` command 
+ - *June 25, 2018* `updateconfig` plugin will now support update/remove keys
+   from a glob match.
+ - *June 05, 2018* `blunderbuss` plugin may now suggest approvers in addition
+   to reviewers. Use `exclude_approvers: true` to revert to previous behavior.
+ - *April 10, 2018* `cla` plugin now supports `/check-cla` command
    to force rechecking of the CLA status.
  - *February 1, 2018* `updateconfig` will now update any configmap on merge
  - *November 14, 2017* `jenkins-operator:0.58` exposes prometheus metrics.
@@ -17,6 +20,27 @@ Note: versions specified in these announcements may not include bug fixes made
 in more recent versions so it is recommended that the most recent versions are
 used when updating deployments.
 
+ - *July 9, 2018* `milestone` format has changed from
+    ```yaml
+    milestone:
+     maintainers_id: <some_team_id>
+     maintainers_team: <some_team_name>
+    ```
+    to `repo_milestone`
+    ```yaml
+    repo_milestone:
+     <some_repo_name>:
+       maintainers_id: <some_team_id>
+       maintainers_team: <some_team_name>
+    ```
+ - *July 2, 2018* the `trigger` plugin will now trust PRs from repo
+   collaborators. Use `only_org_members: true` in the trigger config to
+   temporarily disable this behavior.
+ - *June 14, 2018* the `updateconfig` plugin will only add data to your `ConfigMaps`
+   using the basename of the updated file, instead of using that and also duplicating
+   the data using the name of the `ConfigMap` as a key
+ - *June 1, 2018* all unquoted `boolean` fields in config.yaml that were unmarshall
+   into type `string` now need to be quoted to avoid unmarshalling error.
  - *May 9, 2018* `deck` logs for jobs run as `Pods` will now return logs for the
    `"test"` container only.
  - *April 2, 2018* `updateconfig` format has been changed from

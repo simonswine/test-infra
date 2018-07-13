@@ -13,7 +13,7 @@
 # limitations under the License.
 
 IMG = gcr.io/jetstack-build-infra/bootstrap
-TAG = $(shell date +v%Y%m%d)-$(shell git describe --tags --always --dirty)
+TAG := $(shell date +v%Y%m%d)-$(shell git describe --tags --always --dirty)
 
 all: build
 
