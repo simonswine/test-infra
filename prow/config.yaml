@@ -1079,13 +1079,6 @@ presubmits:
       run_if_changed: "^(puppet/modules).*$"
       trigger: "(?m)^/test( all| puppet| puppet-tarmak| puppet-tarmak-acceptance-centos( v?1.6)?|)( \\[.+\\])?$"
       rerun_command: "/test puppet-tarmak-acceptance-centos v1.6"
-    - <<: *puppet_module_acceptance
-      name: tarmak-puppet-module-tarmak-acceptance-1-10-centos
-      context: tarmak-puppet-module-tarmak-acceptance-1-10-centos
-      always_run: false
-      run_if_changed: "^(puppet/modules).*$"
-      trigger: "(?m)^/test( all| puppet| puppet-tarmak| puppet-tarmak-acceptance-centos( v?1.10)?|)( \\[.+\\])?$"
-      rerun_command: "/test puppet-tarmak-acceptance-centos v1.10"
   # puppet module vault_client
   - <<: *puppet_module_verify
     name: tarmak-puppet-module-vault_client-quick-verify
