@@ -83,7 +83,6 @@ plugins:
   - size
   - wip
   - lifecycle
-  - reopen
   - assign
   - hold
   - label
@@ -95,7 +94,6 @@ plugins:
   - release-note
   - blunderbuss
   - assign
-  - reopen
   - golint
   - heart
   - hold
@@ -116,7 +114,6 @@ plugins:
   - trigger
   - assign
   - lifecycle
-  - reopen
   - heart
   - hold
   - label
@@ -133,7 +130,6 @@ plugins:
   - blunderbuss
   - assign
   - lifecycle
-  - reopen
   - golint
   - heart
   - hold
@@ -153,7 +149,6 @@ plugins:
   - assign
   - blunderbuss
   - lifecycle
-  - reopen
   - golint
   - skip
   - heart
@@ -174,7 +169,6 @@ plugins:
   - assign
   - blunderbuss
   - lifecycle
-  - reopen
   - golint
   - heart
   - hold
@@ -191,7 +185,6 @@ plugins:
   - trigger
   - assign
   - lifecycle
-  - reopen
   - heart
   - hold
   - label
@@ -206,7 +199,6 @@ plugins:
   - trigger
   - assign
   - lifecycle
-  - reopen
   - heart
   - hold
   - label
@@ -221,7 +213,6 @@ plugins:
   - trigger
   - assign
   - lifecycle
-  - reopen
   - heart
   - hold
   - label
@@ -236,7 +227,6 @@ plugins:
   - trigger
   - assign
   - lifecycle
-  - reopen
   - heart
   - hold
   - label
@@ -251,7 +241,6 @@ plugins:
   - trigger
   - assign
   - lifecycle
-  - reopen
   - heart
   - hold
   - label
@@ -266,7 +255,6 @@ plugins:
   - trigger
   - assign
   - lifecycle
-  - reopen
   - heart
   - hold
   - label
@@ -281,7 +269,6 @@ plugins:
   - trigger
   - assign
   - lifecycle
-  - reopen
   - heart
   - hold
   - label
@@ -296,7 +283,6 @@ plugins:
   - trigger
   - assign
   - lifecycle
-  - reopen
   - heart
   - hold
   - label
@@ -313,7 +299,6 @@ plugins:
   - assign
   - blunderbuss
   - lifecycle
-  - reopen
   - golint
   - heart
   - hold
@@ -332,7 +317,6 @@ plugins:
   - assign
   - blunderbuss
   - lifecycle
-  - reopen
   - golint
   - heart
   - hold
@@ -351,7 +335,6 @@ plugins:
   - assign
   - blunderbuss
   - lifecycle
-  - reopen
   - golint
   - heart
   - hold
