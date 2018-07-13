@@ -1,3 +1,9 @@
+.minikube_small: &minikube_small
+  resources:
+    requests:
+      cpu: 2900m
+      memory: 8Gi
+
 presets:
 - labels:
     cert-manager-cloudflare-svc-acct: "true"
@@ -176,7 +182,7 @@ presubmits:
       preset-service-account: "true"
       libvirt-socket: "true"
       minikube-support: "true"
-      minikube-size: small
+      minikube-small: "true"
     spec:
       nodeSelector:
         node-role.kubernetes.io/libvirt: ""
@@ -211,7 +217,7 @@ presubmits:
       preset-service-account: "true"
       libvirt-socket: "true"
       minikube-support: "true"
-      minikube-size: small
+      minikube-small: "true"
     spec:
       nodeSelector:
         node-role.kubernetes.io/libvirt: ""
@@ -246,7 +252,7 @@ presubmits:
       preset-service-account: "true"
       libvirt-socket: "true"
       minikube-support: "true"
-      minikube-size: small
+      minikube-small: "true"
     spec:
       nodeSelector:
         node-role.kubernetes.io/libvirt: ""
@@ -281,7 +287,7 @@ presubmits:
       preset-service-account: "true"
       libvirt-socket: "true"
       minikube-support: "true"
-      minikube-size: small
+      minikube-small: "true"
     spec:
       nodeSelector:
         node-role.kubernetes.io/libvirt: ""
