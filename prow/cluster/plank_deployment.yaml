@@ -33,6 +33,7 @@ spec:
         - --tot-url=http://tot
         - --dry-run=false
         - --build-cluster=/etc/cluster/cluster
+        - --job-config-path=/etc/job-config
         volumeMounts:
         - name: oauth
           mountPath: /etc/github
@@ -42,6 +43,9 @@ spec:
           readOnly: true
         - mountPath: /etc/cluster
           name: cluster
+          readOnly: true
+        - name: job-config
+          mountPath: /etc/job-config
           readOnly: true
       volumes:
       - name: oauth
@@ -53,3 +57,6 @@ spec:
       - name: cluster
         secret:
           secretName: build-cluster
+      - name: job-config
+        configMap:
+          name: job-config
