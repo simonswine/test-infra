@@ -16,7 +16,7 @@ spec:
       - name: sinker
         args:
         - --build-cluster=/etc/cluster/cluster
-        # - --job-config-path=/etc/job-config
+        - --job-config-path=/etc/job-config
         image: gcr.io/k8s-prow/sinker:v20180709-7109caeb1
         volumeMounts:
         - name: config
@@ -25,6 +25,9 @@ spec:
         - mountPath: /etc/cluster
           name: cluster
           readOnly: true
+        - name: job-config
+          mountPath: /etc/job-config
+          readOnly: true
       volumes:
       - name: config
         configMap:
@@ -32,3 +35,6 @@ spec:
       - name: cluster
         secret:
           secretName: build-cluster
+      - name: job-config
+        configMap:
+          name: job-config

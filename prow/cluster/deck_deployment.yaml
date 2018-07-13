@@ -45,6 +45,7 @@ spec:
         - --hook-url=http://hook:8888/plugin-help
         - --redirect-http-to=prow.build-infra.jetstack.io
         - --oauth-url=/github-login
+        - --job-config-path=/etc/job-config
         volumeMounts:
         - name: config
           mountPath: /etc/config
@@ -56,6 +57,9 @@ spec:
           readOnly: true
         - mountPath: /etc/cookie
           name: cookie-secret
+          readOnly: true
+        - name: job-config
+          mountPath: /etc/job-config
           readOnly: true
       volumes:
       - name: config
@@ -73,3 +77,6 @@ spec:
         secret:
           defaultMode: 420
           secretName: cookie
+      - name: job-config
+        configMap:
+          name: job-config
