@@ -107,12 +107,6 @@ presets:
       cpu: 3800m
       memory: 12Gi
 
-.minikube_small: &minikube_small
-  resources:
-    requests:
-      cpu: 2900m
-      memory: 8Gi
-
 tide:
   target_url: https://prow.build-infra.jetstack.net/tide.html
   queries:

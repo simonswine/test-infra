@@ -1,3 +1,9 @@
+.minikube_small: &minikube_small
+  resources:
+    requests:
+      cpu: 2900m
+      memory: 8Gi
+
 presets:
 - labels:
     cert-manager-cloudflare-svc-acct: "true"
