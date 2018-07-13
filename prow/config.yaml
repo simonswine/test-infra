@@ -65,7 +65,7 @@ presets:
     value: /var/lib/libvirt/caches/minikube
 
 - labels:
-    minikube-size: medium
+    minikube-medium: "true"
   env:
   - name: MINIKUBE_CPUS
     value: "4"
@@ -73,7 +73,7 @@ presets:
     value: "12288"
 
 - labels:
-    minikube-size: small
+    minikube-small: "true"
   env:
   - name: MINIKUBE_CPUS
     value: "3"
@@ -278,7 +278,7 @@ presubmits:
       preset-bazel-remote-cache-enabled: "true"
       libvirt-socket: "true"
       minikube-support: "true"
-      minikube-size: medium
+      minikube-medium: "true"
     spec:
       nodeSelector:
         node-role.kubernetes.io/libvirt: ""
@@ -338,7 +338,7 @@ presubmits:
       preset-service-account: "true"
       libvirt-socket: "true"
       minikube-support: "true"
-      minikube-size: medium
+      minikube-medium: "true"
     spec:
       nodeSelector:
         node-role.kubernetes.io/libvirt: ""
@@ -370,7 +370,7 @@ presubmits:
       preset-service-account: "true"
       libvirt-socket: "true"
       minikube-support: "true"
-      minikube-size: medium
+      minikube-medium: "true"
     spec:
       nodeSelector:
         node-role.kubernetes.io/libvirt: ""
@@ -402,7 +402,7 @@ presubmits:
       preset-service-account: "true"
       libvirt-socket: "true"
       minikube-support: "true"
-      minikube-size: medium
+      minikube-medium: "true"
     spec:
       nodeSelector:
         node-role.kubernetes.io/libvirt: ""
@@ -434,7 +434,7 @@ presubmits:
       preset-service-account: "true"
       libvirt-socket: "true"
       minikube-support: "true"
-      minikube-size: medium
+      minikube-medium: "true"
     spec:
       nodeSelector:
         node-role.kubernetes.io/libvirt: ""
