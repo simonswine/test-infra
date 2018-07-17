@@ -573,6 +573,12 @@ presubmits:
     always_run: true
 
   - <<: *puppet_module_acceptance
+    name: puppet-module-tarmak-acceptance-1-11-centos
+    context: puppet-module-tarmak-acceptance-1-11-centos
+    always_run: false
+    trigger: "(?m)^/test( all| acceptance-centos( v?1.11)?|)( \\[.+\\])?$"
+    rerun_command: "/test acceptance-centos v1.11"
+  - <<: *puppet_module_acceptance
     name: puppet-module-tarmak-acceptance-1-10-centos
     context: puppet-module-tarmak-acceptance-1-10-centos
     always_run: false
@@ -609,11 +615,11 @@ presubmits:
     trigger: "(?m)^/test( all| acceptance-centos( v?1.5)?|)( \\[.+\\])?$"
     rerun_command: "/test acceptance-centos v1.5"
   - <<: *puppet_module_acceptance
-    name: puppet-module-tarmak-acceptance-1-7-ubuntu
-    context: puppet-module-tarmak-acceptance-1-7-ubuntu
+    name: puppet-module-tarmak-acceptance-1-10-ubuntu
+    context: puppet-module-tarmak-acceptance-1-10-ubuntu
     always_run: false
-    trigger: "(?m)^/test( all| acceptance-ubuntu( v?1.7)?|)( \\[.+\\])?$"
-    rerun_command: "/test acceptance-ubuntu v1.7"
+    trigger: "(?m)^/test( all| acceptance-ubuntu( v?1.10)?|)( \\[.+\\])?$"
+    rerun_command: "/test acceptance-ubuntu v1.10"
 
   jetstack/puppet-module-vault_client:
   - <<: *puppet_module_verify
