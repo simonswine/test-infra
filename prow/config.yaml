@@ -750,27 +750,34 @@ presubmits:
     trigger: "(?m)^/test( all| puppet| puppet-tarmak| puppet-verify| puppet-tarmak-verify|)( \\[.+\\])?$"
     rerun_command: "/test puppet-tarmak-verify"
   - <<: *puppet_module_acceptance
-    name: tarmak-puppet-module-tarmak-acceptance-1-9-centos
-    context: tarmak-puppet-module-tarmak-acceptance-1-9-centos
+    name: tarmak-puppet-module-tarmak-acceptance-1-10-centos
+    context: tarmak-puppet-module-tarmak-acceptance-1-10-centos
     always_run: false
     run_if_changed: "^(puppet/modules).*$"
-    trigger: "(?m)^/test( all| puppet| puppet-tarmak| puppet-tarmak-acceptance-centos( v?1.9)?|)( \\[.+\\])?$"
-    rerun_command: "/test puppet-tarmak-acceptance-centos v1.9"
+    trigger: "(?m)^/test( all| puppet| puppet-tarmak| puppet-tarmak-acceptance-centos( v?1.10)?|)( \\[.+\\])?$"
+    rerun_command: "/test puppet-tarmak-acceptance-centos v1.10"
     run_after_success:
     - <<: *puppet_module_acceptance
-      name: tarmak-puppet-module-tarmak-acceptance-1-9-ubuntu
-      context: tarmak-puppet-module-tarmak-acceptance-1-9-ubuntu
+      name: tarmak-puppet-module-tarmak-acceptance-1-10-ubuntu
+      context: tarmak-puppet-module-tarmak-acceptance-1-10-ubuntu
       always_run: false
       run_if_changed: "^(puppet/modules).*$"
-      trigger: "(?m)^/test( all| puppet| puppet-tarmak| puppet-tarmak-acceptance-ubuntu( v?1.9)?|)( \\[.+\\])?$"
-      rerun_command: "/test puppet-tarmak-acceptance-ubuntu v1.9"
+      trigger: "(?m)^/test( all| puppet| puppet-tarmak| puppet-tarmak-acceptance-ubuntu( v?1.10)?|)( \\[.+\\])?$"
+      rerun_command: "/test puppet-tarmak-acceptance-ubuntu v1.10"
     - <<: *puppet_module_acceptance
-      name: tarmak-puppet-module-tarmak-acceptance-1-10-centos
-      context: tarmak-puppet-module-tarmak-acceptance-1-10-centos
+      name: tarmak-puppet-module-tarmak-acceptance-1-11-centos
+      context: tarmak-puppet-module-tarmak-acceptance-1-11-centos
       always_run: false
       run_if_changed: "^(puppet/modules).*$"
-      trigger: "(?m)^/test( all| puppet| puppet-tarmak| puppet-tarmak-acceptance-centos( v?1.10)?|)( \\[.+\\])?$"
-      rerun_command: "/test puppet-tarmak-acceptance-centos v1.10"
+      trigger: "(?m)^/test( all| puppet| puppet-tarmak| puppet-tarmak-acceptance-centos( v?1.11)?|)( \\[.+\\])?$"
+      rerun_command: "/test puppet-tarmak-acceptance-centos v1.11"
+    - <<: *puppet_module_acceptance
+      name: tarmak-puppet-module-tarmak-acceptance-1-9-centos
+      context: tarmak-puppet-module-tarmak-acceptance-1-9-centos
+      always_run: false
+      run_if_changed: "^(puppet/modules).*$"
+      trigger: "(?m)^/test( all| puppet| puppet-tarmak| puppet-tarmak-acceptance-centos( v?1.9)?|)( \\[.+\\])?$"
+      rerun_command: "/test puppet-tarmak-acceptance-centos v1.9"
     - <<: *puppet_module_acceptance
       name: tarmak-puppet-module-tarmak-acceptance-1-8-centos
       context: tarmak-puppet-module-tarmak-acceptance-1-8-centos
