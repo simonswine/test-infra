@@ -463,6 +463,21 @@
       "UNKNOWN"
     ]
   },
+  "tarmak-puppet-module-tarmak-acceptance-1-11-centos": {
+    "args": [
+      "--env",
+      "FIXTURES_YML=.fixtures.yml.local",
+      "--",
+      "make",
+      "-C",
+      "puppet/modules/tarmak",
+      "acceptance-1-11-centos"
+    ],
+    "scenario": "execute",
+    "sigOwners": [
+      "UNKNOWN"
+    ]
+  },
   "tarmak-puppet-module-tarmak-acceptance-1-10-centos": {
     "args": [
       "--env",
@@ -532,6 +547,36 @@
       "-C",
       "puppet/modules/tarmak",
       "acceptance-1-6-centos"
+    ],
+    "scenario": "execute",
+    "sigOwners": [
+      "UNKNOWN"
+    ]
+  },
+  "tarmak-puppet-module-tarmak-acceptance-1-11-ubuntu": {
+    "args": [
+      "--env",
+      "FIXTURES_YML=.fixtures.yml.local",
+      "--",
+      "make",
+      "-C",
+      "puppet/modules/tarmak",
+      "acceptance-1-11-ubuntu"
+    ],
+    "scenario": "execute",
+    "sigOwners": [
+      "UNKNOWN"
+    ]
+  },
+  "tarmak-puppet-module-tarmak-acceptance-1-10-ubuntu": {
+    "args": [
+      "--env",
+      "FIXTURES_YML=.fixtures.yml.local",
+      "--",
+      "make",
+      "-C",
+      "puppet/modules/tarmak",
+      "acceptance-1-10-ubuntu"
     ],
     "scenario": "execute",
     "sigOwners": [
